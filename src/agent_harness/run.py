@@ -100,6 +100,26 @@ def cmd_mcp(args):
     main()
 
 
+def cmd_comic(args):
+    """Generate AIGC short video."""
+    from .agents.comic_agent import produce_comic
+
+    result = produce_comic(
+        user_prompt=args.prompt,
+        scene_count=args.scenes,
+        output_base=args.output or "",
+        enable_images=not args.no_images,
+        enable_audio=not args.no_audio,
+    )
+
+    if result.video_path:
+        print(f"\n🎉 Video ready: {result.video_path}")
+    else:
+        print(f"\n⚠ Partial output in: {result.output_dir}")
+        if result.errors:
+            print(f"Errors: {result.errors}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Agent Harness — LangGraph Multi-Agent Orchestration",
@@ -123,6 +143,18 @@ def main():
                         help="Include network-dependent tasks")
     eval_p.add_argument("--output", help="Save eval report to file")
     eval_p.set_defaults(func=cmd_eval)
+
+    # comic
+    comic_p = sub.add_parser("comic", help="Generate AIGC short video")
+    comic_p.add_argument("prompt", help="Video description (e.g., 猫娘在咖啡馆打工的一天)")
+    comic_p.add_argument("--scenes", type=int, default=6,
+                         help="Number of scenes (default: 6, ~30s)")
+    comic_p.add_argument("--output", help="Output directory")
+    comic_p.add_argument("--no-images", action="store_true",
+                         help="Skip image generation (script only)")
+    comic_p.add_argument("--no-audio", action="store_true",
+                         help="Skip audio generation")
+    comic_p.set_defaults(func=cmd_comic)
 
     # serve
     serve_p = sub.add_parser("serve", help="Start FastAPI server")

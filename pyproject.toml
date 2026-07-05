@@ -50,6 +50,7 @@ all = [
 agent-harness = "agent_harness.run:main"
 agent-mcp = "agent_harness.mcp_server:main"
 agent-api = "agent_harness.api_fastapi:main"
+agent-comic = "agent_harness.run:main"
 
 [build-system]
 requires = ["setuptools>=75.0", "wheel"]
