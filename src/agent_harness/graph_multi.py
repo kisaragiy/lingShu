@@ -26,10 +26,20 @@ from langgraph.graph import StateGraph, END
 from .config import SUPERVISOR_MAX_ROUNDS
 from .pipeline.state import SupervisorState, WorkerResult
 from .pipeline.circuit_breaker import CircuitBreaker
+from .pipeline.tracing import TraceCollector
 from .agents import (
     supervisor_analyze, supervisor_collect, supervisor_replan,
     run_worker, WORKER_CAPABILITIES,
 )
+
+# Module-level trace collector — set before graph invocation
+_trace_collector: TraceCollector | None = None
+
+
+def set_trace_collector(collector: TraceCollector):
+    """Set the trace collector for the current execution."""
+    global _trace_collector
+    _trace_collector = collector
 
 
 # ─── Dispatch: run workers in parallel ───
@@ -48,12 +58,21 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
     results: dict[str, WorkerResult] = {}
     errors: dict[str, list[str]] = {}
 
+    def _run_with_trace(wname: str, task: str):
+        """Run worker with optional trace span."""
+        if _trace_collector:
+            with _trace_collector.span(f"worker:{wname}", "worker", task=task[:80]):
+                result = run_worker(wname, task)
+                _trace_collector.record_metadata("output_preview", str(result.get("output", ""))[:100])
+                return result
+        return run_worker(wname, task)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(workers_assigned)) as pool:
         futures = {}
         for wname in workers_assigned:
             task = worker_tasks.get(wname, state["request"])
             print(f"  → {wname}: {task[:60]}...")
-            futures[pool.submit(run_worker, wname, task)] = wname
+            futures[pool.submit(_run_with_trace, wname, task)] = wname
 
         for future in concurrent.futures.as_completed(futures):
             wname = futures[future]
@@ -179,6 +198,7 @@ def run_multi_agent(
     request: str,
     goal: str = "",
     trace_id: str = "",
+    enable_tracing: bool = False,
 ) -> dict[str, Any]:
     """Run the multi-agent pipeline from a single request.
 
@@ -186,9 +206,10 @@ def run_multi_agent(
         request: User's natural language request
         goal: Optional explicit goal description
         trace_id: Optional trace ID for logging
+        enable_tracing: If True, collect detailed trace spans
 
     Returns:
-        Dict with final_output, trace_steps, errors, elapsed
+        Dict with final_output, trace_steps, errors, elapsed, trace_tree (if enabled)
     """
     t0 = time.time()
     trace_id = trace_id or str(uuid.uuid4())
@@ -196,6 +217,12 @@ def run_multi_agent(
     print(f"\n{'='*60}")
     print(f"[Multi-Agent] 任务: {request[:100]}...")
     print(f"{'='*60}")
+
+    # Setup tracing
+    collector = None
+    if enable_tracing:
+        collector = TraceCollector(trace_id)
+        set_trace_collector(collector)
 
     graph = build_multi_agent()
 
@@ -216,12 +243,20 @@ def run_multi_agent(
         "circuit_breaker": CircuitBreaker(),
     }
 
-    final = graph.invoke(initial_state)
+    if collector:
+        with collector.span("multi_agent_root", "supervisor", request=request[:100]):
+            final = graph.invoke(initial_state)
+            # Check circuit breaker
+            cb: CircuitBreaker = initial_state.get("circuit_breaker")  # type: ignore
+            if cb and cb.check()["tripped"]:
+                collector.mark_circuit_breaker("; ".join(cb.check()["reasons"]))
+    else:
+        final = graph.invoke(initial_state)
 
     elapsed = time.time() - t0
     print(f"\n[Multi-Agent] 完成 ({elapsed:.1f}s, {final.get('round', 1)} 轮)")
 
-    return {
+    result: dict[str, Any] = {
         "final_output": final.get("final_output", ""),
         "trace_steps": final.get("trace_steps", []),
         "errors": final.get("errors", []),
@@ -230,3 +265,10 @@ def run_multi_agent(
         "elapsed_s": round(elapsed, 2),
         "trace_id": trace_id,
     }
+
+    if collector:
+        trace_tree = collector.build()
+        result["trace_tree"] = trace_tree
+        print(f"\n{trace_tree.summary()}")
+
+    return result
