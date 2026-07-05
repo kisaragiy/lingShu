@@ -245,13 +245,13 @@ def run_multi_agent(
 
     if collector:
         with collector.span("multi_agent_root", "supervisor", request=request[:100]):
-            final = graph.invoke(initial_state)
+            final = graph.invoke(initial_state, config={"recursion_limit": 100})
             # Check circuit breaker
             cb: CircuitBreaker = initial_state.get("circuit_breaker")  # type: ignore
             if cb and cb.check()["tripped"]:
                 collector.mark_circuit_breaker("; ".join(cb.check()["reasons"]))
     else:
-        final = graph.invoke(initial_state)
+        final = graph.invoke(initial_state, config={"recursion_limit": 100})
 
     elapsed = time.time() - t0
     print(f"\n[Multi-Agent] 完成 ({elapsed:.1f}s, {final.get('round', 1)} 轮)")

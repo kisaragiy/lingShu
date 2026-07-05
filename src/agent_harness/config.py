@@ -4,14 +4,14 @@ import os
 from pathlib import Path
 
 # ─── LLM API endpoints ───
-LLAMA_API = os.environ.get("HARNESS_LLAMA_API", "http://127.0.0.1:8080/v1/chat/completions")
+LLAMA_API = os.environ.get("HARNESS_LLAMA_API", "http://127.0.0.1:8081/v1/chat/completions")
 OLLAMA_API = os.environ.get("HARNESS_OLLAMA_API", "http://172.18.9.126:11434/api/generate")
 DEEPSEEK_API = os.environ.get("HARNESS_DEEPSEEK_API", "http://127.0.0.1:9000/v1/chat/completions")
 CLOUD_API_DIRECT = os.environ.get("HARNESS_CLOUD_API", "http://127.0.0.1:9099/v1/chat/completions")
 CLOUD_API_KEY = os.environ.get("HARNESS_CLOUD_KEY", "sk-local")
 
 # ─── Model names ───
-MODEL_LLAMA = os.environ.get("HARNESS_MODEL_LLAMA", "Qwen3.6-35B-A3B-Abliterated-Heretic-Q4_K_M.gguf")
+MODEL_LLAMA = os.environ.get("HARNESS_MODEL_LLAMA", "qwen2.5-coder:14b")
 MODEL_DEEPSEEK = os.environ.get("HARNESS_MODEL_DEEPSEEK", "deepseek-v4-pro")
 
 # ─── Paths ───

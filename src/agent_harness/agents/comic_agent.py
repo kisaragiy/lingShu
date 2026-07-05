@@ -108,12 +108,14 @@ def generate_script(user_prompt: str, scene_count: int = 6) -> ComicScript:
         "max_tokens": 2048,
         "temperature": 0.8,
         "stream": False,
+        "thinking": {"type": "disabled"},
     }
 
     try:
-        resp = req_lib.post(LLAMA_API, json=payload, timeout=120)
+        resp = req_lib.post(LLAMA_API, json=payload, timeout=300)
         if resp.status_code == 200:
-            raw = resp.json()["choices"][0]["message"]["content"]
+            msg = resp.json()["choices"][0]["message"]
+            raw = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
         else:
             raw = ""
     except Exception:
@@ -351,7 +353,7 @@ def assemble_video(script: ComicScript, output_dir: str,
 
     print(f"  🎬 Assembling video ({len(valid_scenes)} scenes)...")
     try:
-        subprocess.run(cmd, capture_output=True, timeout=120, check=True)
+        subprocess.run(cmd, capture_output=True, timeout=300, check=True)
         size_mb = os.path.getsize(output_path) / (1024 * 1024)
         print(f"  ✅ Video: {output_path} ({size_mb:.1f} MB)")
         return output_path

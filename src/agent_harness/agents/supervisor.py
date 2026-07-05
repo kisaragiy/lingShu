@@ -46,12 +46,15 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
         "max_tokens": max_tokens,
         "temperature": 0.3,
         "stream": False,
+        "thinking": {"type": "disabled"},
     }
     try:
-        resp = req_lib.post(LLAMA_API, json=payload, timeout=120)
+        resp = req_lib.post(LLAMA_API, json=payload, timeout=300)
         if resp.status_code == 200:
             data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            msg = data["choices"][0]["message"]
+            content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
+            return content
         return ""
     except Exception:
         return ""

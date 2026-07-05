@@ -26,11 +26,14 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
         "max_tokens": max_tokens,
         "temperature": 0.3,
         "stream": False,
+        "thinking": {"type": "disabled"},
     }
     try:
-        resp = req_lib.post(LLAMA_API, json=payload, timeout=120)
+        resp = req_lib.post(LLAMA_API, json=payload, timeout=300)
         if resp.status_code == 200:
-            return resp.json()["choices"][0]["message"]["content"]
+            msg = resp.json()["choices"][0]["message"]
+            content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
+            return content
         return ""
     except Exception:
         return ""
@@ -142,7 +145,7 @@ def _worker_executor(state: WorkerState) -> dict:
 
 # ─── Worker router ───
 
-def _worker_router(state: WorkerState) -> Literal["advance", "next", "synthesize"]:
+def _worker_router(state: WorkerState) -> Literal["advance", "planner", "synthesize"]:
     step_idx = state.get("current_step", 0)
     plan = state.get("plan", [])
 
@@ -153,10 +156,8 @@ def _worker_router(state: WorkerState) -> Literal["advance", "next", "synthesize
     if results:
         last = results[-1]
         if not last["validation"]["passed"]:
-            retries = state.get("retry_count", 0)
-            if retries >= 2:
-                return "advance"  # skip failed step
-            return "next"  # retry
+            # Skip failed step, keep moving forward — don't loop
+            return "advance"
 
     return "advance"
 
@@ -213,10 +214,11 @@ def build_worker(worker_name: str) -> StateGraph:
     graph.add_edge("planner", "executor")
     graph.add_conditional_edges("executor", _worker_router, {
         "advance": "advance",
-        "next": "executor",
+        "planner": "planner",
         "synthesize": "synthesize",
     })
     graph.add_edge("advance", "executor")
+    graph.add_edge("planner", "executor")
     graph.add_edge("synthesize", END)
 
     return graph.compile()
@@ -251,7 +253,7 @@ def run_worker(worker_name: str, task: str) -> WorkerResult:
             "final_output": "",
             "trace_steps": [],
         }
-        final = worker.invoke(initial_state)
+        final = worker.invoke(initial_state, config={"recursion_limit": 50})
 
         return WorkerResult(
             worker_name=worker_name,

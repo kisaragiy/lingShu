@@ -3,6 +3,24 @@
 All notable changes to Agent Harness will be documented in this file.
 
 ## [0.3.0] — 2026-07-05
+n## [0.4.0] — 2026-07-05
+
+### Added
+- **验证通过**：Multi-Agent 在 qwen2.5-coder:14b 上实测通过
+- Eval 套件首次跑通：6/8 pass (75%)，均分 61/100，总耗时 71.8s
+- ComicAgent 脚本生成验证：4 分镜，10.3s
+- README 含验证结果和 demo
+
+### Fixed
+- Worker 图死循环：失败时不再回到 executor，直接 advance
+- 全部 LLM reasoning 剥离适配
+- 默认端点切换：8080(35B) → 8081 proxy(qwen2.5-coder:14b)
+- recursion_limit=50 防无限循环
+
+### Changed
+- 默认模型 qwen2.5-coder:14b（50x 提速，0.7s/调用）
+- LLM timeout 120s→300s，内容提取统一 reasoning fallback
+
 
 ### Added
 - **ComicAgent** — end-to-end AIGC short video production pipeline

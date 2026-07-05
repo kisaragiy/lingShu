@@ -35,12 +35,18 @@ def call_llama(messages: list[dict], system_prompt: str = "",
         "max_tokens": max_tokens,
         "temperature": temperature,
         "stream": False,
+        "thinking": {"type": "disabled"},
     }
     try:
-        resp = _session.post(LLAMA_API, json=payload, timeout=120)
+        resp = _session.post(LLAMA_API, json=payload, timeout=300)
         if resp.status_code == 200:
             data = resp.json()
-            content = data["choices"][0]["message"]["content"]
+            msg = data["choices"][0]["message"]
+            # Strip reasoning tokens — Qwen3.6-35B outputs them before content
+            content = msg.get("content", "")
+            if not content:
+                # If content is empty, the model might still be generating
+                content = msg.get("reasoning_content", "")[-200:] or "(empty)"
             tokens = data.get("usage", {}).get("total_tokens", 0)
             return content, tokens
     except Exception:
