@@ -33,7 +33,7 @@ WORKER_CAPABILITIES = {
 # ─── LLM call helper ───
 
 def _call_llm(messages: list[dict], system_prompt: str = "",
-              max_tokens: int = 2048) -> str:
+              max_tokens: int = 4096) -> str:
     """Call LLM for supervisor reasoning."""
     import requests as req_lib
 

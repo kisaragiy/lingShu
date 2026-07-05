@@ -18,7 +18,7 @@ from .tools.registry import TOOL_REGISTRY, call_tool, validate_result
 # ─── LLM Call ───
 
 def _call_llm(messages: list[dict], system_prompt: str = "",
-              max_tokens: int = 2048, temperature: float = 0.3) -> str:
+              max_tokens: int = 4096, temperature: float = 0.3) -> str:
     import requests as req_lib
     payload = {
         "model": MODEL_LLAMA,

@@ -11,7 +11,7 @@ CLOUD_API_DIRECT = os.environ.get("HARNESS_CLOUD_API", "http://127.0.0.1:9099/v1
 CLOUD_API_KEY = os.environ.get("HARNESS_CLOUD_KEY", "sk-local")
 
 # ─── Model names ───
-MODEL_LLAMA = os.environ.get("HARNESS_MODEL_LLAMA", "qwen2.5-coder:14b")
+MODEL_LLAMA = os.environ.get("HARNESS_MODEL_LLAMA", "qwen3.5:9b")
 MODEL_DEEPSEEK = os.environ.get("HARNESS_MODEL_DEEPSEEK", "deepseek-v4-pro")
 
 # ─── Paths ───

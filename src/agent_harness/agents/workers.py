@@ -18,7 +18,7 @@ from ..agents.supervisor import WORKER_CAPABILITIES
 # ─── LLM call for workers ───
 
 def _call_llm(messages: list[dict], system_prompt: str = "",
-              max_tokens: int = 1024) -> str:
+              max_tokens: int = 4096) -> str:
     import requests as req_lib
     payload = {
         "model": MODEL_LLAMA,
