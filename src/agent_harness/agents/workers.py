@@ -77,10 +77,16 @@ def _worker_planner(state: WorkerState) -> dict:
     tools_text = "\n".join(tool_lines) if tool_lines else "  (无可用工具)"
 
     system = (
-        f"你是 {worker_name} Worker。只做一件事：完成分配给你的子任务。\n\n"
+        f"你是 {worker_name} Worker。使用可用工具完成子任务。\n\n"
         f"可用工具:\n{tools_text}\n\n"
+        "规则:\n"
+        "1. 数学计算 → 用 code_execute（别心算）\n"
+        "2. 搜索信息 → 用 search\n"
+        "3. 总结文本 → 用 summarize\n"
+        "4. 纯知识问答/翻译/列举 → 用 think\n"
+        "5. 能调用工具就别空想\n\n"
         "输出一个 JSON 数组，每个元素: {name, tool, args}\n"
-        "输出示例: [{\"name\":\"搜索\",\"tool\":\"search\",\"args\":{\"query\":\"...\"}}]\n"
+        "输出示例: [{\"name\":\"计算\",\"tool\":\"code_execute\",\"args\":{\"code\":\"print(2**10)\"}}]\n"
         "只输出 JSON 数组，不要其他文字。"
     )
 
@@ -123,6 +129,18 @@ def _worker_executor(state: WorkerState) -> dict:
 
     elapsed = time.time() - t0
     validation = validate_result(tool_name, result)
+
+    # Push tool progress event
+    try:
+        from ..graph_multi import _progress_queue
+        if _progress_queue:
+            status_icon = "✅" if result.get("success") else "❌"
+            _progress_queue.put({
+                "type": "progress",
+                "content": f"  {status_icon} [{state.get('worker_name','?')}] {tool_name} ({elapsed:.1f}s)\n"
+            })
+    except Exception:
+        pass
 
     new_results = list(state.get("results", []))
     new_results.append({
@@ -190,8 +208,14 @@ def _worker_synthesize(state: WorkerState) -> dict:
         [{"role": "user", "content": f"子任务: {state['task']}\n执行结果: {evidence}"}],
         system_prompt=system,
     )
-    if not output:
-        output = evidence[:500] or "任务完成"
+    # Fallback: if LLM returns empty, try direct answer
+    if not output or len(output) < 10:
+        direct = _call_llm(
+            [{"role": "user", "content": state["task"]}],
+            system_prompt=f"你是 {state['worker_name']} Worker。直接回答这个问题，给出具体内容。用中文。",
+            max_tokens=1024,
+        )
+        output = direct or f"[{state['worker_name']}] 任务完成: {state['task'][:200]}"
 
     return {"final_output": output}
 

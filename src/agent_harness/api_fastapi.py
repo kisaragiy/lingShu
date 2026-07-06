@@ -99,13 +99,15 @@ def _sse_done(result_text: str) -> str:
 # ─── Execute harness (blocking, run in thread) ───
 
 def _execute_multi(prompt: str, history_context: str) -> dict:
-    from .graph_multi import run_multi_agent
+    from .graph_multi import run_multi_agent, set_progress_queue, clear_progress_queue, _progress_queue
     enhanced = prompt
     if history_context:
         enhanced = (
             "以下是本对话的历史记录（越新的越靠前）:\n%s\n\n"
             "请基于以上对话上下文，回答用户当前的问题:\n%s"
         ) % (history_context, prompt)
+    # If _progress_queue exists from streaming context, pass it through
+    # Otherwise, set_progress_queue in _run_with_queue handles it
     return run_multi_agent(enhanced)
 
 
@@ -118,17 +120,21 @@ def _execute_single(prompt: str, history_context: str) -> str:
 
 
 # ─── Streaming with progress queue ───
-
 def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue):
+    """Run harness in a thread, pushing progress events into queue."""
     try:
+        # Connect progress queue to graph_multi module
+        from .graph_multi import set_progress_queue, clear_progress_queue
+        set_progress_queue(q)
+        
         q.put({"type": "status", "content": "🤔 分析请求中...\n"})
 
-        if model in ("agent-harness", "agent-harness-single"):
-            q.put({"type": "status", "content": "⚙️ 单 Agent 处理中...\n"})
+        if model in ("agent-harness", "agent-harness-single", "lingShu-fast"):
+            q.put({"type": "status", "content": "⚡ 快模式（单 Agent）处理中...\n"})
             result = _execute_single(prompt, history)
             q.put({"type": "result", "content": result})
         else:
-            q.put({"type": "status", "content": "🔀 多 Agent 协作执行中...\n"})
+            q.put({"type": "status", "content": "🧠 深模式（多 Agent 编排）执行中...\n"})
             result = _execute_multi(prompt, history)
             rounds = result.get("rounds", 1)
             worker_results = result.get("worker_results", {})
@@ -155,6 +161,12 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue):
         tb = traceback.format_exc()
         q.put({"type": "error", "content": "❌ 执行出错: %s\n\n%s" % (e, tb[:500])})
         q.put({"type": "done"})
+    finally:
+        try:
+            from .graph_multi import clear_progress_queue
+            clear_progress_queue()
+        except Exception:
+            pass
 
 
 async def _stream_progress(prompt: str, history: str, model: str, session_id: str):
@@ -178,11 +190,7 @@ async def _stream_progress(prompt: str, history: str, model: str, session_id: st
 
         if event["type"] == "done":
             break
-        elif event["type"] == "error":
-            content = event["content"]
-            result_text += content
-            yield _sse_chunk(content)
-        elif event["type"] == "status":
+        elif event["type"] in ("error", "status", "progress"):
             content = event["content"]
             result_text += content
             yield _sse_chunk(content)
@@ -242,16 +250,32 @@ async def list_models():
         "object": "list",
         "data": [
             {
+                "id": "lingShu-deep",
+                "object": "model",
+                "created": now,
+                "owned_by": "harness",
+                "description": "多 Agent 深度模式 — Supervisor-Worker 编排",
+            },
+            {
                 "id": "agent-harness-multi",
                 "object": "model",
                 "created": now,
                 "owned_by": "harness",
+                "description": "多 Agent 深度模式（兼容旧名）",
+            },
+            {
+                "id": "lingShu-fast",
+                "object": "model",
+                "created": now,
+                "owned_by": "harness",
+                "description": "单 Agent 快速模式 — 轻量任务秒回",
             },
             {
                 "id": "agent-harness",
                 "object": "model",
                 "created": now,
                 "owned_by": "harness",
+                "description": "单 Agent 快速模式（兼容旧名）",
             },
         ],
     }
@@ -306,7 +330,7 @@ async def chat_completions(req: ChatRequest, request: Request):
 
     # ── Non-streaming ──
     try:
-        if req.model in ("agent-harness", "agent-harness-single"):
+        if req.model in ("agent-harness", "agent-harness-single", "lingShu-fast"):
             response_text = await asyncio.get_event_loop().run_in_executor(
                 None, _execute_single, last_user_msg, history_context
             )
@@ -381,7 +405,8 @@ def main():
     print("  Agent Harness API")
     print("  " + ("-" * 40))
     print("  Endpoint:  http://%s:%d/v1" % (HOST, PORT))
-    print("  Models:    agent-harness (single), agent-harness-multi (multi)")
+    print("  Models:    lingShu-fast (单 Agent), lingShu-deep (多 Agent)")
+    print("             (兼容旧名: agent-harness / agent-harness-multi)")
     print("  Sessions:  ✓ (X-Session-Id header)")
     print("  Streaming: ✓ (SSE progressive)")
     print("  Docs:      http://%s:%d/docs" % (HOST, PORT))

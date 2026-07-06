@@ -34,12 +34,26 @@ from .agents import (
 
 # Module-level trace collector — set before graph invocation
 _trace_collector: TraceCollector | None = None
+# Module-level progress queue — set before graph invocation for SSE streaming
+_progress_queue = None
 
 
 def set_trace_collector(collector: TraceCollector):
     """Set the trace collector for the current execution."""
     global _trace_collector
     _trace_collector = collector
+
+
+def set_progress_queue(q):
+    """Set a queue for real-time progress events (SSE streaming)."""
+    global _progress_queue
+    _progress_queue = q
+
+
+def clear_progress_queue():
+    """Clear the progress queue after execution."""
+    global _progress_queue
+    _progress_queue = None
 
 
 # ─── Dispatch: run workers in parallel ───
@@ -53,6 +67,11 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
         return {"all_done": True}
 
     print(f"\n[Supervisor] 调度 {len(workers_assigned)} 个 Worker: {workers_assigned}")
+    if _progress_queue:
+        _progress_queue.put({
+            "type": "progress",
+            "content": f"🔀 分配 {len(workers_assigned)} 个 Worker: {', '.join(workers_assigned)}\n"
+        })
 
     # Run all workers in parallel
     results: dict[str, WorkerResult] = {}
@@ -60,6 +79,11 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
 
     def _run_with_trace(wname: str, task: str):
         """Run worker with optional trace span."""
+        if _progress_queue:
+            _progress_queue.put({
+                "type": "progress",
+                "content": f"▶️ {wname} 开始工作: {task[:60]}...\n"
+            })
         if _trace_collector:
             with _trace_collector.span(f"worker:{wname}", "worker", task=task[:80]):
                 result = run_worker(wname, task)
@@ -82,6 +106,12 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
                 status = "✅" if result.get("success") else "❌"
                 print(f"  {status} {wname} ({result.get('elapsed_s', 0):.1f}s): "
                       f"{str(result.get('output', ''))[:80]}")
+                if _progress_queue:
+                    snippet = str(result.get("output", ""))[:60]
+                    _progress_queue.put({
+                        "type": "progress",
+                        "content": f"{status} {wname} 完成 ({result.get('elapsed_s', 0):.1f}s): {snippet}\n"
+                    })
             except Exception as e:
                 results[wname] = WorkerResult(
                     worker_name=wname, success=False, output="",

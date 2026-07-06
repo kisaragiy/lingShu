@@ -15,8 +15,8 @@ from ..pipeline.state import SupervisorState, WorkerResult
 
 WORKER_CAPABILITIES = {
     "search": {
-        "description": "网页搜索、信息抓取、RAG语义检索、实时数据查询",
-        "tools": ["search", "fetch", "web_scrape", "web_browse", "rag_query", "datetime"],
+        "description": "网页搜索、信息抓取、RAG语义检索、实时数据查询、知识问答",
+        "tools": ["search", "fetch", "web_scrape", "web_browse", "rag_query", "datetime", "think"],
     },
     "analyze": {
         "description": "数据分析、报告生成、内容总结、代码执行、文本处理",
@@ -76,11 +76,12 @@ def supervisor_analyze(state: SupervisorState) -> dict:
         f"可用的 Worker:\n{workers_desc}\n\n"
         "规则:\n"
         "1. 需要搜索信息 → 分配 search worker\n"
-        "2. 需要分析/计算/总结 → 分配 analyze worker\n"
+        "2. 需要分析/计算/总结/翻译/列举 → 分配 analyze worker\n"
         "3. 需要操作桌面/浏览器/生成图像/发消息 → 分配 execute worker\n"
-        "4. 复杂任务可以分配多个 worker（它们会并行执行）\n"
-        "5. 每个 worker 分配一个清晰的具体子任务\n\n"
-        '输出 JSON: {"task_type": "mixed", "workers": [{"name": "search", "task": "搜索..."}, ...]}'
+        "4. 纯知识问答（翻译、列举、常识等）→ 只分配 analyze，<b>不要</b>分配 search\n"
+        "5. 简单任务只分配 1 个 worker，复杂任务可以分配多个\n"
+        "6. 每个 worker 分配一个清晰的具体子任务\n\n"
+        '输出 JSON: {"task_type": "search"|"analyze"|"execute"|"mixed", "workers": [{"name": "...", "task": "..."}]}'
     )
 
     result = _call_llm(
