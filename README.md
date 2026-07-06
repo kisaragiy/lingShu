@@ -6,7 +6,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-green)](https://langchain-ai.github.io/langgraph/)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
-[![GitHub](https://img.shields.io/badge/GitHub-kisaragiy%2Fagent--harness-181717?logo=github)](https://github.com/kisaragiy/agent-harness)
+[![GitHub](https://img.shields.io/badge/GitHub-kisaragiy%2FlingShu-181717?logo=github)](https://github.com/kisaragiy/lingShu)
 
 ---
 
@@ -15,7 +15,7 @@
 | 层面 | 名称 | 说明 |
 |------|------|------|
 | **产品名** | 灵枢 (LingShu) | 品牌定位、简历展示 |
-| **仓库名** | `agent-harness` | GitHub 仓库，开发者搜索友好 |
+| **仓库名** | `lingShu` | GitHub 仓库，品牌化命名 |
 | **包名** | `agent-harness` | pip install，技术描述性命名 |
 
 ## 🏗️ 架构
@@ -49,7 +49,7 @@
 
 ```bash
 # 安装
-pip install git+https://github.com/kisaragiy/agent-harness.git
+pip install git+https://github.com/kisaragiy/lingShu.git
 
 # 启动 API 服务
 agent-harness serve    # → http://127.0.0.1:8788
