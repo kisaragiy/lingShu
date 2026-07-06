@@ -1,0 +1,150 @@
+{
+  "timestamp": "2026-07-06 13:18:27",
+  "total_tasks": 8,
+  "passed": 6,
+  "failed": 2,
+  "skipped": 0,
+  "avg_score": 64.0,
+  "total_latency_s": 48.6,
+  "total_tokens": 0,
+  "scores": [
+    {
+      "task_id": "eval-001",
+      "passed": true,
+      "total_score": 70.0,
+      "details": {
+        "output_preview": "今天是**2025年4月7日，星期一**。",
+        "tool_calls": [],
+        "expected_tool": "datetime",
+        "expected_keywords": [
+          "星期",
+          "202"
+        ],
+        "latency_s": 4.6,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-002",
+      "passed": false,
+      "total_score": 51.666666666666664,
+      "details": {
+        "output_preview": "根据计算，表达式 (123 + 456) * 789 的结果为 **456,831**。具体步骤：先计算加法 123 + 456 = 579，再乘以 789，得到最终结果。数据准确无误。",
+        "tool_calls": [],
+        "expected_tool": "code_execute",
+        "expected_keywords": [
+          "456",
+          "或",
+          "计算"
+        ],
+        "latency_s": 5.0,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-003",
+      "passed": true,
+      "total_score": 65.0,
+      "details": {
+        "output_preview": "根据分析，这段文字的核心观点是：**人工智能（尤其是AI Agent）能够自动化软件开发中的代码编写、测试和部署等流程，但人类的创造力和判断力仍然是不可替代的关键要素。** 具体来说，AI Agent可以高效完成重复性、规则明确的任务（如自动编码、测试和部署），从而提升开发效率；然而，在需要创新、复杂决策和伦理判断的领域，人类独有的创造力和判断力依然发挥着核心作用。这体现了自动化技术与人类价值的互",
+        "tool_calls": [],
+        "expected_tool": "summarize",
+        "expected_keywords": [
+          "AI",
+          "Agent",
+          "人类",
+          "人工"
+        ],
+        "latency_s": 5.3,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-005",
+      "passed": true,
+      "total_score": 65.0,
+      "details": {
+        "output_preview": "根据读取结果，`C:\\Users\\zwq\\agent-harness\\README.md` 文件的前 100 个字符如下：\n\n```\n# Agent Harness\n\nAgent Harness is a framework for building, testing, and deploying AI agents. It provides a unified\n```\n\n该内容表明，这是一个名为",
+        "tool_calls": [],
+        "expected_tool": "file_read",
+        "expected_keywords": [
+          "Agent",
+          "Harness"
+        ],
+        "latency_s": 5.5,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-006",
+      "passed": true,
+      "total_score": 65.0,
+      "details": {
+        "output_preview": "根据您的请求，我编写了一个判断素数的Python函数，并验证了97是否为素数。以下是完整的结果：\n\n## 判断素数的Python函数\n\n```python\ndef is_prime(n):\n    \"\"\"判断一个数字是否为素数\"\"\"\n    if n <= 1:\n        return False\n    if n <= 3:\n        return True\n    if n % 2",
+        "tool_calls": [],
+        "expected_tool": "code_execute",
+        "expected_keywords": [
+          "素数",
+          "True",
+          "97"
+        ],
+        "latency_s": 8.8,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-007",
+      "passed": true,
+      "total_score": 68.33333333333333,
+      "details": {
+        "output_preview": "好的，根据查询结果，为您提供以下信息：\n\n1.  **今天是什么日子**：今天是 **2025年3月21日**，属于 **春分节气**，并非国家法定节日或广泛纪念日。\n\n2.  **2 的 20 次方是多少**：使用 Python 计算，2 的 20 次方等于 **1,048,576**。",
+        "tool_calls": [],
+        "expected_tool": "",
+        "expected_keywords": [
+          "日期",
+          "1048576",
+          "2"
+        ],
+        "latency_s": 7.7,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-008",
+      "passed": true,
+      "total_score": 70.0,
+      "details": {
+        "output_preview": "根据翻译结果，'Hello World' 的三种语言翻译如下：\n\n- **中文**：你好世界  \n- **日文**：こんにちは世界  \n- **韩文**：안녕하세요 세계  \n\n以上是准确的翻译结果。",
+        "tool_calls": [],
+        "expected_tool": "think",
+        "expected_keywords": [
+          "你好",
+          "こんにちは",
+          "안녕하세요"
+        ],
+        "latency_s": 4.7,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-009",
+      "passed": false,
+      "total_score": 57.0,
+      "details": {
+        "output_preview": "根据搜索结果，以下是 5 个常用的 Python 标准库及其简要用途：\n\n1. **os**：提供操作系统接口，用于文件和目录操作（如创建、删除、重命名文件）、环境变量管理、进程管理等。\n2. **sys**：提供系统相关的参数和函数，例如访问命令行参数（`sys.argv`）、退出程序（`sys.exit()`）、获取 Python 运行时环境信息等。\n3. **json**：用于 JSON 数",
+        "tool_calls": [],
+        "expected_tool": "think",
+        "expected_keywords": [
+          "os",
+          "sys",
+          "json",
+          "datetime",
+          "re"
+        ],
+        "latency_s": 7.0,
+        "total_tokens": 0
+      }
+    }
+  ],
+  "failures": []
+}

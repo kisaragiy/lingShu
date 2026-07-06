@@ -1,0 +1,150 @@
+{
+  "timestamp": "2026-07-05 21:54:40",
+  "total_tasks": 8,
+  "passed": 1,
+  "failed": 7,
+  "skipped": 0,
+  "avg_score": 49.4,
+  "total_latency_s": 767.1,
+  "total_tokens": 0,
+  "scores": [
+    {
+      "task_id": "eval-001",
+      "passed": false,
+      "total_score": 15.0,
+      "details": {
+        "output_preview": "嗯嗯",
+        "tool_calls": [],
+        "expected_tool": "datetime",
+        "expected_keywords": [
+          "星期",
+          "202"
+        ],
+        "latency_s": 108.6,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-002",
+      "passed": false,
+      "total_score": 41.666666666666664,
+      "details": {
+        "output_preview": "您好，关于您请求计算的数学表达式 **(123 + 456) * 789**，计算任务已完成。根据核算结果及关键数据点验证，具体信息如下：\n\n*   **第一步（括号内求和）：** $123 + 456 = \\mathbf{579}$\n*   **第二步（整体相乘）：** $\\mathbf{579} \\times 789 = \\mathbf{456,831}$\n\n因此，该表达式的最终结果为 **4",
+        "tool_calls": [],
+        "expected_tool": "code_execute",
+        "expected_keywords": [
+          "456",
+          "或",
+          "计算"
+        ],
+        "latency_s": 65.9,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-003",
+      "passed": false,
+      "total_score": 55.0,
+      "details": {
+        "output_preview": "这段文字的核心观点总结如下：\n\n人工智能（AI Agent）正在深刻重塑软件开发模式，其核心影响体现在以下三个方面：\n\n1.  **效率显著提升**：数据显示 AI Agent 使代码生成效率提升了约 **40%**，推动软件开发生命周期经历自动化重构。\n2.  **人类角色的转变**：虽然 AI 可自动完成编写、测试和部署等基础工作，但人类的创造力与判断力依然不可替代；人类的价值将更多转向架构设",
+        "tool_calls": [],
+        "expected_tool": "summarize",
+        "expected_keywords": [
+          "AI",
+          "Agent",
+          "人类",
+          "人工"
+        ],
+        "latency_s": 224.8,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-005",
+      "passed": false,
+      "total_score": 55.0,
+      "details": {
+        "output_preview": "很抱歉，无法完成您读取 `C:\\Users\\zwq\\agent-harness\\README.md` 文件前100个字的请求。根据任务执行结果反馈：当前环境**未返回有效的前100个字符数据或访问被拒绝**。具体原因为系统无法直接读取本地路径，建议检查文件系统权限配置或使用云端文档替代方案，并确认后续处理流程以解决此问题。",
+        "tool_calls": [],
+        "expected_tool": "file_read",
+        "expected_keywords": [
+          "Agent",
+          "Harness"
+        ],
+        "latency_s": 59.6,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-006",
+      "passed": false,
+      "total_score": 55.0,
+      "details": {
+        "output_preview": "根据任务执行与分析结果，数字 **97** 确认为素数。以下是为您编写的 Python 判断函数及验证过程：\n\n### 1. Python 代码实现\n基于分析报告中提到的“试除法（遍历至根号 N）”逻辑，代码如下：\n\n```python\nimport math\n\ndef is_prime(n):\n    \"\"\"\n    判断一个数字是否为素数\n    :param n: 待检测的数字\n    :r",
+        "tool_calls": [],
+        "expected_tool": "code_execute",
+        "expected_keywords": [
+          "素数",
+          "True",
+          "97"
+        ],
+        "latency_s": 96.0,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-007",
+      "passed": true,
+      "total_score": 71.66666666666666,
+      "details": {
+        "output_preview": "您好！根据检索与计算结果，回答如下：\n\n1.  **今天日期**：今天是 **2024 年 5 月 23 日（星期四）**。\n2.  **Python 计算结果**：经 Python 验证，$2^{20}$ 的计算结果为 **1,048,576**。\n\n以上信息已确认无误，如有其他指令请随时告知。",
+        "tool_calls": [],
+        "expected_tool": "",
+        "expected_keywords": [
+          "日期",
+          "1048576",
+          "2"
+        ],
+        "latency_s": 96.8,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-008",
+      "passed": false,
+      "total_score": 55.0,
+      "details": {
+        "output_preview": "您好！根据分析结果，'Hello World'的三种语言翻译已完成，具体数据如下：\n\n*   **中文**：“你好，世界”\n*   **日文**：\"こんにちは、世界\"\n*   **韩文**：\"안녕하세요 세계\"\n\n以上译文均符合各语言的本地化规范。如有其他需求，请随时告知。",
+        "tool_calls": [],
+        "expected_tool": "think",
+        "expected_keywords": [
+          "你好",
+          "こんにちは",
+          "안녕하세요"
+        ],
+        "latency_s": 56.1,
+        "total_tokens": 0
+      }
+    },
+    {
+      "task_id": "eval-009",
+      "passed": false,
+      "total_score": 47.0,
+      "details": {
+        "output_preview": "您好！以下是为您整理的5个常用的 Python 标准库及其核心用途：\n\n1. **os**：用于文件系统操作（如路径处理、文件读写）。\n2. **sys**：管理系统参数和变量（如命令行参数获取、环境变量设置）。\n3. **re**：处理正则表达式匹配（常用于文本搜索与验证）。\n4. **json**：负责数据序列化与反序列化（常用於JSON格式数据的解析与生成）。\n5. **collection",
+        "tool_calls": [],
+        "expected_tool": "think",
+        "expected_keywords": [
+          "os",
+          "sys",
+          "json",
+          "datetime",
+          "re"
+        ],
+        "latency_s": 59.3,
+        "total_tokens": 0
+      }
+    }
+  ],
+  "failures": []
+}
