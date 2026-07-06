@@ -16,3 +16,4 @@ memory/
 *.log
 eval_report.json
 comic_output/
+*.json
