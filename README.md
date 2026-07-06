@@ -1,137 +1,109 @@
-# Agent Harness
+# 灵枢 (LingShu Agent)
 
-**LangGraph 多 Agent 工具编排框架** — Supervisor-Worker 架构，40 个工具，MCP 协议，OpenAI 兼容 API，AIGC 视频管线。
+> **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
+> 基于 LangGraph Supervisor-Worker 架构的多 Agent 超级智能体平台。
 
-## ✅ 验证状态（v0.4.0）
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://python.org)
+[![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-green)](https://langchain-ai.github.io/langgraph/)
+[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-kisaragiy%2Fagent--harness-181717?logo=github)](https://github.com/kisaragiy/agent-harness)
 
-| 项目 | 结果 | 时间 |
-|------|:--:|------|
-| **Eval 套件** | **6/8 pass (75%)**，均分 61/100 | 71.8s |
-| **ComicAgent 脚本** | 4 分镜，20s 视频脚本 | 10.3s |
-| **Multi-Agent 响应** | 单任务 3-5s | — |
-| **LLM 后端** | qwen2.5-coder:14b @ 44 tok/s | WSL Ollama |
+---
 
-<details>
-<summary>📊 Eval 详情</summary>
+## 📦 项目定位
 
-| 任务 | 评分 | 描述 |
-|------|:--:|------|
-| eval-001 | 70 ✅ | 日期查询 |
-| eval-002 | 52 ❌ | 算术计算 |
-| eval-003 | 65 ✅ | 文本总结 |
-| eval-005 | 65 ✅ | 文件读取 |
-| eval-006 | 60 ✅ | 代码执行 |
-| eval-007 | 68 ✅ | 多工具协作 |
-| eval-008 | 65 ✅ | 多语翻译 |
-| eval-009 | 44 ❌ | Python 知识 |
+| 层面 | 名称 | 说明 |
+|------|------|------|
+| **产品名** | 灵枢 (LingShu) | 品牌定位、简历展示 |
+| **仓库名** | `agent-harness` | GitHub 仓库，开发者搜索友好 |
+| **包名** | `agent-harness` | pip install，技术描述性命名 |
 
-</details>
-
-<details>
-<summary>🎬 ComicAgent Demo</summary>
+## 🏗️ 架构
 
 ```
-用户输入: "猫娘在咖啡馆打工的一天，温馨治愈风格"
-    ↓ 📝 Script (LLM, 10.3s)
-    ↓ 🎨 Images (ComfyUI, on demand)
-    ↓ 🔊 Voice (edge-tts, on demand)
-    ↓ 🎬 Assembly (ffmpeg)
-
-Title: 猫娘咖啡馆的一天
-  Scene 1: 清晨，猫娘走进咖啡馆。
-    Visual: morning sun, cozy café, catgirl with orange apron
-  Scene 2: 她熟练地冲泡咖啡，和顾客聊天。
-    Visual: brewing coffee, interacting with customers
-  Scene 3: 午休时间，猫娘在窗边休息。
-    Visual: lunch break, relaxing by window
-  Scene 4: 晚上，她为顾客准备晚餐。
-    Visual: evening, preparing dinner for customers
+用户请求 → Supervisor (任务分析·分配·验收·重规划)
+            ├→ Search Worker   (网页搜索·RAG·抓取)
+            ├→ Analyze Worker  (代码执行·数据分析·总结)
+            └→ Execute Worker  (桌面自动化·ComfyUI·浏览器)
+                 ↓
+           Supervisor (结果收集·多轮迭代)
+                 ↓
+           Finalizer (综合回复)
 ```
 
-</details>
+## ✨ 特性
 
-## 架构
+- **多 Agent 编排** — Supervisor-Worker 架构，Worker 并行执行，支持多轮 Replan 迭代
+- **41 个工具** — 搜索/代码/桌面/浏览器/绘画/RAG/股票/消息 6 大类别
+- **OpenAI 兼容 API** — `/v1/chat/completions` + `/v1/models`，支持 SSE 流式
+- **会话上下文** — X-Session-Id 自动追踪 2h 对话历史，多轮不失忆
+- **Open WebUI 集成** — Docker 容器化前端，自然语言→Agent→结果全链路闭环
+- **MCP 协议** — JSON-RPC 2.0 标准暴露工具，外部 Agent 原生调用
+- **本地推理** — llama.cpp + Ollama WSL + DeepSeek Flash 三模型群，Model Proxy 路由
+- **全链路追踪** — 执行耗时/Tokens/工具调用统计
+- **熔断保护** — Token 预算 / 超时 / 无进展 三重熔断
+- **AIGC 管线** — ComfyUI + edge-tts + ffmpeg 一句话生成短视频
+- **评估套件** — 10 条回归测试任务，60+ 分及格线
 
-```
-User Request → Supervisor (任务分析+分配)
-                 ├→ Search Worker   (网页搜索·RAG·抓取)
-                 ├→ Analyze Worker  (数据处理·代码执行·总结)
-                 └→ Execute Worker  (桌面自动化·ComfyUI·浏览器)
-                      ↓
-                 Supervisor (收集·验收·重规划)
-                      ↓
-                 Finalizer (综合回复)
-```
-
-## 安装
+## 🚀 快速开始
 
 ```bash
-pip install git+https://github.com/kisaragiy/agent-harness.git@v0.4.0
-# 或本地开发
-git clone https://github.com/kisaragiy/agent-harness.git
-cd agent-harness && pip install -e .
+# 安装
+pip install git+https://github.com/kisaragiy/agent-harness.git
+
+# 启动 API 服务
+agent-harness serve    # → http://127.0.0.1:8788
+
+# 或直接运行任务
+agent-harness run "用 Python 计算 2 的 10 次方"
+agent-harness run --trace "搜索 AI Agent 最新进展"  # 带追踪
+agent-harness eval                                    # 评估套件
+agent-harness comic "猫娘在咖啡馆打工的一天" --no-images  # AIGC 脚本
 ```
 
-## 快速开始
+## 🔌 Open WebUI 集成
 
-```bash
-# 多 Agent 任务
-agent-harness run "Python中计算2的10次方"
+在 Open WebUI 管理后台添加自定义 OpenAI 连接：
 
-# 带追踪执行
-agent-harness run --trace "搜索AI新闻并总结"
+| 字段 | 值 |
+|------|-----|
+| URL | `http://host.docker.internal:8788/v1` |
+| Key | 留空 |
+| 模型 | `agent-harness-multi` |
 
-# 评估套件
-agent-harness eval
+## 🛠️ 技术栈
 
-# AIGC 视频脚本
-agent-harness comic "猫娘的一天" --no-images --no-audio
+- **编排框架**: LangGraph · FastAPI · Uvicorn
+- **推理引擎**: Qwen3.6-35B (llama.cpp) · DeepSeek Flash · Ollama 模型群
+- **工具层**: Playwright · PyAutoGUI · ComfyUI REST API · ChromaDB · SearXNG
+- **部署**: Docker · Open WebUI · WSL · Windows 原生
 
-# API 服务器
-agent-harness serve     # http://localhost:8788
-
-# MCP 工具服务器
-agent-harness mcp       # stdio, 40 tools
-```
-
-## 环境要求
-
-- Python ≥ 3.11
-- LLM 后端（任选其一）：
-  - 本地 llama.cpp（OpenAI 兼容 API）
-  - WSL Ollama（通过 model_proxy 桥接）
-  - 任何 OpenAI 兼容 API
-- 可选：ComfyUI（图像生成）、ffmpeg（视频合成）、edge-tts（配音）
-
-## 项目结构
+## 📁 项目结构
 
 ```
 src/agent_harness/
 ├── agents/
-│   ├── supervisor.py       # Supervisor Agent
-│   ├── workers.py          # Worker Agents (Search/Analyze/Execute)
-│   └── comic_agent.py      # AIGC 短视频生产管线
+│   ├── supervisor.py       # Supervisor Agent（分析/分配/验收/重规划）
+│   ├── workers.py          # Worker Agents（Search/Analyze/Execute）
+│   └── comic_agent.py      # AIGC 视频管线
 ├── pipeline/
-│   ├── state.py            # 状态定义
+│   ├── state.py            # TypedDict 状态定义
+│   ├── llm.py              # LLM 调用封装
 │   ├── circuit_breaker.py  # 三重熔断器
-│   ├── tracing.py          # 全链路追踪
-│   └── llm.py              # LLM 调用
-├── eval/
-│   ├── dataset.py          # 10 条评估任务
-│   ├── scorer.py           # 100 分评分标准
-│   └── runner.py           # 批量跑分
-├── tools/                  # 40 个工具
-│   ├── desktop.py          # 桌面/微信/QQ/浏览器
-│   ├── web.py              # 搜索/抓取
-│   ├── comfyui.py          # AI 图像/视频
+│   └── tracing.py          # 全链路追踪
+├── tools/                  # 41 个工具（注册即用）
+│   ├── web.py              # 搜索/抓取/浏览
+│   ├── desktop.py          # GUI/浏览器/消息/启动
+│   ├── comfyui.py          # 图像/视频生成
 │   └── misc.py             # 文件/代码/RAG/股票
-├── graph.py                # 单 Agent
-├── graph_multi.py          # 多 Agent
-├── mcp_server.py           # MCP stdio 服务器
-├── api_fastapi.py          # OpenAI 兼容 API
+├── eval/                   # 评估套件
+├── graph.py                # 单 Agent 管线
+├── graph_multi.py          # 多 Agent 管线
+├── api_fastapi.py          # OpenAI 兼容 API（会话+流式）
+├── mcp_server.py           # MCP 服务器
 └── run.py                  # CLI 入口
 ```
 
-## License
+## 📄 License
 
 MIT
