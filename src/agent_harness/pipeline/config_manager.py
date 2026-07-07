@@ -21,7 +21,7 @@ CONFIG_DIR = Path(os.environ.get("HARNESS_CONFIG_DIR",
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
 DEFAULT_CONFIG = {
-    "setup_complete": False,
+    "setup_complete": True,
     "llm": {
         "backend": "model_proxy",
         "api_url": "http://127.0.0.1:8081/v1/chat/completions",
@@ -414,44 +414,48 @@ def _fix_start_llamacpp() -> dict:
 
 
 def _fix_auto_configure() -> dict:
-    """Full automatic configuration — try everything.
+    """Full automatic configuration — detect best available backend, save config.
 
     Strategy:
-      1. Try to start model_proxy (most reliable, uses DeepSeek API)
-      2. If model_proxy works, use it
-      3. Save config and mark setup complete
+      1. Check available backends (model_proxy, llamacpp, ollama, deepseek)
+      2. Pick the first available one
+      3. Save config with that backend
+      4. If none available, mark complete anyway (error will show in chat)
     """
     results = {"steps": [], "llm_configured": False, "services_started": []}
 
-    # Step 1: Start model_proxy
-    mp = _fix_start_model_proxy()
-    results["steps"].append({"action": "start_model_proxy", **mp})
-    if mp.get("success"):
+    backends = check_llm_backend()
+    preferred_order = ["model_proxy", "llamacpp", "ollama", "deepseek"]
+
+    chosen = None
+    for name in preferred_order:
+        info = backends.get(name, {})
+        if info.get("available"):
+            chosen = {"name": name, "endpoint": info.get("endpoint", ""), "label": info.get("label", name)}
+            results["steps"].append({
+                "action": "detect_%s" % name,
+                "success": True,
+                "message": "%s 可用" % info.get("label", name),
+            })
+            break
+        results["steps"].append({
+            "action": "detect_%s" % name,
+            "success": False,
+            "message": "%s 不可用" % info.get("label", name),
+        })
+
+    if chosen:
+        cfg = load_config()
+        cfg["llm"]["backend"] = chosen["name"]
+        cfg["llm"]["api_url"] = chosen["endpoint"]
+        cfg["llm"]["model"] = "deepseek-v4"
+        cfg["setup_complete"] = True
+        save_config(cfg)
         results["llm_configured"] = True
-        results["services_started"].append("model_proxy")
-
-    # Step 2: Try Ollama
-    if not results["llm_configured"]:
-        ol = _fix_start_ollama()
-        results["steps"].append({"action": "start_ollama", **ol})
-        if ol.get("success"):
-            results["llm_configured"] = True
-            results["services_started"].append("ollama")
-
-    # Step 3: Start SearXNG
-    sx = _fix_start_searxng()
-    results["steps"].append({"action": "start_searxng", **sx})
-    if sx.get("success"):
-        results["services_started"].append("searxng")
-
-    # Step 4: Save config
-    if results["llm_configured"]:
-        ensure_setup_complete()
-        results["configured"] = True
+        results["chosen"] = chosen["label"]
     else:
-        # Fallback: mark complete anyway, agent will show error gracefully
         ensure_setup_complete()
-        results["configured"] = True
-        results["warning"] = "未能自动启动任何 LLM 后端，请手动配置"
+        results["llm_configured"] = False
+        results["warning"] = "未检测到可用的 LLM 后端。请确保 model_proxy / llama.cpp / Ollama 在运行，或在设置中手动配置。"
 
     return results

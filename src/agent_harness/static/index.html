@@ -46,7 +46,7 @@ async function init() {
       renderSetup();
     }
   } catch(e) {
-    renderSetup();
+    renderDashboard();
   }
 }
 
@@ -379,8 +379,20 @@ function renderDashFrame() {
         <span class="logo">⚡ 灵枢</span>
         <span class="logo-sub">LingShu Agent</span>
       </div>
-      <div>
-        <a href="/setup" class="btn btn-secondary btn-sm" onclick="event.preventDefault(); renderSetup()">重新配置</a>
+      <div style="display:flex;gap:4px;align-items:center">
+        <div style="position:relative" id="settings-menu-container">
+          <button class="btn btn-secondary btn-sm" onclick="toggleSettingsMenu()">⚙️ 菜单 ▾</button>
+          <div id="settings-dropdown" class="hidden" style="position:absolute;top:100%;right:0;margin-top:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);min-width:160px;z-index:100;box-shadow:0 4px 20px rgba(0,0,0,0.4)">
+            <div class="dropdown-item" onclick="switchTab('settings'); closeSettingsMenu()">⚙️ 设置</div>
+            <div class="dropdown-item" onclick="switchTab('mcp'); closeSettingsMenu()">🔌 MCP 工具列表</div>
+            <div class="dropdown-item" onclick="switchTab('skills'); closeSettingsMenu()">🧠 Skill 列表</div>
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-item" onclick="checkUpdate(); closeSettingsMenu()">📦 检查更新</div>
+            <div class="dropdown-item" onclick="renderSetup(); closeSettingsMenu()">🔄 重新配置</div>
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-item" onclick="closeSettingsMenu()">❌ 关闭</div>
+          </div>
+        </div>
       </div>
     </div>
     <div class="container">
@@ -785,6 +797,97 @@ async function saveSettings() {
   await API.post('/v1/setup/config', config);
   toast('设置已保存 ✓', 'ok');
 }
+
+// ── Settings dropdown menu ──
+function toggleSettingsMenu() {
+  const el = document.getElementById('settings-dropdown');
+  el.classList.toggle('hidden');
+}
+
+function closeSettingsMenu() {
+  document.getElementById('settings-dropdown').classList.add('hidden');
+}
+
+async function checkUpdate() {
+  closeSettingsMenu();
+  toast('检查更新中...', 'info');
+  try {
+    const r = await fetch('https://api.github.com/repos/kisaragiy/lingShu/releases/latest', {signal: AbortSignal.timeout(5000)});
+    const data = await r.json();
+    const latest = (data.tag_name || '').replace('v', '');
+    const current = '0.12.0';
+    if (latest && latest !== current) {
+      toast('发现新版本: v' + latest + ' (当前: v' + current + ')', 'info');
+    } else {
+      toast('已是最新版本 v' + current, 'ok');
+    }
+  } catch(e) {
+    toast('检查更新失败: ' + e.message, 'err');
+  }
+}
+
+// ── MCP Tools Tab ──
+async function renderMCP() {
+  const el = document.getElementById('dash-content');
+  el.innerHTML = '<div class="card"><div class="card-title">🔌 MCP 工具列表</div><div class="text-center"><span class="spinner"></span> 加载中...</div></div>';
+  try {
+    const registry = await import('/static/js/registry.js').catch(() => null);
+    if (registry) {
+      html = await registry.renderTools();
+    } else {
+      // Fallback: list via API
+      const r = await fetch('/v1/tools').catch(() => null);
+      if (r) {
+        const data = await r.json();
+        const tools = data.tools || {};
+        el.innerHTML = `<div class="card"><div class="card-title">🔌 MCP 工具列表 (${Object.keys(tools).length})</div>
+          <div class="service-grid">${Object.entries(tools).map(([k,v]) =>
+            `<div class="service-card"><div class="service-info"><div class="service-name">${k}</div><div class="service-detail">${(v.description||'').slice(0,60)}</div></div></div>`
+          ).join('')}</div></div>`;
+      } else {
+        el.innerHTML = '<div class="card"><div class="card-title">🔌 MCP 工具列表</div><div class="text-center text-muted">MCP API 不可用（确认服务已启动且端口正确）</div></div>';
+      }
+    }
+  } catch(e) {
+    el.innerHTML = '<div class="card"><div class="card-title">🔌 MCP 工具列表</div><div class="text-center text-muted">加载失败</div></div>';
+  }
+}
+
+// ── Skills Tab ──
+async function renderSkills() {
+  const el = document.getElementById('dash-content');
+  el.innerHTML = `<div class="card">
+    <div class="card-title">🧠 Skill 列表</div>
+    <div class="text-muted text-sm mb-16">灵枢的扩展技能模块，用于特定任务场景</div>
+    <table><tr><th>名称</th><th>描述</th><th>状态</th></tr>
+      <tr><td>agent-orchestration</td><td>LangGraph 多 Agent 编排</td><td><span class="dot dot-ok"></span> 内置</td></tr>
+      <tr><td>knowledge-base</td><td>知识库上传与 RAG 检索</td><td><span class="dot dot-ok"></span> 内置</td></tr>
+      <tr><td>session-persistence</td><td>会话持久化（磁盘存储）</td><td><span class="dot dot-ok"></span> 内置</td></tr>
+      <tr><td>mcp-server</td><td>MCP 协议工具暴露</td><td><span class="dot dot-ok"></span> 内置</td></tr>
+      <tr><td>comic-agent</td><td>AIGC 短视频管线</td><td><span class="dot dot-ok"></span> 内置</td></tr>
+      <tr><td>desktop-automation</td><td>Windows 桌面自动化</td><td><span class="dot dot-ok"></span> 内置</td></tr>
+      <tr><td>stock-analysis</td><td>A 股实时行情与技术指标</td><td><span class="dot dot-ok"></span> 内置</td></tr>
+      <tr><td>comfyui-pipeline</td><td>ComfyUI AI 绘画集成</td><td><span class="dot dot-warn"></span> 需启动 ComfyUI</td></tr>
+    </table>
+  </div>`;
+}
+
+// Add to switchTab
+const _origSwitch = switchTab;
+switchTab = function(tab) {
+  dashTab = tab;
+  document.querySelectorAll('.dash-nav a').forEach(a => a.classList.remove('active'));
+  document.querySelector('.dash-nav a[data-tab="' + tab + '"]')?.classList.add('active');
+  if (tab === 'chat') renderDashChat();
+  else if (tab === 'status') renderDashStatus();
+  else if (tab === 'knowledge') renderDashKnowledge();
+  else if (tab === 'sessions') renderDashSessions();
+  else if (tab === 'settings') renderDashSettings();
+  else if (tab === 'mcp') renderMCP();
+  else if (tab === 'skills') renderSkills();
+  closeSettingsMenu();
+  return false;
+};
 
 // ── Start ──
 init();

@@ -547,6 +547,26 @@ async def auto_configure():
     return result
 
 
+@app.get("/v1/tools")
+async def list_tools():
+    """List all registered tools."""
+    try:
+        # Force import all tool modules to trigger registration
+        import agent_harness.tools as _t
+        from agent_harness.tools.registry import TOOL_REGISTRY
+        tools = {
+            k: {
+                "description": v["schema"].get("description", ""),
+                "privilege": v.get("privilege", "read-only"),
+                "properties": list(v["schema"].get("properties", {}).keys()),
+            }
+            for k, v in TOOL_REGISTRY.items()
+        }
+        return {"tools": tools, "count": len(tools)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/v1/sessions")
 async def list_sessions():
     """List active sessions (persisted on disk)."""
