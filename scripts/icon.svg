@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c5cfc"/>
+      <stop offset="100%" style="stop-color:#4a2ad4"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="128" cy="128" r="120" fill="url(#bg)"/>
+  <!-- Lightning bolt -->
+  <path d="M148 52 L108 118 L140 118 L116 204 L170 126 L136 126 L156 52 Z"
+        fill="#ffffff" opacity="0.95"/>
+  <!-- Small decorative dots -->
+  <circle cx="80" cy="80" r="6" fill="#ffffff" opacity="0.3"/>
+  <circle cx="180" cy="70" r="4" fill="#ffffff" opacity="0.2"/>
+  <circle cx="170" cy="180" r="5" fill="#ffffff" opacity="0.25"/>
+</svg>

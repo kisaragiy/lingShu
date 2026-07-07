@@ -10,13 +10,35 @@
 
 ---
 
-## 📦 项目定位
+## 🚀 快速开始
 
-| 层面 | 名称 | 说明 |
-|------|------|------|
-| **产品名** | 灵枢 (LingShu) | 品牌定位、简历展示 |
-| **仓库名** | `lingShu` | GitHub 仓库，品牌化命名 |
-| **包名** | `agent-harness` | pip install，技术描述性命名 |
+### 下载即用（推荐）
+
+从 Releases 下载 `lingShu.exe`，双击启动，浏览器自动打开。
+
+### 从源码运行
+
+```bash
+# 安装
+pip install git+https://github.com/kisaragiy/lingShu.git
+
+# 启动
+agent-harness serve    # → http://127.0.0.1:8788
+
+# 或直接运行任务
+agent-harness run "用 Python 计算 2 的 10 次方"
+
+# 构建 .exe
+pip install pyinstaller
+python scripts/build_exe.py
+```
+
+### 首次使用
+
+1. 打开浏览器 → `http://127.0.0.1:8788`
+2. Setup Wizard 自动引导：路径检测 → LLM 配置 → 环境检查
+3. 进入 Dashboard → 在「💬 对话」标签页开始聊天
+4. 多轮对话自动保持上下文，长任务可取消
 
 ## 🏗️ 架构
 
