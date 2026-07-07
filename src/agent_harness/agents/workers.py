@@ -16,21 +16,78 @@ from ..tools.registry import TOOL_REGISTRY, call_tool, validate_result
 from ..agents.supervisor import WORKER_CAPABILITIES
 
 
+# ─── Token optimization utilities ───
+
+def truncate_output(output: str, max_chars: int = 500, max_lines: int = 20) -> str:
+    """Truncate tool output to save tokens. Keeps head + tail."""
+    if not output or len(output) <= max_chars:
+        return output or ""
+    lines = output.split("\n")
+    if len(lines) > max_lines:
+        half = max_lines // 2
+        skipped = len(lines) - max_lines
+        return "\n".join(lines[:half]) + f"\n...（省略 {skipped} 行）...\n" + "\n".join(lines[-half:])
+    return output[:max_chars] + f"\n...（超出 {len(output)-max_chars} 字符）"
+
+
+def _is_simple_task(task: str) -> bool:
+    """Detect if a task is simple enough for a cheap local model."""
+    t = task.lower().strip()
+    # Short queries
+    if len(t) < 20:
+        return True
+    # Patterns that don't need strong reasoning
+    SIMPLE_PATTERNS = [
+        r'^(ls|cd|pwd|echo|cat|head|tail|pip|npm|git)\s',
+        r'^(计算|算一下|求值)\s*\d',
+        r'^(翻译|转换成|格式化)\s',
+        r'^(你好|hi|hello|ping)$',
+        r'^\d+\s*[+\-*/]\s*\d+',
+        r'(现在几点|今天日期|星期几|天气|温度)',
+    ]
+    for pat in SIMPLE_PATTERNS:
+        if re.search(pat, t):
+            return True
+    # Pure chat without tool requirements
+    if len(t) < 50 and not any(kw in t for kw in
+        ['搜索', '查找', '分析', '代码', 'python', '文件', '执行', '运行']):
+        return True
+    return False
+
+
 # ─── LLM call for workers ───
 
+# Local model endpoint for simple tasks (token optimization strategy #4)
+LOCAL_LLM_API = "http://127.0.0.1:8081/v1/chat/completions"
+LOCAL_LLM_MODEL = "qwen3:14b"
+
+
 def _call_llm(messages: list[dict], system_prompt: str = "",
-              max_tokens: int = 4096) -> str:
+              max_tokens: int = 4096, task_hint: str = "") -> str:
+    """
+    Call LLM with optional simple-task routing to save tokens.
+
+    Strategy #4: If task_hint indicates a simple query, route to
+    the local Ollama model (free) instead of DeepSeek (paid).
+    """
     import requests as req_lib
+
+    # Check if this is a simple task that can use local model
+    use_local = bool(task_hint and _is_simple_task(task_hint))
+
+    api_url = LOCAL_LLM_API if use_local else LLAMA_API
+    model = LOCAL_LLM_MODEL if use_local else MODEL_LLAMA
+
     payload = {
-        "model": MODEL_LLAMA,
+        "model": model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
-        "max_tokens": max_tokens,
+        "max_tokens": max_tokens if not use_local else 512,
         "temperature": 0.3,
         "stream": False,
         "thinking": {"type": "disabled"},
     }
     try:
-        resp = req_lib.post(LLAMA_API, json=payload, timeout=300)
+        resp = req_lib.post(api_url, json=payload, timeout=300 if not use_local else 30)
         if resp.status_code == 200:
             msg = resp.json()["choices"][0]["message"]
             content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
@@ -94,6 +151,7 @@ def _worker_planner(state: WorkerState) -> dict:
     result = _call_llm(
         [{"role": "user", "content": task}],
         system_prompt=system,
+        task_hint=task,
     )
     plan = _extract_json_array(result)
     if not plan:
@@ -208,9 +266,15 @@ def _worker_executor(state: WorkerState) -> dict:
         pass
 
     new_results = list(state.get("results", []))
+    # Truncate tool output to save tokens (strategy #3)
+    truncated_result = dict(result)
+    if isinstance(truncated_result.get("data"), str):
+        truncated_result["data"] = truncate_output(truncated_result["data"])
+    elif isinstance(truncated_result.get("output"), str):
+        truncated_result["output"] = truncate_output(truncated_result["output"])
     new_results.append({
         "step": step,
-        "result": result,
+        "result": truncated_result,
         "validation": validation,
         "elapsed": round(elapsed, 2),
     })

@@ -358,7 +358,36 @@ async function renderDashStatus() {
     </div>
   </div>`;
 
+  // Running tasks
+  try {
+    const tasksData = await API.get('/v1/tasks');
+    if (tasksData.tasks && tasksData.tasks.length > 0) {
+      html += `<div class="card"><div class="card-title">⚡ 运行中的任务</div>`;
+      html += tasksData.tasks.map(t => `
+        <div class="service-card">
+          <span class="dot dot-ok" style="animation:pulse 1s infinite"></span>
+          <div class="service-info">
+            <div class="service-name">${t.session_id.slice(0,12)}...</div>
+            <div class="service-detail">运行中</div>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="cancelTask('${t.session_id}')">取消</button>
+        </div>
+      `).join('');
+      html += '</div>';
+    }
+  } catch(e) {}
+
   el.innerHTML = html;
+}
+
+async function cancelTask(sessionId) {
+  try {
+    await fetch('/v1/tasks/' + sessionId + '/cancel', { method: 'POST' });
+    toast('已发送取消请求', 'info');
+    renderDashStatus();
+  } catch(e) {
+    toast('取消失败: ' + e, 'err');
+  }
 }
 
 // ── Knowledge Tab ──

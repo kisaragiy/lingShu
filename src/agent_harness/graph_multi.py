@@ -32,6 +32,13 @@ from .agents import (
     run_worker, WORKER_CAPABILITIES,
 )
 
+# ─── Cancel event mechanism ───
+from .pipeline.cancel import (
+    set_cancel_event, clear_cancel_event,
+    is_cancelled, check_cancelled, CancelledError,
+)
+
+
 # Module-level trace collector — set before graph invocation
 _trace_collector: TraceCollector | None = None
 # Module-level progress queue — set before graph invocation for SSE streaming
@@ -62,6 +69,13 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
     """Fan-out tasks to workers, running them in parallel."""
     workers_assigned = state.get("workers_assigned", [])
     worker_tasks = state.get("worker_tasks", {})
+
+    # Check cancellation before dispatching
+    if is_cancelled():
+        print("[Supervisor] ⛔ 用户取消了任务")
+        if _progress_queue:
+            _progress_queue.put({"type": "progress", "content": "⛔ 任务已取消\n"})
+        return {"all_done": True, "final_output": "⛔ 任务已被用户取消"}
 
     if not workers_assigned:
         return {"all_done": True}
@@ -99,6 +113,12 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
             futures[pool.submit(_run_with_trace, wname, task)] = wname
 
         for future in concurrent.futures.as_completed(futures):
+            # Check cancellation
+            if is_cancelled():
+                print("[Supervisor] ⛔ 取消检测到，停止等待 Worker")
+                for f in futures:
+                    f.cancel()
+                break
             wname = futures[future]
             try:
                 result = future.result(timeout=120)

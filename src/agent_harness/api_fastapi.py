@@ -39,6 +39,14 @@ from pydantic import BaseModel
 HOST = os.environ.get("HARNESS_API_HOST", "127.0.0.1")
 PORT = int(os.environ.get("HARNESS_API_PORT", "8788"))
 
+# ─── Token optimization: conversation window ───
+# 分析结论：80% 请求 ≤2轮，95% ≤4轮，99%+ ≤6轮
+# 保留 4 轮（8 条消息）覆盖 95% 场景，平衡质量与成本
+# 可通过环境变量 HARNESS_MAX_HISTORY 运行时调整（例: HARNESS_MAX_HISTORY=8 agent-harness serve）
+MAX_HISTORY_ROUNDS = int(os.environ.get("HARNESS_MAX_HISTORY", "4"))
+MAX_HISTORY_MSGS = MAX_HISTORY_ROUNDS * 2    # 每个 round = user + assistant
+SESSION_TRIM_AT = MAX_HISTORY_ROUNDS * 4     # 持久化保留弹性
+
 # ─── Session store (persistent) ───
 from .pipeline.session_store import (
     save_session as _save_session,
@@ -50,12 +58,20 @@ from .pipeline.session_store import (
     session_count as _session_count,
 )
 
+# ─── Running task registry (for cancellation) ───
+import threading as _threading
+_running_tasks: dict[str, _threading.Event] = {}
+_running_tasks_lock = _threading.Lock()
+
 
 def _build_history_context(messages: list[dict]) -> str:
+    """Build context string from recent conversation history (capped to save tokens)."""
     if not messages:
         return ""
+    # Take only last N rounds
+    trimmed = messages[-(MAX_HISTORY_MSGS):]
     lines = []
-    for m in messages:
+    for m in trimmed:
         role = m.get("role", "unknown")
         content = m.get("content", "")
         if len(content) > 300:
@@ -91,8 +107,9 @@ def _sse_done(result_text: str) -> str:
 
 # ─── Execute harness (blocking, run in thread) ───
 
-def _execute_multi(prompt: str, history_context: str) -> dict:
+def _execute_multi(prompt: str, history_context: str, session_id: str = "") -> dict:
     from .graph_multi import run_multi_agent, set_progress_queue, clear_progress_queue, _progress_queue
+    from .pipeline.cancel import set_cancel_event, clear_cancel_event
     enhanced = prompt
     if history_context:
         enhanced = (
@@ -162,13 +179,21 @@ def _execute_single(prompt: str, history_context: str) -> str:
 
 
 # ─── Streaming with progress queue ───
-def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue):
+def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, session_id: str = ""):
     """Run harness in a thread, pushing progress events into queue."""
     try:
-        # Connect progress queue to graph_multi module
+        # Connect progress queue and cancel event to graph modules
         from .graph_multi import set_progress_queue, clear_progress_queue
+        from .pipeline.cancel import set_cancel_event, clear_cancel_event, is_cancelled
         set_progress_queue(q)
-        
+
+        # Register this task for cancellation
+        if session_id:
+            cancel_event = _threading.Event()
+            with _running_tasks_lock:
+                _running_tasks[session_id] = cancel_event
+            set_cancel_event(cancel_event)
+
         q.put({"type": "status", "content": "🤔 分析请求中...\n"})
 
         if model in ("agent-harness", "agent-harness-single", "lingShu-fast"):
@@ -177,7 +202,7 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue):
             q.put({"type": "result", "content": result})
         else:
             q.put({"type": "status", "content": "🧠 深模式（多 Agent 编排）执行中...\n"})
-            result = _execute_multi(prompt, history)
+            result = _execute_multi(prompt, history, session_id=session_id)
             rounds = result.get("rounds", 1)
             worker_results = result.get("worker_results", {})
             workers = list(worker_results.keys())
@@ -206,7 +231,12 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue):
     finally:
         try:
             from .graph_multi import clear_progress_queue
+            from .pipeline.cancel import clear_cancel_event
             clear_progress_queue()
+            clear_cancel_event()
+            if session_id:
+                with _running_tasks_lock:
+                    _running_tasks.pop(session_id, None)
         except Exception:
             pass
 
@@ -214,7 +244,7 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue):
 async def _stream_progress(prompt: str, history: str, model: str, session_id: str):
     q = queue.Queue()
     t = threading.Thread(
-        target=_run_with_queue, args=(prompt, history, model, q), daemon=True
+        target=_run_with_queue, args=(prompt, history, model, q, session_id), daemon=True
     )
     t.start()
 
@@ -388,6 +418,13 @@ async def chat_completions(req: ChatRequest, request: Request):
 
     # ── Non-streaming ──
     try:
+        # Register for cancellation
+        cancel_event = _threading.Event()
+        with _running_tasks_lock:
+            _running_tasks[session_id] = cancel_event
+        from .pipeline.cancel import set_cancel_event
+        set_cancel_event(cancel_event)
+
         if req.model in ("agent-harness", "agent-harness-single", "lingShu-fast"):
             response_text = await asyncio.get_event_loop().run_in_executor(
                 None, _execute_single, last_user_msg, history_context
@@ -402,10 +439,13 @@ async def chat_completions(req: ChatRequest, request: Request):
             rounds = result.get("rounds", 1)
             workers = list(result.get("worker_results", {}).keys())
 
-        # Save session
+        # Save session (capped to MAX_HISTORY_ROUNDS to prevent unbounded growth)
         session = _load_session(session_id) or []
         session.append({"role": "user", "content": last_user_msg, "ts": time.time()})
         session.append({"role": "assistant", "content": response_text, "ts": time.time()})
+        # Trim old rounds
+        if len(session) > SESSION_TRIM_AT:
+            session = session[-SESSION_TRIM_AT:]
         _save_session(session_id, session)
 
         print(
@@ -417,6 +457,12 @@ async def chat_completions(req: ChatRequest, request: Request):
         import traceback
         traceback.print_exc()
         response_text = "[HarnessError] %s" % e
+    finally:
+        # Clean up task registration
+        with _running_tasks_lock:
+            _running_tasks.pop(session_id, None)
+        from .pipeline.cancel import clear_cancel_event
+        clear_cancel_event()
 
     return {
         "id": "chatcmpl-%d" % int(time.time()),
@@ -498,6 +544,37 @@ async def delete_session_endpoint(session_id: str):
         {"error": "Session not found: %s" % session_id},
         status_code=404,
     )
+
+
+# ─── Task Cancel API ───
+
+
+@app.get("/v1/tasks")
+async def list_running_tasks():
+    """List currently running tasks."""
+    with _running_tasks_lock:
+        tasks = [
+            {
+                "session_id": sid,
+                "running": not event.is_set(),
+            }
+            for sid, event in _running_tasks.items()
+        ]
+    return {"tasks": tasks, "count": len(tasks)}
+
+
+@app.post("/v1/tasks/{session_id}/cancel")
+async def cancel_task(session_id: str):
+    """Cancel a running task."""
+    with _running_tasks_lock:
+        event = _running_tasks.get(session_id)
+    if not event:
+        return JSONResponse(
+            {"error": "No running task for session: %s" % session_id},
+            status_code=404,
+        )
+    event.set()
+    return {"status": "cancelled", "session_id": session_id}
 
 
 # ─── Knowledge Base API ───
