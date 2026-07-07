@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>灵枢 — 超级智能体平台</title>
+<link rel="stylesheet" href="/static/css/lingShu.css">
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="toast"></div>
+
+<script>
+// ─── API helper ───
+const API = {
+  async get(path) {
+    const r = await fetch(path); const d = await r.json(); return d;
+  },
+  async post(path, body) {
+    const r = await fetch(path, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    }); return await r.json();
+  },
+  async upload(path, formData) {
+    const r = await fetch(path, { method: 'POST', body: formData });
+    return await r.json();
+  },
+};
+
+// ─── Toast ───
+function toast(msg, type='info') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast toast-' + type + ' show';
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ─── Router ───
+async function init() {
+  try {
+    const config = await API.get('/v1/setup/config');
+    if (config.setup_complete) {
+      renderDashboard();
+    } else {
+      renderSetup();
+    }
+  } catch(e) {
+    renderSetup();
+  }
+}
+
+// ═══════════════════════════════════
+// SETUP WIZARD
+// ═══════════════════════════════════
+let setupStep = 1;
+let setupData = { paths: [], llm: {}, env: {} };
+
+function renderSetup() {
+  document.title = '灵枢 — 初始化配置';
+  document.getElementById('app').innerHTML = `
+    <div class="container" style="max-width:720px">
+      <div class="welcome" id="setup-welcome">
+        <h1 style="font-size:42px; letter-spacing:2px">⚡ 灵枢</h1>
+        <div style="color:var(--accent); font-size:14px; margin-bottom:4px">LingShu Agent</div>
+        <p class="subtitle">基于 LangGraph 的多 Agent 超级智能体平台</p>
+        <button class="btn btn-primary" onclick="startSetup()" style="font-size:16px; padding:14px 36px">
+          开始配置 →
+        </button>
+        <div class="feature-list" style="margin-top:48px">
+          <div class="feature-item"><div class="icon">🧠</div><div class="name">多 Agent 编排</div><div class="desc">Supervisor-Worker 架构</div></div>
+          <div class="feature-item"><div class="icon">🔧</div><div class="name">41+ 工具</div><div class="desc">搜索/代码/桌面/AIGC</div></div>
+          <div class="feature-item"><div class="icon">📚</div><div class="name">知识库</div><div class="desc">文件上传 RAG 检索</div></div>
+          <div class="feature-item"><div class="icon">💬</div><div class="name">Open WebUI</div><div class="desc">对话式交互</div></div>
+        </div>
+      </div>
+      <div id="setup-content" class="hidden"></div>
+    </div>`;
+}
+
+function startSetup() {
+  document.getElementById('setup-welcome').classList.add('hidden');
+  document.getElementById('setup-content').classList.remove('hidden');
+  setupStep = 1;
+  renderStep1();
+}
+
+function renderSteps() {
+  const steps = ['环境检测', 'LLM 配置', '服务检查', '完成'];
+  return `<div class="steps">${
+    steps.map((s, i) => {
+      const n = i + 1;
+      let cls = 'step';
+      if (n === setupStep) cls += ' active';
+      else if (n < setupStep) cls += ' done';
+      return `<div class="${cls}"><span class="num">${n < setupStep ? '✓' : n}</span>${s}</div>`;
+    }).join('')
+  }</div>`;
+}
+
+// Step 1: Path Detection
+async function renderStep1() {
+  const el = document.getElementById('setup-content');
+  el.innerHTML = renderSteps() + `
+    <div class="card">
+      <div class="card-title">🔍 环境路径检测</div>
+      <p class="text-muted text-sm mb-16">检查关键路径是否存在中文字符等问题</p>
+      <div id="path-list"><div class="text-center"><span class="spinner"></span> 扫描中...</div></div>
+      <div class="flex gap-8 mt-16">
+        <button class="btn btn-secondary btn-sm" onclick="renderStep1()">重新检测</button>
+        <button class="btn btn-primary btn-sm hidden" id="step1-next" onclick="setupStep=2; renderStep2()">下一步 →</button>
+      </div>
+    </div>`;
+
+  const data = await API.get('/v1/setup/check-paths');
+  setupData.paths = data;
+  const list = document.getElementById('path-list');
+  list.innerHTML = data.map(p => {
+    const ok = p.exists && !p.has_chinese;
+    const warn = p.has_chinese ? '⚠️ 路径含中文，建议修改' : (p.exists ? '✅ 正常' : '⏸️ 未找到');
+    const warnCls = p.has_chinese ? 'path-warn' : (p.exists ? 'path-ok' : 'text-muted');
+    return `<div class="path-item">
+      <span class="path-label">${p.label}</span>
+      <span class="path-value">${p.path || '—'}</span>
+      <span class="${warnCls}">${warn}</span>
+    </div>`;
+  }).join('');
+  document.getElementById('step1-next').classList.remove('hidden');
+}
+
+// Step 2: LLM Config
+async function renderStep2() {
+  const el = document.getElementById('setup-content');
+  el.innerHTML = renderSteps() + `
+    <div class="card">
+      <div class="card-title">🤖 LLM 配置</div>
+      <p class="text-muted text-sm mb-16">选择推理后端，或使用自动检测</p>
+      <div id="llm-backends"><div class="text-center"><span class="spinner"></span> 检测可用后端...</div></div>
+      <div class="mt-16 hidden" id="llm-custom">
+        <div class="form-group">
+          <label class="form-label">API 地址</label>
+          <input class="form-input" id="llm-url" placeholder="http://127.0.0.1:8081/v1/chat/completions">
+        </div>
+        <div class="form-group">
+          <label class="form-label">API Key（可选）</label>
+          <input class="form-input" id="llm-key" placeholder="sk-...">
+        </div>
+        <div class="form-group">
+          <label class="form-label">模型名称</label>
+          <input class="form-input" id="llm-model" placeholder="deepseek-v4">
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="testLLM()">测试连接</button>
+        <div id="llm-test-result" class="mt-16"></div>
+      </div>
+      <div class="flex gap-8 mt-16">
+        <button class="btn btn-secondary btn-sm" onclick="setupStep=1; renderStep1()">← 上一步</button>
+        <button class="btn btn-primary btn-sm" onclick="setupStep=3; renderStep3()">下一步 →</button>
+      </div>
+    </div>`;
+
+  const backends = await API.get('/v1/setup/llm-backends');
+  setupData.llm = backends;
+  const container = document.getElementById('llm-backends');
+  container.innerHTML = Object.entries(backends).map(([k, v]) => `
+    <div class="service-card" style="cursor:pointer" onclick="selectLLM('${k}')">
+      <span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span>
+      <div class="service-info">
+        <div class="service-name">${v.label}</div>
+        <div class="service-detail">${v.available ? '可用' : '未运行'} · ${v.endpoint || ''}</div>
+      </div>
+      <span class="text-sm" style="color:var(--accent)" id="llm-sel-${k}">${k === 'model_proxy' ? '✓ 推荐' : ''}</span>
+    </div>
+  `).join('');
+}
+
+function selectLLM(key) {
+  const v = setupData.llm[key];
+  document.querySelectorAll('.service-card').forEach(el => el.style.borderColor = '');
+  event.currentTarget.style.borderColor = 'var(--accent)';
+  setupData.selectedLLM = key;
+  setupData.llmEndpoint = v.endpoint;
+  if (key === 'deepseek') {
+    document.getElementById('llm-custom').classList.remove('hidden');
+    document.getElementById('llm-url').value = v.endpoint;
+  } else {
+    document.getElementById('llm-custom').classList.add('hidden');
+  }
+}
+
+async function testLLM() {
+  const btn = event.target; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 测试中...';
+  const result = await API.post('/v1/setup/test-llm', {
+    endpoint: document.getElementById('llm-url').value || setupData.llmEndpoint,
+    api_key: document.getElementById('llm-key').value || '',
+    model: document.getElementById('llm-model').value || '',
+  });
+  const el = document.getElementById('llm-test-result');
+  el.innerHTML = result.reachable
+    ? `<span class="dot dot-ok"></span> 连接成功！`
+    : `<span class="dot dot-fail"></span> 连接失败: ${result.error}`;
+  btn.disabled = false; btn.textContent = '测试连接';
+}
+
+// Step 3: Environment Check
+async function renderStep3() {
+  const el = document.getElementById('setup-content');
+  el.innerHTML = renderSteps() + `
+    <div class="card">
+      <div class="card-title">🛡️ 环境检查</div>
+      <p class="text-muted text-sm mb-16">检测所有服务运行状态</p>
+      <div id="env-results"><div class="text-center"><span class="spinner"></span> 检测中...</div></div>
+      <div class="flex gap-8 mt-16">
+        <button class="btn btn-secondary btn-sm" onclick="setupStep=2; renderStep2()">← 上一步</button>
+        <button class="btn btn-primary btn-sm" onclick="setupStep=4; renderStep4()">下一步 →</button>
+      </div>
+    </div>`;
+
+  const env = await API.get('/v1/setup/env-check');
+  setupData.env = env;
+  const html = [];
+  // LLM backends
+  html.push('<div class="card-title" style="font-size:13px;margin-top:8px">推理后端</div>');
+  for (const [k, v] of Object.entries(env.llm_backends || {})) {
+    html.push(`<div class="service-card"><span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span><div class="service-info"><div class="service-name">${v.label}</div></div></div>`);
+  }
+  // Services
+  html.push('<div class="card-title" style="font-size:13px;margin-top:16px">辅助服务</div>');
+  for (const [k, v] of Object.entries(env.services || {})) {
+    html.push(`<div class="service-card"><span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span><div class="service-info"><div class="service-name">${v.label}</div><div class="service-detail">${v.endpoint || ''}</div></div></div>`);
+  }
+  // Paths
+  html.push('<div class="card-title" style="font-size:13px;margin-top:16px">路径</div>');
+  for (const p of env.paths || []) {
+    const ok = p.exists && !p.has_chinese;
+    html.push(`<div class="service-card"><span class="dot ${ok ? 'dot-ok' : 'dot-fail'}"></span><div class="service-info"><div class="service-name">${p.label}</div><div class="service-detail">${p.path || '未找到'}</div></div></div>`);
+  }
+  document.getElementById('env-results').innerHTML = html.join('');
+}
+
+// Step 4: Complete
+async function renderStep4() {
+  // Save config
+  const llmKey = setupData.selectedLLM || 'model_proxy';
+  const llmInfo = setupData.llm[llmKey] || {};
+  await API.post('/v1/setup/config', {
+    setup_complete: true,
+    llm: {
+      backend: llmKey,
+      api_url: llmInfo.endpoint || '',
+      api_key: '',
+      model: 'deepseek-v4',
+    },
+  });
+
+  const el = document.getElementById('setup-content');
+  el.innerHTML = renderSteps() + `
+    <div class="card text-center" style="padding:60px">
+      <div style="font-size:48px; margin-bottom:16px">🎉</div>
+      <h2 style="margin-bottom:8px">配置完成！</h2>
+      <p class="text-muted" style="margin-bottom:24px">灵枢已就绪，开始使用超级智能体</p>
+      <button class="btn btn-primary" onclick="renderDashboard()" style="font-size:16px; padding:14px 36px">
+        进入控制台 →
+      </button>
+      <div class="text-sm text-muted mt-16">
+        Open WebUI 访问：<code style="color:var(--accent)">http://localhost:3000</code>
+      </div>
+    </div>`;
+}
+
+// ═══════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════
+let dashTab = 'status';
+let dashData = {};
+
+function renderDashboard() {
+  document.title = '灵枢 — 控制台';
+  dashTab = 'status';
+  renderDashFrame();
+  renderDashStatus();
+}
+
+function renderDashFrame() {
+  document.getElementById('app').innerHTML = `
+    <div class="header">
+      <div class="header-left">
+        <span class="logo">⚡ 灵枢</span>
+        <span class="logo-sub">LingShu Agent</span>
+      </div>
+      <div>
+        <a href="/setup" class="btn btn-secondary btn-sm" onclick="event.preventDefault(); renderSetup()">重新配置</a>
+      </div>
+    </div>
+    <div class="container">
+      <nav class="dash-nav" id="dash-nav">
+        <a href="#" data-tab="status" class="active" onclick="return switchTab('status')">📊 服务状态</a>
+        <a href="#" data-tab="knowledge" onclick="return switchTab('knowledge')">📚 知识库</a>
+        <a href="#" data-tab="sessions" onclick="return switchTab('sessions')">💬 会话</a>
+        <a href="#" data-tab="settings" onclick="return switchTab('settings')">⚙️ 设置</a>
+      </nav>
+      <div id="dash-content"></div>
+    </div>`;
+}
+
+function switchTab(tab) {
+  dashTab = tab;
+  document.querySelectorAll('.dash-nav a').forEach(a => a.classList.remove('active'));
+  document.querySelector(`.dash-nav a[data-tab="${tab}"]`).classList.add('active');
+  if (tab === 'status') renderDashStatus();
+  else if (tab === 'knowledge') renderDashKnowledge();
+  else if (tab === 'sessions') renderDashSessions();
+  else if (tab === 'settings') renderDashSettings();
+  return false;
+}
+
+// ── Status Tab ──
+async function renderDashStatus() {
+  const el = document.getElementById('dash-content');
+  el.innerHTML = '<div class="text-center mt-24"><span class="spinner"></span></div>';
+  const env = await API.get('/v1/setup/env-check');
+  const health = await API.get('/health');
+
+  let html = `<div class="flex-between mb-16">
+    <div><span class="card-title" style="font-size:18px;margin:0">服务状态</span></div>
+    <button class="btn btn-secondary btn-sm" onclick="renderDashStatus()">🔄 刷新</button>
+  </div>`;
+
+  // LLM backends
+  html += '<div class="card"><div class="card-title">🤖 推理后端</div><div class="service-grid">';
+  for (const [k, v] of Object.entries(env.llm_backends || {})) {
+    html += `<div class="service-card">
+      <span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span>
+      <div class="service-info">
+        <div class="service-name">${v.label}</div>
+        <div class="service-detail">${v.available ? '运行中' : '离线'} ${v.port ? '· port ' + v.port : ''}</div>
+      </div>
+    </div>`;
+  }
+  html += '</div></div>';
+
+  // Services
+  html += '<div class="card"><div class="card-title">🔧 辅助服务</div><div class="service-grid">';
+  for (const [k, v] of Object.entries(env.services || {})) {
+    html += `<div class="service-card">
+      <span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span>
+      <div class="service-info">
+        <div class="service-name">${v.label}</div>
+        <div class="service-detail">${v.available ? '运行中' : '离线'} ${v.port ? '· port ' + v.port : ''}</div>
+      </div>
+    </div>`;
+  }
+  html += '</div></div>';
+
+  // Summary
+  html += `<div class="card"><div class="card-title">📊 概览</div>
+    <div class="service-grid">
+      <div class="service-card"><div class="service-info"><div class="service-name">活跃会话</div><div class="service-detail">${health.active_sessions}</div></div></div>
+    </div>
+  </div>`;
+
+  el.innerHTML = html;
+}
+
+// ── Knowledge Tab ──
+async function renderDashKnowledge() {
+  const el = document.getElementById('dash-content');
+  el.innerHTML = `<div class="card">
+    <div class="card-title">📚 知识库</div>
+    <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+      <div class="upload-zone-icon">📄</div>
+      <div>点击上传文件（PDF/TXT/DOCX/MD）</div>
+      <div class="text-sm text-muted">文件将自动分块索引到向量存储</div>
+    </div>
+    <input type="file" id="file-input" hidden accept=".pdf,.txt,.docx,.md" onchange="uploadFile(this)">
+    <div id="upload-progress" class="hidden mt-16 text-center"><span class="spinner"></span> 索引中...</div>
+    <div id="collections-list" class="mt-16"><div class="text-center text-muted"><span class="spinner"></span> 加载中...</div></div>
+  </div>`;
+  renderCollections();
+}
+
+async function renderCollections() {
+  try {
+    const data = await API.get('/v1/knowledge/collections');
+    const el = document.getElementById('collections-list');
+    if (!data.collections || data.collections.length === 0) {
+      el.innerHTML = '<div class="text-center text-muted" style="padding:20px">暂无知识库，上传文件开始</div>';
+      return;
+    }
+    el.innerHTML = '<h4 style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">已有知识库</h4>' +
+    data.collections.map(c => `<div class="service-card">
+      <div class="service-info">
+        <div class="service-name">${c.name}</div>
+        <div class="service-detail">${c.chunks} 个片段 · ${c.doc_count} 个文件 · ${c.sources.join(', ') || ''}</div>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="deleteCollection('${c.name}')">删除</button>
+    </div>`).join('');
+  } catch(e) { /* ignore */ }
+}
+
+async function uploadFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  document.getElementById('upload-progress').classList.remove('hidden');
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('collection', 'default');
+  try {
+    await API.upload('/v1/knowledge/upload', fd);
+    toast('文件已索引 ✓', 'ok');
+    renderCollections();
+  } catch(e) {
+    toast('上传失败: ' + e, 'err');
+  }
+  document.getElementById('upload-progress').classList.add('hidden');
+  input.value = '';
+}
+
+async function deleteCollection(name) {
+  if (!confirm(`确定删除知识库「${name}」？`)) return;
+  try {
+    await fetch('/v1/knowledge/collections/' + name, { method: 'DELETE' });
+    toast('已删除', 'ok');
+    renderCollections();
+  } catch(e) {
+    toast('删除失败', 'err');
+  }
+}
+
+// ── Sessions Tab ──
+async function renderDashSessions() {
+  const el = document.getElementById('dash-content');
+  el.innerHTML = `<div class="card">
+    <div class="flex-between"><div class="card-title">💬 会话历史</div><button class="btn btn-secondary btn-sm" onclick="renderDashSessions()">🔄 刷新</button></div>
+    <div id="session-list"><div class="text-center"><span class="spinner"></span> 加载中...</div></div>
+  </div>`;
+
+  try {
+    const data = await API.get('/v1/sessions');
+    const list = document.getElementById('session-list');
+    if (!data.sessions || data.sessions.length === 0) {
+      list.innerHTML = '<div class="text-center text-muted" style="padding:20px">暂无会话记录</div>';
+      return;
+    }
+    list.innerHTML = '<table><tr><th>会话 ID</th><th>轮次</th><th>最后活跃</th><th>预览</th><th></th></tr>' +
+    data.sessions.map(s => `<tr>
+      <td><code>${s.id}</code></td>
+      <td>${s.exchanges}</td>
+      <td>${s.last_active < 60 ? s.last_active + '秒前' : Math.floor(s.last_active/60) + '分钟前'}</td>
+      <td class="text-muted text-sm">${(s.preview || '').slice(0, 40)}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteSession('${s.id}')">删除</button></td>
+    </tr>`).join('') + '</table>';
+  } catch(e) { /* ignore */ }
+}
+
+async function deleteSession(sessionId) {
+  if (!confirm('删除此会话？')) return;
+  try {
+    await fetch('/v1/sessions/' + sessionId, { method: 'DELETE' });
+    toast('已删除', 'ok');
+    renderDashSessions();
+  } catch(e) {
+    toast('删除失败', 'err');
+  }
+}
+
+// ── Settings Tab ──
+async function renderDashSettings() {
+  const el = document.getElementById('dash-content');
+  const config = await API.get('/v1/setup/config');
+  el.innerHTML = `<div class="card">
+    <div class="card-title">⚙️ 设置</div>
+    <div class="form-group">
+      <label class="form-label">LLM 后端</label>
+      <input class="form-input" id="set-llm-backend" value="${config.llm?.backend || 'auto'}">
+      <div class="form-hint">当前: ${config.llm?.backend || '未配置'}</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">API 地址</label>
+      <input class="form-input" id="set-llm-url" value="${config.llm?.api_url || ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">模型</label>
+      <input class="form-input" id="set-llm-model" value="${config.llm?.model || ''}">
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="saveSettings()">保存设置</button>
+    <div class="mt-16" style="border-top:1px solid var(--border);padding-top:16px">
+      <button class="btn btn-secondary btn-sm" onclick="renderSetup()">重新运行配置向导</button>
+      <span class="text-sm text-muted" style="margin-left:12px">清空配置并从头设置</span>
+    </div>
+  </div>`;
+}
+
+async function saveSettings() {
+  const config = {
+    llm: {
+      backend: document.getElementById('set-llm-backend').value,
+      api_url: document.getElementById('set-llm-url').value,
+      model: document.getElementById('set-llm-model').value,
+    },
+    setup_complete: true,
+  };
+  await API.post('/v1/setup/config', config);
+  toast('设置已保存 ✓', 'ok');
+}
+
+// ── Start ──
+init();
+</script>
+</body>
+</html>

@@ -28,6 +28,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -262,6 +264,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─── Static files (灵枢 frontend) ───
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/setup", include_in_schema=False)
+@app.get("/dashboard", include_in_schema=False)
+async def serve_frontend():
+    index = STATIC_DIR / "index.html"
+    if index.exists():
+        return FileResponse(str(index))
+    return JSONResponse({"message": "灵枢 API 运行中", "docs": "/docs"}, status_code=200)
+
 
 class ChatRequest(BaseModel):
     model: str = "agent-harness-multi"
@@ -421,6 +438,50 @@ async def chat_completions(req: ChatRequest, request: Request):
     }
 
 
+# ─── Setup API ───
+
+
+def _get_cm():
+    from .pipeline import config_manager
+    return config_manager
+
+
+@app.get("/v1/setup/config")
+async def get_config():
+    return _get_cm().load_config()
+
+
+@app.post("/v1/setup/config")
+async def save_config(request: Request):
+    body = await request.json()
+    return _get_cm().save_config(body)
+
+
+@app.get("/v1/setup/check-paths")
+async def check_paths():
+    return _get_cm().check_paths()
+
+
+@app.get("/v1/setup/llm-backends")
+async def llm_backends():
+    return _get_cm().check_llm_backend()
+
+
+@app.get("/v1/setup/env-check")
+async def env_check():
+    return _get_cm().full_env_check()
+
+
+@app.post("/v1/setup/test-llm")
+async def test_llm(request: Request):
+    body = await request.json()
+    return _get_cm().test_llm_connection(
+        endpoint=body.get("endpoint", ""),
+        model=body.get("model", ""),
+        api_key=body.get("api_key", ""),
+    )
+
+
 @app.get("/v1/sessions")
 async def list_sessions():
     """List active sessions (persisted on disk)."""
@@ -541,14 +602,10 @@ def main():
     _init_session_store()
     count = _session_count()
     print("")
-    print("  Agent Harness API")
+    print("  ⚡ 灵枢 — LingShu Agent")
     print("  " + ("-" * 40))
-    print("  Endpoint:  http://%s:%d/v1" % (HOST, PORT))
-    print("  Models:    lingShu-fast (单 Agent), lingShu-deep (多 Agent)")
-    print("             (兼容旧名: agent-harness / agent-harness-multi)")
-    print("  Sessions:  ✓ (disk-persisted, %d active)" % count)
-    print("  Streaming: ✓ (SSE progressive)")
-    print("  Knowledge: ✓ (upload / query / manage)")
+    print("  API:       http://%s:%d/v1" % (HOST, PORT))
+    print("  Frontend:  http://%s:%d" % (HOST, PORT))
     print("  Docs:      http://%s:%d/docs" % (HOST, PORT))
     print("  " + ("-" * 40))
     print("")
