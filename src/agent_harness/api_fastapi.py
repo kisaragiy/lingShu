@@ -528,6 +528,25 @@ async def test_llm(request: Request):
     )
 
 
+@app.post("/v1/setup/fix")
+async def run_fix(request: Request):
+    """Execute a fix action (start service / auto-configure).
+
+    Body: {"action": "start_model_proxy"|"start_ollama"|"start_searxng"|"auto_configure"}
+    """
+    body = await request.json()
+    action = body.get("action", "")
+    result = _get_cm().fix_action(action)
+    return result
+
+
+@app.post("/v1/setup/auto-configure")
+async def auto_configure():
+    """One-click full auto configuration."""
+    result = _get_cm().fix_action("auto_configure")
+    return result
+
+
 @app.get("/v1/sessions")
 async def list_sessions():
     """List active sessions (persisted on disk)."""

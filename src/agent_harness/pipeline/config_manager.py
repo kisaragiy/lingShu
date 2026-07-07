@@ -2,6 +2,7 @@
 
 Stores user config in ~/.agent-harness/config.json.
 Auto-discovers environment (paths, LLM backends, services).
+Provides fix actions for one-click environment setup.
 """
 
 import json
@@ -9,22 +10,23 @@ import os
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 # ─── Paths ───
 
-CONFIG_DIR = Path(os.environ.get("HARNESS_CONFIG_DIR", 
+CONFIG_DIR = Path(os.environ.get("HARNESS_CONFIG_DIR",
                                  os.path.expanduser("~/.agent-harness")))
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
 DEFAULT_CONFIG = {
     "setup_complete": False,
     "llm": {
-        "backend": "auto",        # "auto" | "llamacpp" | "ollama" | "deepseek" | "openai"
-        "api_url": "",
+        "backend": "model_proxy",
+        "api_url": "http://127.0.0.1:8081/v1/chat/completions",
         "api_key": "",
-        "model": "",
+        "model": "deepseek-v4",
     },
     "paths": {
         "llama_cpp": "",
@@ -70,6 +72,17 @@ def save_config(config: dict) -> dict:
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
     return config
+
+
+def ensure_setup_complete():
+    """Mark setup as complete with default config (one-click skip)."""
+    cfg = load_config()
+    cfg["setup_complete"] = True
+    cfg["llm"]["backend"] = "model_proxy"
+    cfg["llm"]["api_url"] = "http://127.0.0.1:8081/v1/chat/completions"
+    cfg["llm"]["model"] = "deepseek-v4"
+    save_config(cfg)
+    return cfg
 
 
 # ─── Path helpers ───
@@ -131,7 +144,6 @@ def check_llm_backend(backend: str = "auto") -> dict:
     """Check which LLM backends are available."""
     results = {}
 
-    # llama-server
     results["llamacpp"] = {
         "available": check_port(8080),
         "port": 8080,
@@ -139,15 +151,13 @@ def check_llm_backend(backend: str = "auto") -> dict:
         "label": "llama.cpp (本地)",
     }
 
-    # Model proxy
     results["model_proxy"] = {
         "available": check_port(8081),
         "port": 8081,
         "endpoint": "http://127.0.0.1:8081/v1/chat/completions",
-        "label": "Model Proxy (路由)",
+        "label": "Model Proxy (路由·推荐)",
     }
 
-    # Ollama
     results["ollama"] = {
         "available": check_port(11434, "172.18.9.126"),
         "port": 11434,
@@ -155,7 +165,6 @@ def check_llm_backend(backend: str = "auto") -> dict:
         "label": "Ollama (WSL)",
     }
 
-    # DeepSeek API key check
     dsk_key = os.environ.get("DEEPSEEK_API_KEY", "")
     results["deepseek"] = {
         "available": bool(dsk_key),
@@ -164,7 +173,6 @@ def check_llm_backend(backend: str = "auto") -> dict:
         "key_configured": bool(dsk_key),
     }
 
-    # Hermes
     results["hermes"] = {
         "available": check_port(8642),
         "port": 8642,
@@ -216,9 +224,9 @@ def check_paths() -> list[dict]:
     ]
 
     for label, path in paths_to_check:
-        entry = {"label": label, "path": str(path) if path else "", "exists": False, "has_chinese": False}
+        entry = {"label": label, "path": str(path) if path else "",
+                 "exists": bool(path), "has_chinese": False}
         if path:
-            entry["exists"] = True
             entry["has_chinese"] = has_chinese(str(path))
         results.append(entry)
 
@@ -246,7 +254,7 @@ def test_llm_connection(endpoint: str, model: str = "", api_key: str = "") -> di
 
 
 def full_env_check() -> dict:
-    """Run all environment checks in one call."""
+    """Run all environment checks in one call (parallel)."""
     import concurrent.futures
 
     results = {}
@@ -266,4 +274,184 @@ def full_env_check() -> dict:
 
     results["python_version"] = sys.version
     results["platform"] = sys.platform
+    return results
+
+
+# ═══════════════════════════════════════════════
+# FIX ACTIONS — one-click environment repair
+# ═══════════════════════════════════════════════
+
+def fix_action(action: str) -> dict:
+    """Execute a fix action and return result.
+
+    Actions:
+      - start_model_proxy: Launch model_proxy.py as subprocess
+      - start_ollama: Start Ollama via WSL
+      - start_searxng: Start SearXNG Docker container
+      - start_llamacpp: Start llama-server
+      - auto_configure: Full automatic configuration
+    """
+    action_map = {
+        "start_model_proxy": _fix_start_model_proxy,
+        "start_ollama": _fix_start_ollama,
+        "start_searxng": _fix_start_searxng,
+        "start_llamacpp": _fix_start_llamacpp,
+        "auto_configure": _fix_auto_configure,
+    }
+
+    fn = action_map.get(action)
+    if not fn:
+        return {"success": False, "error": "Unknown action: %s" % action}
+
+    try:
+        return fn()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _fix_start_model_proxy() -> dict:
+    """Start model_proxy.py as a background process."""
+    candidates = [
+        os.path.expanduser("~/Downloads/llama.cpp/model_proxy.py"),
+        r"C:\Users\zwq\Downloads\llama.cpp\model_proxy.py",
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            # Check if already running
+            if check_port(8081):
+                return {"success": True, "message": "Model Proxy 已在运行", "port": 8081}
+            # Launch
+            subprocess.Popen(
+                [sys.executable, path],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            # Wait for it
+            for _ in range(15):
+                time.sleep(1)
+                if check_port(8081):
+                    return {"success": True, "message": "Model Proxy 已启动", "port": 8081}
+            return {"success": False, "error": "Model Proxy 启动超时"}
+    return {"success": False, "error": "未找到 model_proxy.py"}
+
+
+def _fix_start_ollama() -> dict:
+    """Start Ollama via WSL."""
+    if check_port(11434, "172.18.9.126"):
+        return {"success": True, "message": "Ollama 已在运行"}
+    try:
+        subprocess.run(
+            ["wsl", "-d", "Ubuntu-22.04", "bash", "-lc", "nohup ollama serve > /dev/null 2>&1 &"],
+            timeout=10,
+            capture_output=True,
+        )
+        for _ in range(10):
+            time.sleep(2)
+            if check_port(11434, "172.18.9.126"):
+                return {"success": True, "message": "Ollama 已启动"}
+        return {"success": False, "error": "Ollama 启动超时"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _fix_start_searxng() -> dict:
+    """Start SearXNG Docker container."""
+    if check_port(4000):
+        return {"success": True, "message": "SearXNG 已在运行"}
+    try:
+        # Try starting existing container first
+        r = subprocess.run(
+            ["docker", "start", "searxng"],
+            timeout=15, capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            for _ in range(10):
+                time.sleep(2)
+                if check_port(4000):
+                    return {"success": True, "message": "SearXNG 已启动"}
+        # If no existing container, create one
+        r = subprocess.run(
+            ["docker", "run", "-d", "--name", "searxng",
+             "-p", "4000:8080", "searxng/searxng:latest"],
+            timeout=30, capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            for _ in range(15):
+                time.sleep(2)
+                if check_port(4000):
+                    return {"success": True, "message": "SearXNG 容器已创建并启动"}
+        return {"success": False, "error": r.stderr[:200] or "Docker 命令失败"}
+    except FileNotFoundError:
+        return {"success": False, "error": "Docker 未安装"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _fix_start_llamacpp() -> dict:
+    """Start llama-server."""
+    if check_port(8080):
+        return {"success": True, "message": "llama-server 已在运行"}
+    llm_dir = find_llama_cpp()
+    if not llm_dir:
+        return {"success": False, "error": "未找到 llama.cpp 目录"}
+    try:
+        subprocess.Popen(
+            [os.path.join(llm_dir, "llama-server.exe"),
+             "-m", os.path.join(llm_dir, "models", "Qwen3.6-35B-A3B-Abliterated-Heretic-Q4_K_M.gguf"),
+             "-ngl", "99", "--no-mmap", "--ctx-size", "131072",
+             "--host", "127.0.0.1", "--port", "8080"],
+            cwd=llm_dir,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        for _ in range(30):
+            time.sleep(3)
+            if check_port(8080):
+                return {"success": True, "message": "llama-server 已启动", "port": 8080}
+        return {"success": False, "error": "llama-server 启动超时"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _fix_auto_configure() -> dict:
+    """Full automatic configuration — try everything.
+
+    Strategy:
+      1. Try to start model_proxy (most reliable, uses DeepSeek API)
+      2. If model_proxy works, use it
+      3. Save config and mark setup complete
+    """
+    results = {"steps": [], "llm_configured": False, "services_started": []}
+
+    # Step 1: Start model_proxy
+    mp = _fix_start_model_proxy()
+    results["steps"].append({"action": "start_model_proxy", **mp})
+    if mp.get("success"):
+        results["llm_configured"] = True
+        results["services_started"].append("model_proxy")
+
+    # Step 2: Try Ollama
+    if not results["llm_configured"]:
+        ol = _fix_start_ollama()
+        results["steps"].append({"action": "start_ollama", **ol})
+        if ol.get("success"):
+            results["llm_configured"] = True
+            results["services_started"].append("ollama")
+
+    # Step 3: Start SearXNG
+    sx = _fix_start_searxng()
+    results["steps"].append({"action": "start_searxng", **sx})
+    if sx.get("success"):
+        results["services_started"].append("searxng")
+
+    # Step 4: Save config
+    if results["llm_configured"]:
+        ensure_setup_complete()
+        results["configured"] = True
+    else:
+        # Fallback: mark complete anyway, agent will show error gracefully
+        ensure_setup_complete()
+        results["configured"] = True
+        results["warning"] = "未能自动启动任何 LLM 后端，请手动配置"
+
     return results

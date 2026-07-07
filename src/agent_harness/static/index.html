@@ -64,9 +64,14 @@ function renderSetup() {
         <h1 style="font-size:42px; letter-spacing:2px">⚡ 灵枢</h1>
         <div style="color:var(--accent); font-size:14px; margin-bottom:4px">LingShu Agent</div>
         <p class="subtitle">基于 LangGraph 的多 Agent 超级智能体平台</p>
-        <button class="btn btn-primary" onclick="startSetup()" style="font-size:16px; padding:14px 36px">
-          开始配置 →
-        </button>
+        <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="startSetup()" style="font-size:16px; padding:14px 36px">
+            开始配置 →
+          </button>
+          <button class="btn btn-success" onclick="quickStart()" style="font-size:16px; padding:14px 36px">
+            ⚡ 快速开始 — 一键自动配置
+          </button>
+        </div>
         <div class="feature-list" style="margin-top:48px">
           <div class="feature-item"><div class="icon">🧠</div><div class="name">多 Agent 编排</div><div class="desc">Supervisor-Worker 架构</div></div>
           <div class="feature-item"><div class="icon">🔧</div><div class="name">41+ 工具</div><div class="desc">搜索/代码/桌面/AIGC</div></div>
@@ -83,6 +88,59 @@ function startSetup() {
   document.getElementById('setup-content').classList.remove('hidden');
   setupStep = 1;
   renderStep1();
+}
+
+async function quickStart() {
+  // One-click auto configure
+  const el = document.getElementById('setup-content');
+  el.classList.remove('hidden');
+  el.innerHTML = '<div class="card text-center" style="padding:40px"><span class="spinner"></span><div class="mt-16">自动配置中...<br><span class="text-sm text-muted">启动服务、配置 LLM、检测环境</span></div></div>';
+
+  try {
+    const result = await API.post('/v1/setup/auto-configure', {});
+    const steps = (result.steps || []).map(s =>
+      `<div class="service-card"><span class="dot ${s.success ? 'dot-ok' : 'dot-fail'}"></span><div class="service-info"><div class="service-name">${s.action}</div><div class="service-detail">${s.message || s.error || ''}</div></div></div>`
+    ).join('');
+    const ok = result.llm_configured;
+    el.innerHTML = `
+      <div class="card text-center" style="padding:40px">
+        <div style="font-size:48px; margin-bottom:16px">${ok ? '🎉' : '⚠️'}</div>
+        <h2 style="margin-bottom:8px">${ok ? '配置完成！' : '部分完成'}</h2>
+        <p class="text-muted" style="margin-bottom:24px">${result.warning || '灵枢已就绪，开始使用超级智能体'}</p>
+        <div style="text-align:left">${steps}</div>
+        <div class="mt-16">
+          <button class="btn btn-primary" onclick="renderDashboard()" style="font-size:16px; padding:14px 36px">
+            进入控制台 →
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="startSetup()" style="margin-left:8px">
+            手动配置
+          </button>
+        </div>
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="card text-center" style="padding:40px">
+      <div style="font-size:48px; margin-bottom:16px">❌</div>
+      <h2>配置失败</h2>
+      <p class="text-muted">${e.message}</p>
+      <button class="btn btn-primary mt-16" onclick="startSetup()">手动配置</button>
+    </div>`;
+  }
+}
+
+async function fixService(name) {
+  const btn = event.target; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    const result = await API.post('/v1/setup/fix', {action: 'start_' + name});
+    if (result.success) {
+      toast(name + ' 启动成功 ✓', 'ok');
+      renderStep3();  // Refresh
+    } else {
+      toast(name + ' 启动失败: ' + (result.error || '未知错误'), 'err');
+    }
+  } catch(e) {
+    toast('操作失败: ' + e.message, 'err');
+  }
+  btn.disabled = false; btn.innerHTML = '启动';
 }
 
 function renderSteps() {
@@ -154,6 +212,7 @@ async function renderStep2() {
       </div>
       <div class="flex gap-8 mt-16">
         <button class="btn btn-secondary btn-sm" onclick="setupStep=1; renderStep1()">← 上一步</button>
+        <button class="btn btn-success btn-sm" onclick="quickStartLLM()">⚡ 自动配置</button>
         <button class="btn btn-primary btn-sm" onclick="setupStep=3; renderStep3()">下一步 →</button>
       </div>
     </div>`;
@@ -185,6 +244,23 @@ function selectLLM(key) {
   } else {
     document.getElementById('llm-custom').classList.add('hidden');
   }
+}
+
+async function quickStartLLM() {
+  // Auto-configure LLM: start model_proxy and use it
+  const btn = event.target; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    const result = await API.post('/v1/setup/auto-configure', {});
+    if (result.llm_configured) {
+      toast('LLM 自动配置成功 ✓', 'ok');
+      setupStep = 3; renderStep3();
+    } else {
+      toast('自动配置失败: ' + (result.warning || '请手动选择'), 'err');
+    }
+  } catch(e) {
+    toast('自动配置出错: ' + e.message, 'err');
+  }
+  btn.disabled = false; btn.innerHTML = '⚡ 自动配置';
 }
 
 async function testLLM() {
@@ -221,12 +297,28 @@ async function renderStep3() {
   // LLM backends
   html.push('<div class="card-title" style="font-size:13px;margin-top:8px">推理后端</div>');
   for (const [k, v] of Object.entries(env.llm_backends || {})) {
-    html.push(`<div class="service-card"><span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span><div class="service-info"><div class="service-name">${v.label}</div></div></div>`);
+    const fixable = !v.available && ['model_proxy', 'ollama', 'llamacpp'].includes(k);
+    html.push(`<div class="service-card">
+      <span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span>
+      <div class="service-info">
+        <div class="service-name">${v.label}</div>
+        <div class="service-detail">${v.available ? '运行中' : '离线'}</div>
+      </div>
+      ${fixable ? `<button class="btn btn-secondary btn-sm" onclick="fixService('${k}')">启动</button>` : ''}
+    </div>`);
   }
   // Services
   html.push('<div class="card-title" style="font-size:13px;margin-top:16px">辅助服务</div>');
   for (const [k, v] of Object.entries(env.services || {})) {
-    html.push(`<div class="service-card"><span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span><div class="service-info"><div class="service-name">${v.label}</div><div class="service-detail">${v.endpoint || ''}</div></div></div>`);
+    const fixable = !v.available && ['searxng', 'comfyui'].includes(k);
+    html.push(`<div class="service-card">
+      <span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span>
+      <div class="service-info">
+        <div class="service-name">${v.label}</div>
+        <div class="service-detail">${v.available ? '运行中' : '离线'} ${v.endpoint || ''}</div>
+      </div>
+      ${fixable ? `<button class="btn btn-secondary btn-sm" onclick="fixService('${k}')">启动</button>` : ''}
+    </div>`);
   }
   // Paths
   html.push('<div class="card-title" style="font-size:13px;margin-top:16px">路径</div>');
