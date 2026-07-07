@@ -10,8 +10,9 @@ _SEARCH_CACHE_TTL = 300  # 5 分钟
 
 
 def _tool_search(query: str, max_results: int = 5) -> list:
-    """搜索 — 优先 SearXNG，降级 Bing skill（5 分钟内存缓存）"""
+    """搜索 — 优先 SearXNG，降级 DuckDuckGo，再降级 Bing skill（5 分钟内存缓存）"""
     import time as _time
+    import re as _re
 
     # 缓存命中
     now = _time.time()
@@ -22,11 +23,13 @@ def _tool_search(query: str, max_results: int = 5) -> list:
             return results
 
     results = []
+
+    # 1. SearXNG（私有搜索引擎）
     try:
         r = _session.get(
             "http://127.0.0.1:4000/search",
             params={"q": query, "format": "json", "language": "zh-CN"},
-            timeout=15,
+            timeout=10,
         )
         if r.status_code == 200:
             sr = r.json().get("results", [])
@@ -38,20 +41,55 @@ def _tool_search(query: str, max_results: int = 5) -> list:
     except Exception:
         pass
 
+    # 2. DuckDuckGo HTML 搜索（无需 API Key）
     if not results:
         try:
-            import sys
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            r = _session.get(
+                "https://html.duckduckgo.com/html/",
+                params={"q": query},
+                headers=headers,
+                timeout=15,
+            )
+            if r.status_code == 200:
+                # Parse result links from DuckDuckGo HTML
+                html = r.text
+                links = _re.findall(
+                    r'<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([^<]+)</a>',
+                    html,
+                )
+                snippets = _re.findall(
+                    r'<a class="result__snippet"[^>]*>([^<]+)</a>',
+                    html,
+                )
+                for i, (url, title) in enumerate(links[:max_results]):
+                    snippet = snippets[i] if i < len(snippets) else ""
+                    results.append(
+                        f"{title}: {snippet} [{url}]"
+                    )
+        except Exception:
+            pass
+
+    # 3. 降级：search_tool skill
+    if not results:
+        try:
             skills_dir = os.path.join(os.path.dirname(HARNESS_DIR), "skills")
             if skills_dir not in sys.path:
                 sys.path.insert(0, skills_dir)
             from search_tool import web_search
             results = web_search(query, max_results)
-        except Exception as e:
-            results = [f"[搜索失败] {e}"]
+        except Exception:
+            pass
 
-    # 写入缓存（过滤失败结果）
-    if results and not results[0].startswith("[搜索失败]"):
-        _SEARCH_CACHE[cache_key] = (_time.time(), results)
+    # 兜底
+    if not results:
+        results = ["[搜索不可用] 请检查 SearXNG 或网络连接"]
+
+    # 写入缓存
+    _SEARCH_CACHE[cache_key] = (_time.time(), results)
     return results
 
 

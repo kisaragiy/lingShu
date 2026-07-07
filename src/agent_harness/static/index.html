@@ -384,6 +384,7 @@ function renderDashFrame() {
           <button class="btn btn-secondary btn-sm" onclick="toggleSettingsMenu()">⚙️ 菜单 ▾</button>
           <div id="settings-dropdown" class="hidden" style="position:absolute;top:100%;right:0;margin-top:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);min-width:160px;z-index:100;box-shadow:0 4px 20px rgba(0,0,0,0.4)">
             <div class="dropdown-item" onclick="switchTab('settings'); closeSettingsMenu()">⚙️ 设置</div>
+            <div class="dropdown-item" onclick="switchTab('reports'); closeSettingsMenu()">📄 报告列表</div>
             <div class="dropdown-item" onclick="switchTab('mcp'); closeSettingsMenu()">🔌 MCP 工具列表</div>
             <div class="dropdown-item" onclick="switchTab('skills'); closeSettingsMenu()">🧠 Skill 列表</div>
             <div class="dropdown-divider"></div>
@@ -398,6 +399,7 @@ function renderDashFrame() {
     <div class="container">
       <nav class="dash-nav" id="dash-nav">
         <a href="#" data-tab="chat" onclick="return switchTab('chat')">💬 对话</a>
+        <a href="#" data-tab="reports" onclick="return switchTab('reports')">📄 报告</a>
         <a href="#" data-tab="status" onclick="return switchTab('status')">📊 服务状态</a>
         <a href="#" data-tab="knowledge" onclick="return switchTab('knowledge')">📚 知识库</a>
         <a href="#" data-tab="sessions" onclick="return switchTab('sessions')">💬 会话</a>
@@ -610,6 +612,14 @@ async function sendChatMessage() {
     if (assistantEl) assistantEl.innerHTML = fullContent.replace(/\n/g, '<br>');
     thinkingEl.classList.add('hidden');
 
+    // Add save report button if response is substantial
+    if (fullContent.length > 100) {
+      const saveBtn = document.createElement('div');
+      saveBtn.style.cssText = 'align-self:flex-start; margin-top:4px';
+      saveBtn.innerHTML = `<button class="btn btn-secondary btn-sm" onclick="saveReport(this, \`${chatSessionId}\`)" data-content="${encodeURIComponent(fullContent.slice(0,80))}">💾 保存报告</button>`;
+      document.getElementById('chat-messages').appendChild(saveBtn);
+    }
+
   } catch(e) {
     if (e.name === 'AbortError') {
       addChatBubble('assistant', '⛔ 任务已取消', null, true);
@@ -643,16 +653,60 @@ function addChatBubble(role, content, id, isSystem) {
   const container = document.getElementById('chat-messages');
   const div = document.createElement('div');
   div.id = id || '';
-  div.style.cssText = `
-    max-width:80%; padding:10px 14px; border-radius:10px; font-size:13px; line-height:1.5;
-    ${role === 'user'
-      ? 'align-self:flex-end; background:var(--accent); color:#fff;'
-      : isSystem
-        ? 'align-self:center; background:var(--bg-hover); color:var(--text-secondary); text-align:center; font-size:12px;'
-        : 'align-self:flex-start; background:var(--bg-card); border:1px solid var(--border);'}`;
+  div.style.cssText = `max-width:80%; padding:10px 14px; border-radius:10px; font-size:13px; line-height:1.5; ${role === 'user' ? 'align-self:flex-end; background:var(--accent); color:#fff;' : isSystem ? 'align-self:center; background:var(--bg-hover); color:var(--text-secondary); text-align:center; font-size:12px;' : 'align-self:flex-start; background:var(--bg-card); border:1px solid var(--border);'}`;
   div.innerHTML = content.replace(/\n/g, '<br>');
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
+}
+
+async function saveReport(btn, sessionId) {
+  const container = document.getElementById('chat-messages');
+  const bubbles = container.querySelectorAll('div[style*="align-self:flex-start"]');
+  const last = bubbles[bubbles.length - 1];
+  if (!last) return;
+  const content = last.textContent || '';
+  const title = '调研报告_' + new Date().toISOString().slice(0,10);
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    await fetch('/v1/reports', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title, content, tags:['chat'], source_session:sessionId})});
+    toast('报告已保存 ✓', 'ok');
+    btn.innerHTML = '💾 已保存'; btn.style.opacity = '0.5';
+  } catch(e) { toast('保存失败: ' + e.message, 'err'); btn.disabled = false; btn.innerHTML = '💾 保存报告'; }
+}
+
+// ── Reports Tab ──
+async function renderReports() {
+  const el = document.getElementById('dash-content');
+  el.innerHTML = '<div class="card"><div class="flex-between"><div class="card-title">📄 报告列表</div><button class="btn btn-secondary btn-sm" onclick="renderReports()">🔄 刷新</button></div><div id="report-list"><div class="text-center"><span class="spinner"></span> 加载中...</div></div></div>';
+  try {
+    const data = await API.get('/v1/reports');
+    const list = document.getElementById('report-list');
+    if (!data.reports || !data.reports.length) {
+      list.innerHTML = '<div class="text-center text-muted" style="padding:20px">暂无报告。在「💬 对话」中聊天后，点击「💾 保存报告」按钮即可保存。</div>';
+      return;
+    }
+    list.innerHTML = data.reports.map(r => {
+      const date = new Date(r.created_at*1000).toLocaleString('zh-CN');
+      const tags = (r.tags||[]).map(t => '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:var(--accent-glow);color:var(--accent);font-size:11px;margin-right:4px">'+t+'</span>').join('');
+      return '<div class="service-card"><div class="service-info"><div class="service-name">'+r.title+'</div><div class="service-detail">'+date+' · '+r.chars+' 字 '+tags+'</div></div><button class="btn btn-secondary btn-sm" onclick="viewReport(\''+r.id+'\')" style="margin-right:4px">查看</button><button class="btn btn-danger btn-sm" onclick="deleteReport(\''+r.id+'\')">删除</button></div>';
+    }).join('');
+  } catch(e) {}
+}
+
+async function viewReport(reportId) {
+  try {
+    const r = await API.get('/v1/reports/'+reportId);
+    if (!r||!r.content) { toast('报告加载失败','err'); return; }
+    const el = document.getElementById('dash-content');
+    const date = new Date(r.created_at*1000).toLocaleString('zh-CN');
+    el.innerHTML = '<div class="card"><div class="flex-between"><div><div class="card-title">'+r.title+'</div><div class="text-sm text-muted">'+date+' · '+r.chars+' 字</div></div><button class="btn btn-secondary btn-sm" onclick="renderReports()">← 返回列表</button></div><div style="margin-top:16px;font-size:14px;line-height:1.7;white-space:pre-wrap">'+r.content.replace(/</g,'&lt;')+'</div></div>';
+  } catch(e) { toast('加载失败','err'); }
+}
+
+async function deleteReport(reportId) {
+  if (!confirm('删除此报告？')) return;
+  try { await fetch('/v1/reports/'+reportId,{method:'DELETE'}); toast('已删除','ok'); renderReports(); }
+  catch(e) { toast('删除失败','err'); }
 }
 
 
@@ -884,6 +938,7 @@ switchTab = function(tab) {
   else if (tab === 'sessions') renderDashSessions();
   else if (tab === 'settings') renderDashSettings();
   else if (tab === 'mcp') renderMCP();
+  else if (tab === 'reports') renderReports();
   else if (tab === 'skills') renderSkills();
   closeSettingsMenu();
   return false;

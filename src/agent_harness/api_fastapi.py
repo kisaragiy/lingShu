@@ -551,7 +551,6 @@ async def auto_configure():
 async def list_tools():
     """List all registered tools."""
     try:
-        # Force import all tool modules to trigger registration
         import agent_harness.tools as _t
         from agent_harness.tools.registry import TOOL_REGISTRY
         tools = {
@@ -565,6 +564,60 @@ async def list_tools():
         return {"tools": tools, "count": len(tools)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ─── Report API ───
+
+
+def _get_rs():
+    from .pipeline import report_store
+    return report_store
+
+
+@app.post("/v1/reports")
+async def create_report(request: Request):
+    """Save a report."""
+    body = await request.json()
+    meta = _get_rs().save_report(
+        title=body.get("title", "未命名报告"),
+        content=body.get("content", ""),
+        tags=body.get("tags", []),
+        source_session=body.get("source_session", ""),
+    )
+    return meta
+
+
+@app.get("/v1/reports")
+async def list_reports(limit: int = 50, offset: int = 0):
+    """List saved reports."""
+    reports = _get_rs().list_reports(limit=limit, offset=offset)
+    return {"reports": reports, "count": len(reports)}
+
+
+@app.get("/v1/reports/{report_id}")
+async def get_report(report_id: str):
+    """Get a specific report with full content."""
+    report = _get_rs().get_report(report_id)
+    if not report:
+        return JSONResponse({"error": "Report not found"}, status_code=404)
+    return report
+
+
+@app.delete("/v1/reports/{report_id}")
+async def delete_report(report_id: str):
+    """Delete a report."""
+    if _get_rs().delete_report(report_id):
+        return {"status": "deleted"}
+    return JSONResponse({"error": "Report not found"}, status_code=404)
+
+
+@app.get("/v1/reports/search")
+async def search_reports(q: str = ""):
+    """Search reports by title/tags."""
+    if not q:
+        return {"reports": []}
+    reports = _get_rs().search_reports(q)
+    return {"reports": reports, "count": len(reports)}
 
 
 @app.get("/v1/sessions")
