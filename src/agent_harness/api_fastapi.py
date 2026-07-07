@@ -27,6 +27,7 @@ import queue
 import threading
 import time
 import uuid
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -106,8 +107,36 @@ def _execute_multi(prompt: str, history_context: str) -> dict:
             "以下是本对话的历史记录（越新的越靠前）:\n%s\n\n"
             "请基于以上对话上下文，回答用户当前的问题:\n%s"
         ) % (history_context, prompt)
-    # If _progress_queue exists from streaming context, pass it through
-    # Otherwise, set_progress_queue in _run_with_queue handles it
+
+    # Auto-inject knowledge base context if available
+    try:
+        from .tools.rag_store import query as rag_query, list_collections
+        kb_cols = list_collections()
+        if kb_cols:
+            kb_results = []
+            for col in kb_cols:
+                try:
+                    results = rag_query(prompt, collection=col, top_k=3)
+                    kb_results.extend(results)
+                except Exception:
+                    pass
+            if kb_results:
+                kb_context = "\n\n".join(
+                    "[知识库 - %s] %s" % (r.get("source", "unknown"), r["text"])
+                    for r in kb_results[:3]
+                )
+                enhanced = (
+                    "以下是从知识库中检索到的相关信息（请优先使用这些信息回答）:\n%s\n\n"
+                    "用户问题: %s" % (kb_context, enhanced)
+                )
+                if _progress_queue:
+                    _progress_queue.put({
+                        "type": "progress",
+                        "content": "📚 从知识库中找到 %d 条相关信息\n" % len(kb_results)
+                    })
+    except Exception:
+        pass
+
     return run_multi_agent(enhanced)
 
 
@@ -116,6 +145,27 @@ def _execute_single(prompt: str, history_context: str) -> str:
     enhanced = prompt
     if history_context:
         enhanced = "以下是对话历史:\n%s\n\n当前问题: %s" % (history_context, prompt)
+
+    # Auto-inject KB context
+    try:
+        from .tools.rag_store import query as rag_query, list_collections
+        kb_cols = list_collections()
+        if kb_cols:
+            kb_results = []
+            for col in kb_cols:
+                try:
+                    results = rag_query(prompt, collection=col, top_k=2)
+                    kb_results.extend(results)
+                except Exception:
+                    pass
+            if kb_results:
+                kb_context = "\n".join(
+                    "[知识库] %s" % r["text"] for r in kb_results[:2]
+                )
+                enhanced = "知识库信息:\n%s\n\n%s" % (kb_context, enhanced)
+    except Exception:
+        pass
+
     return run_single(enhanced)
 
 
@@ -393,6 +443,98 @@ async def list_sessions():
                 "preview": msgs[-1].get("content", "")[:60],
             })
     return {"sessions": info, "count": len(info)}
+
+
+# ─── Knowledge Base API ───
+
+
+@app.get("/v1/knowledge/collections")
+async def kb_list_collections():
+    """List all knowledge base collections."""
+    try:
+        from .tools.rag_store import list_collections, collection_info
+        cols = list_collections()
+        return {
+            "collections": [
+                collection_info(c) for c in cols
+            ],
+            "count": len(cols),
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/v1/knowledge/upload")
+async def kb_upload_file(request: Request):
+    """Upload a file and index it into a knowledge base collection.
+
+    Accepts multipart/form-data with fields:
+        - file: the file (PDF, DOCX, TXT, MD)
+        - collection: collection name (default: "default")
+
+    Returns indexing results.
+    """
+    try:
+        from .tools.rag_store import index_file, collection_info
+    except Exception as e:
+        return JSONResponse(
+            {"error": "RAG store not available: %s" % e},
+            status_code=500,
+        )
+
+    import tempfile
+
+    try:
+        form = await request.form()
+        upload = form.get("file")
+        if not upload:
+            return JSONResponse({"error": "No file provided"}, status_code=400)
+
+        collection = form.get("collection", "default")
+        filename = upload.filename or "unknown"
+        content = await upload.read()
+
+        # Save to temp file
+        suffix = Path(filename).suffix or ".tmp"
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=suffix
+        ) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        try:
+            count = index_file(tmp_path, collection=collection, filename=filename)
+            info = collection_info(collection)
+            return {
+                "status": "ok",
+                "filename": filename,
+                "collection": collection,
+                "chunks_indexed": count,
+                "collection_info": info,
+            }
+        finally:
+            os.unlink(tmp_path)
+
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.delete("/v1/knowledge/collections/{name}")
+async def kb_delete_collection(name: str):
+    """Delete a knowledge base collection."""
+    try:
+        from .tools.rag_store import delete_collection
+    except Exception as e:
+        return JSONResponse(
+            {"error": "RAG store not available: %s" % e},
+            status_code=500,
+        )
+    if delete_collection(name):
+        return {"status": "deleted", "collection": name}
+    return JSONResponse(
+        {"error": "Collection not found: %s" % name},
+        status_code=404,
+    )
 
 
 # ─── Direct entry point ───

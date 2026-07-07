@@ -71,14 +71,30 @@ def supervisor_analyze(state: SupervisorState) -> dict:
         for name, info in WORKER_CAPABILITIES.items()
     )
 
+    # Check if knowledge base is available
+    kb_hint = ""
+    try:
+        from ..tools.rag_store import list_collections
+        kb_cols = list_collections()
+        if kb_cols:
+            kb_names = ", ".join(kb_cols)
+            kb_hint = (
+                "\n\n📚 知识库可用! 已有 collections: %s\n"
+                "如果用户询问与已上传文档相关的问题，搜索 worker 使用 rag_query 工具检索知识库。\n"
+                "知识库问答应走 search worker。" % kb_names
+            )
+    except Exception:
+        pass
+
     system = (
         "你是一个任务调度主管。分析用户请求，决定需要哪些 Worker 来处理。\n\n"
-        f"可用的 Worker:\n{workers_desc}\n\n"
-        "规则:\n"
+        f"可用的 Worker:\n{workers_desc}\n"
+        f"{kb_hint}"
+        "\n规则:\n"
         "1. 需要搜索信息 → 分配 search worker\n"
         "2. 需要分析/计算/总结/翻译/列举 → 分配 analyze worker\n"
         "3. 需要操作桌面/浏览器/生成图像/发消息 → 分配 execute worker\n"
-        "4. 纯知识问答（翻译、列举、常识等）→ 只分配 analyze，<b>不要</b>分配 search\n"
+        "4. 纯知识问答（翻译、列举、常识等）→ 只分配 analyze，不要分配 search\n"
         "5. 简单任务只分配 1 个 worker，复杂任务可以分配多个\n"
         "6. 每个 worker 分配一个清晰的具体子任务\n\n"
         '输出 JSON: {"task_type": "search"|"analyze"|"execute"|"mixed", "workers": [{"name": "...", "task": "..."}]}'

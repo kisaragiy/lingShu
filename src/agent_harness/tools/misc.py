@@ -142,13 +142,13 @@ def _tool_permission_gate(action: str = "", reason: str = "", confirm_code: str 
 def _tool_rag_query(query: str, collection: str = "default", top_k: int = 5) -> str:
     """本地 RAG 检索 — 从指定 collection 检索最相关片段"""
     try:
-        from rag_store import query as rag_q
+        from .rag_store import query as rag_q
         results = rag_q(query, collection, top_k)
         if not results:
             return json.dumps({"results": [], "hint": "collection 为空或不存在"}, ensure_ascii=False)
         return json.dumps({"results": results[:top_k]}, ensure_ascii=False)
-    except ImportError:
-        return json.dumps({"error": "rag_store 模块未安装", "hint": "先 pip install numpy"}, ensure_ascii=False)
+    except ImportError as e:
+        return json.dumps({"error": "rag_store 模块未安装", "hint": str(e)}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
@@ -156,11 +156,11 @@ def _tool_rag_query(query: str, collection: str = "default", top_k: int = 5) -> 
 def _tool_rag_index(text: str, source: str, collection: str = "default") -> str:
     """本地 RAG 索引 — 将文本切割为 chunks 并存入向量存储"""
     try:
-        from rag_store import index as rag_i
+        from .rag_store import index as rag_i
         count = rag_i(text, source, collection)
         return json.dumps({"indexed_chunks": count, "collection": collection, "source": source}, ensure_ascii=False)
-    except ImportError:
-        return json.dumps({"error": "rag_store 模块未安装"}, ensure_ascii=False)
+    except ImportError as e:
+        return json.dumps({"error": "rag_store 模块未安装", "hint": str(e)}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
@@ -217,11 +217,11 @@ register_tool("permission_gate", _tool_permission_gate, {
     "properties": {"action": "string", "reason": "string", "confirm_code": "string"},
 }, privilege="reversible")
 register_tool("rag_query", _tool_rag_query, {
-    "description": "本地 RAG 检索相关文档片段",
+    "description": "查询知识库（已上传的文档/PDF/笔记），检索最相关的片段。当你需要回答关于已上传文档的问题时使用这个工具。",
     "properties": {"query": "string", "collection": "string", "top_k": "integer"},
 }, privilege="read-only")
 register_tool("rag_index", _tool_rag_index, {
-    "description": "本地 RAG 将文本索引到向量存储",
+    "description": "将文本加入知识库索引。用 rag_query 来搜索。",
     "properties": {"text": "string", "source": "string", "collection": "string"},
 }, privilege="reversible")
 
