@@ -15,7 +15,7 @@
 | **本质** | 基于 LangGraph 的有状态多 Agent 编排引擎 |
 | **交互层** | Open WebUI（用户前端） |
 | **推理引擎** | Qwen3.6-35B（本地主力）+ DeepSeek Flash（云端编排）+ Ollama 模型群 |
-| **工具数量** | 40+ 已注册工具 |
+| **工具数量** | 45+ 已注册工具（含 RAG 检索 + A 股数据 + AIGC 绘画） |
 | **架构模式** | Supervisor-Worker（主管-工人） |
 | **产品形态** | pip 包 + API 服务 + Open WebUI 集成 |
 
@@ -94,7 +94,7 @@
 | **Analyze** | think, code_execute, summarize, file_read, file_write | 思考、编程、总结、文件操作 |
 | **Execute** | desktop_gui, browser_automation, app_launch, comfyui_text2img, comfyui_img2img, chat_send, file_write | 桌面自动化、浏览器操作、AI 绘画、发消息 |
 
-### 工具全集（40+）
+### 工具全集（45+）
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -186,11 +186,11 @@ Round 3: "用Python提取关键数据" → code_execute 整理
 
 ## 五、产品功能清单
 
-### P0 — 核心可用（当前状态 ✅）
+### P0 — 核心可用（已全部完成 ✅）
 
 - [x] Supervisor-Worker 多 Agent 编排
 - [x] 3 个 Worker（Search / Analyze / Execute）
-- [x] 40+ 工具注册
+- [x] 45+ 工具注册
 - [x] CLI 入口（`agent-harness run`）
 - [x] OpenAI 兼容 API（`agent-harness serve` → :8788）
 - [x] 熔断器（token/时间/无进展）
@@ -199,15 +199,15 @@ Round 3: "用Python提取关键数据" → code_execute 整理
 - [x] AIGC 视频管线（ComicAgent）
 - [x] MCP 服务器
 
-### P1 — 产品级完善（需要做）
+### P1 — 产品级完善（已完成 ✅）
 
-- [ ] **会话上下文** — messages history 注入，多轮对话不"失忆"
-- [ ] **真正的 SSE 流式** — worker 结果逐步吐给用户
-- [ ] **Open WebUI 集成** — 注册为 custom OpenAI provider
-- [ ] **API 统一** — 整合 :8787/:8788 双端口
-- [ ] **启动脚本集成** — agent-harness 加到一键启动中
+- [x] **会话上下文** — X-Session-Id header，多轮对话保持 history
+- [x] **真正的 SSE 流式** — Worker 进度逐步推送给用户
+- [x] **Open WebUI 集成** — 注册为 custom OpenAI provider（`http://host.docker.internal:8788/v1`）
+- [x] **知识库上传** — 文件 PDF/DOCX/TXT → RAG 向量索引 → Agent 自动检索注入上下文（v0.7.0）
+- [ ] **API 统一** — 单端口 8788 已统一，需验证无残留
 
-### P2 — 体验提升
+### P2 — 体验提升（待做）
 
 - [ ] Worker 执行过程实时展示（类似 Cursor 的"正在思考"）
 - [ ] 用户可中断正在执行的任务
@@ -215,17 +215,27 @@ Round 3: "用Python提取关键数据" → code_execute 整理
 - [ ] 模型选择（本地 vs 云端，快速 vs 深度）
 - [ ] 工具权限管理 UI
 
-### P3 — 扩展
+### P3 — 扩展（待做）
 
 - [ ] 插件系统（第三方工具注册）
 - [ ] 自定义 Worker 模板
 - [ ] 团队协作（多用户 + 会话共享）
-- [ ] 知识库上传（文件 → RAG 索引）
 - [ ] 定时任务（cron 触发 Agent 执行）
+- [ ] 一键启动脚本集成
 
 ---
 
-## 六、Open WebUI 集成方案
+## 八、版本历史
+
+| 版本 | 日期 | 关键变更 |
+|------|------|---------|
+| v0.4.0 | 2026-07 | LangGraph 多 Agent 编排框架 |
+| v0.5.0 | 2026-07 | **产品化** — 会话上下文 (X-Session-Id) + SSE 流式 + Open WebUI 集成 + 品牌「灵枢」 |
+| v0.6.0 | 2026-07 | **质量提升** — Worker 输出修复 + Supervisor 路由优化 + 进度流式 |
+| v0.7.0 | 2026-07 | **知识库系统** — RAG 向量存储 (rag_store.py) + 文件上传 API + Agent 自动检索注入 |
+| v0.8.0 | 进行中 | — |
+
+## 九、Open WebUI 集成方案
 
 ### 连接方式
 
@@ -264,9 +274,9 @@ POST /v1/chat/completions
 
 ---
 
-## 七、开发指南
+## 十、开发指南
 
-### 7.1 项目结构
+### 10.1 项目结构
 
 ```
 agent-harness/
@@ -301,7 +311,7 @@ agent-harness/
     └── run.py                   # CLI 入口
 ```
 
-### 7.2 添加新工具
+### 10.2 添加新工具
 
 ```python
 # 1. 在 tools/ 下新建或编辑模块
@@ -320,7 +330,7 @@ register_tool("my_new_thing", _tool_my_new_thing, {
 from . import my_new_module
 ```
 
-### 7.3 添加新 Worker
+### 10.3 添加新 Worker
 
 ```python
 # 1. agents/supervisor.py → WORKER_CAPABILITIES 添加
@@ -333,7 +343,7 @@ WORKER_CAPABILITIES["my_worker"] = {
 #    只需确保工具已注册到 TOOL_REGISTRY
 ```
 
-### 7.4 开发规范
+### 10.4 开发规范
 
 - **P0-P4 全部完成再测试** — 不要半路测试
 - **每次变更必须更新 CHANGELOG.md** — 版本 + 变更说明

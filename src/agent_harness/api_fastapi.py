@@ -37,26 +37,16 @@ from pydantic import BaseModel
 HOST = os.environ.get("HARNESS_API_HOST", "127.0.0.1")
 PORT = int(os.environ.get("HARNESS_API_PORT", "8788"))
 
-# ─── In-memory session store ───
-_sessions: dict[str, list[dict]] = {}
-_SESSION_TTL = 7200  # 2 hours idle timeout
-
-
-def _clean_expired_sessions():
-    now = time.time()
-    expired = [
-        sid for sid, msgs in list(_sessions.items())
-        if msgs and (now - msgs[-1].get("ts", 0)) > _SESSION_TTL
-    ]
-    for sid in expired:
-        del _sessions[sid]
-
-
-def _get_or_create_session(session_id: str) -> list[dict]:
-    _clean_expired_sessions()
-    if session_id not in _sessions:
-        _sessions[session_id] = []
-    return _sessions[session_id]
+# ─── Session store (persistent) ───
+from .pipeline.session_store import (
+    save_session as _save_session,
+    load_session as _load_session,
+    list_sessions as _list_sessions,
+    delete_session as _delete_session,
+    clean_expired as _clean_expired,
+    init_store as _init_session_store,
+    session_count as _session_count,
+)
 
 
 def _build_history_context(messages: list[dict]) -> str:
@@ -250,9 +240,10 @@ async def _stream_progress(prompt: str, history: str, model: str, session_id: st
             yield _sse_chunk(content)
 
     # Save to session
-    session = _get_or_create_session(session_id)
+    session = _load_session(session_id) or []
     session.append({"role": "user", "content": prompt, "ts": time.time()})
     session.append({"role": "assistant", "content": result_text, "ts": time.time()})
+    _save_session(session_id, session)
 
     yield _sse_done(result_text)
 
@@ -289,7 +280,7 @@ async def health():
         "status": "ok",
         "version": "1.0.0",
         "service": "agent-harness",
-        "active_sessions": len(_sessions),
+        "active_sessions": _session_count(),
     }
 
 
@@ -395,9 +386,10 @@ async def chat_completions(req: ChatRequest, request: Request):
             workers = list(result.get("worker_results", {}).keys())
 
         # Save session
-        session = _get_or_create_session(session_id)
+        session = _load_session(session_id) or []
         session.append({"role": "user", "content": last_user_msg, "ts": time.time()})
         session.append({"role": "assistant", "content": response_text, "ts": time.time()})
+        _save_session(session_id, session)
 
         print(
             "[Harness] [%s] ✅ (%d chars, %d 轮, workers: %s)" % (
@@ -431,18 +423,20 @@ async def chat_completions(req: ChatRequest, request: Request):
 
 @app.get("/v1/sessions")
 async def list_sessions():
-    _clean_expired_sessions()
-    now = time.time()
-    info = []
-    for sid, msgs in _sessions.items():
-        if msgs:
-            info.append({
-                "id": sid[:8],
-                "exchanges": len(msgs) // 2,
-                "last_active": int(now - msgs[-1]["ts"]),
-                "preview": msgs[-1].get("content", "")[:60],
-            })
-    return {"sessions": info, "count": len(info)}
+    """List active sessions (persisted on disk)."""
+    sessions = _list_sessions()
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+@app.delete("/v1/sessions/{session_id}")
+async def delete_session_endpoint(session_id: str):
+    """Delete a specific session."""
+    if _delete_session(session_id):
+        return {"status": "deleted", "session_id": session_id}
+    return JSONResponse(
+        {"error": "Session not found: %s" % session_id},
+        status_code=404,
+    )
 
 
 # ─── Knowledge Base API ───
@@ -543,14 +537,18 @@ async def kb_delete_collection(name: str):
 def main():
     import uvicorn
 
+    # Initialize persistent session store
+    _init_session_store()
+    count = _session_count()
     print("")
     print("  Agent Harness API")
     print("  " + ("-" * 40))
     print("  Endpoint:  http://%s:%d/v1" % (HOST, PORT))
     print("  Models:    lingShu-fast (单 Agent), lingShu-deep (多 Agent)")
     print("             (兼容旧名: agent-harness / agent-harness-multi)")
-    print("  Sessions:  ✓ (X-Session-Id header)")
+    print("  Sessions:  ✓ (disk-persisted, %d active)" % count)
     print("  Streaming: ✓ (SSE progressive)")
+    print("  Knowledge: ✓ (upload / query / manage)")
     print("  Docs:      http://%s:%d/docs" % (HOST, PORT))
     print("  " + ("-" * 40))
     print("")
