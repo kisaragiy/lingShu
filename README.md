@@ -14,22 +14,25 @@
 
 ### 下载即用（推荐）
 
-从 Releases 下载 `lingShu.exe`，双击启动，浏览器自动打开。
+从 Releases 下载 `lingShu.exe`，双击启动，弹出独立窗口。
+
+> 首次启动会自动检测可用端口并启动服务，稍等片刻即可使用。
 
 ### 从源码运行
 
 ```bash
-# 安装
+# 安装（需要 Python 3.11+）
+pip install pywebview  # 独立窗口支持
 pip install git+https://github.com/kisaragiy/lingShu.git
 
-# 启动
-agent-harness serve    # → http://127.0.0.1:8788
+# 启动（独立窗口）
+python scripts/lingShu_launcher.py
 
-# 或直接运行任务
-agent-harness run "用 Python 计算 2 的 10 次方"
+# 或直接启动服务（浏览器访问）
+agent-harness serve
 
 # 构建 .exe
-pip install pyinstaller
+pip install pyinstaller pywebview
 python scripts/build_exe.py
 ```
 

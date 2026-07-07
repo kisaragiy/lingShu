@@ -22,6 +22,7 @@ assert (SRC / "agent_harness").is_dir(), "Run pyinstaller from project root (whe
 
 # ─── Collect all hidden imports ───
 HIDDEN_IMPORTS = [
+    # Agent Harness
     "agent_harness",
     "agent_harness.api_fastapi",
     "agent_harness.graph_multi",
@@ -44,20 +45,35 @@ HIDDEN_IMPORTS = [
     "agent_harness.tools.desktop",
     "agent_harness.tools.comfyui",
     "agent_harness.tools.rag_store",
+    # LangGraph
     "langgraph.graph",
     "langgraph.graph.state",
+    # FastAPI / Uvicorn
     "fastapi",
     "uvicorn",
     "uvicorn.logging",
     "uvicorn.loops.auto",
     "uvicorn.protocols.http.auto",
+    # ChromaDB
     "chromadb",
+    # NumPy
     "numpy",
     "numpy.core._multiarray_umath",
+    # Network
     "requests",
     "urllib3",
+    # Pydantic
     "pydantic",
+    # YAML
     "yaml",
+    # pywebview (native window)
+    "webview",
+    "webview.platforms",
+    "webview.platforms.win32_edge",
+    "webview.platforms.cef",
+    "clr_loader",
+    "clr_loader.netfx",
+    "clr_loader.netcore",
 ]
 
 # ─── Data files (static HTML/CSS/JS) ───
