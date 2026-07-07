@@ -275,9 +275,9 @@ let dashData = {};
 
 function renderDashboard() {
   document.title = '灵枢 — 控制台';
-  dashTab = 'status';
+  dashTab = 'chat';
   renderDashFrame();
-  renderDashStatus();
+  renderDashChat();
 }
 
 function renderDashFrame() {
@@ -293,7 +293,8 @@ function renderDashFrame() {
     </div>
     <div class="container">
       <nav class="dash-nav" id="dash-nav">
-        <a href="#" data-tab="status" class="active" onclick="return switchTab('status')">📊 服务状态</a>
+        <a href="#" data-tab="chat" onclick="return switchTab('chat')">💬 对话</a>
+        <a href="#" data-tab="status" onclick="return switchTab('status')">📊 服务状态</a>
         <a href="#" data-tab="knowledge" onclick="return switchTab('knowledge')">📚 知识库</a>
         <a href="#" data-tab="sessions" onclick="return switchTab('sessions')">💬 会话</a>
         <a href="#" data-tab="settings" onclick="return switchTab('settings')">⚙️ 设置</a>
@@ -306,7 +307,8 @@ function switchTab(tab) {
   dashTab = tab;
   document.querySelectorAll('.dash-nav a').forEach(a => a.classList.remove('active'));
   document.querySelector(`.dash-nav a[data-tab="${tab}"]`).classList.add('active');
-  if (tab === 'status') renderDashStatus();
+  if (tab === 'chat') renderDashChat();
+  else if (tab === 'status') renderDashStatus();
   else if (tab === 'knowledge') renderDashKnowledge();
   else if (tab === 'sessions') renderDashSessions();
   else if (tab === 'settings') renderDashSettings();
@@ -389,6 +391,166 @@ async function cancelTask(sessionId) {
     toast('取消失败: ' + e, 'err');
   }
 }
+
+// ── Chat Tab ──
+let chatSessionId = '';
+let chatAbortController = null;
+let chatHistory = [];
+
+function renderDashChat() {
+  const el = document.getElementById('dash-content');
+  chatSessionId = 'chat-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
+  el.innerHTML = `
+    <div class="card" style="display:flex;flex-direction:column;height:calc(100vh - 200px);padding:0">
+      <div style="padding:16px;border-bottom:1px solid var(--border);font-weight:600">
+        💬 灵枢对话
+        <span class="text-sm text-muted" style="font-weight:400;margin-left:8px" id="chat-session-id">${chatSessionId.slice(0,16)}</span>
+      </div>
+      <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px">
+        <div class="text-center text-muted text-sm" style="padding:40px">输入消息开始与灵枢对话</div>
+      </div>
+      <div id="chat-thinking" class="hidden" style="padding:8px 16px;border-top:1px solid var(--border);background:var(--bg-secondary);font-size:12px;color:var(--text-secondary);max-height:120px;overflow-y:auto"></div>
+      <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px">
+        <input id="chat-input" class="form-input" placeholder="输入消息，按 Enter 发送..." style="flex:1"
+          onkeydown="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); sendChatMessage() }">
+        <button class="btn btn-primary" onclick="sendChatMessage()" id="chat-send-btn">发送</button>
+        <button class="btn btn-danger hidden" onclick="cancelChatMessage()" id="chat-cancel-btn">取消</button>
+      </div>
+    </div>`;
+  // Focus input
+  setTimeout(() => document.getElementById('chat-input').focus(), 100);
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  // Clear placeholder
+  document.querySelector('#chat-messages .text-center')?.remove();
+
+  // Add user message bubble
+  addChatBubble('user', msg);
+  input.value = '';
+  input.disabled = true;
+  document.getElementById('chat-send-btn').classList.add('hidden');
+  document.getElementById('chat-cancel-btn').classList.remove('hidden');
+
+  // Thinking area
+  const thinkingEl = document.getElementById('chat-thinking');
+  thinkingEl.classList.remove('hidden');
+  thinkingEl.innerHTML = '<span class="spinner"></span> 分析中...';
+  let thinkingText = '';
+
+  // Assistant message area
+  const assistantId = 'assistant-' + Date.now();
+  addChatBubble('assistant', '<span class="spinner"></span>', assistantId);
+  const assistantEl = document.getElementById(assistantId);
+
+  // Build messages with history
+  const messages = [...chatHistory, {role: 'user', content: msg}];
+
+  // SSE streaming
+  chatAbortController = new AbortController();
+  try {
+    const resp = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Session-Id': chatSessionId},
+      body: JSON.stringify({model: 'lingShu-deep', messages, stream: true}),
+      signal: chatAbortController.signal,
+    });
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullContent = '';
+    let currentThinking = '';
+
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, {stream: true});
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') continue;
+
+        try {
+          const parsed = JSON.parse(data);
+          const content = parsed.choices?.[0]?.delta?.content || '';
+          if (content) {
+            fullContent += content;
+            // Check if it's thinking progress or final output
+            if (content.startsWith('🤔') || content.startsWith('🔀') || content.startsWith('▶️') || 
+                content.startsWith('✅') || content.startsWith('  ✅') || content.startsWith('  ❌') || 
+                content.startsWith('🧠') || content.startsWith('⚡') || content.startsWith('📚')) {
+              currentThinking += content;
+              thinkingEl.innerHTML = currentThinking.replace(/\n/g, '<br>');
+              thinkingEl.scrollTop = thinkingEl.scrollHeight;
+            } else {
+              // It's actual response content
+              if (assistantEl) assistantEl.innerHTML = fullContent.replace(/\n/g, '<br>');
+            }
+          }
+        } catch(e) {}
+      }
+    }
+
+    // Finalize
+    chatHistory = messages;
+    chatHistory.push({role: 'assistant', content: fullContent});
+    if (assistantEl) assistantEl.innerHTML = fullContent.replace(/\n/g, '<br>');
+    thinkingEl.classList.add('hidden');
+
+  } catch(e) {
+    if (e.name === 'AbortError') {
+      addChatBubble('assistant', '⛔ 任务已取消', null, true);
+    } else {
+      addChatBubble('assistant', '❌ 错误: ' + e.message, null, true);
+    }
+  }
+
+  // Re-enable input
+  input.disabled = false;
+  input.focus();
+  document.getElementById('chat-send-btn').classList.remove('hidden');
+  document.getElementById('chat-cancel-btn').classList.add('hidden');
+  document.getElementById('chat-thinking').classList.add('hidden');
+  chatAbortController = null;
+
+  // Scroll to bottom
+  const msgContainer = document.getElementById('chat-messages');
+  msgContainer.scrollTop = msgContainer.scrollHeight;
+}
+
+function cancelChatMessage() {
+  if (chatAbortController) {
+    chatAbortController.abort();
+    // Also hit the cancel API
+    fetch('/v1/tasks/' + chatSessionId + '/cancel', {method: 'POST'}).catch(()=>{});
+  }
+}
+
+function addChatBubble(role, content, id, isSystem) {
+  const container = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.id = id || '';
+  div.style.cssText = `
+    max-width:80%; padding:10px 14px; border-radius:10px; font-size:13px; line-height:1.5;
+    ${role === 'user'
+      ? 'align-self:flex-end; background:var(--accent); color:#fff;'
+      : isSystem
+        ? 'align-self:center; background:var(--bg-hover); color:var(--text-secondary); text-align:center; font-size:12px;'
+        : 'align-self:flex-start; background:var(--bg-card); border:1px solid var(--border);'}`;
+  div.innerHTML = content.replace(/\n/g, '<br>');
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
 
 // ── Knowledge Tab ──
 async function renderDashKnowledge() {
