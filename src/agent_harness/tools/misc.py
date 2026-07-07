@@ -68,15 +68,28 @@ def _tool_summarize(text: str, max_output: int = 500) -> str:
 
 
 def _tool_code_execute(code: str) -> str:
+    """执行 Python 代码并返回输出"""
+    import io
+    import sys as _sys
+    import traceback as _tb
+
+    # Capture stdout
+    old_stdout = _sys.stdout
+    redirected = io.StringIO()
+    _sys.stdout = redirected
+
     try:
-        import sys
-        skills_dir = os.path.join(os.path.dirname(HARNESS_DIR), "skills")
-        if skills_dir not in sys.path:
-            sys.path.insert(0, skills_dir)
-        from code_executor import run_python
-        return run_python(code)
+        # Compile and exec
+        compiled = compile(code, '<exec>', 'exec')
+        exec(compiled, {})
+        output = redirected.getvalue()
+        if not output:
+            return "[code_execute] 代码执行完成（无输出）"
+        return output.strip()
     except Exception as e:
-        return f"[代码执行失败] {e}"
+        return "[code_execute] 执行失败: %s\n%s" % (e, _tb.format_exc()[:200])
+    finally:
+        _sys.stdout = old_stdout
 
 
 def _tool_github_issues(repo: str = "", state: str = "open", limit: int = 10) -> str:

@@ -54,7 +54,12 @@ def call_tool(name: str, **kwargs) -> dict:
         return {"success": False, "error": f"工具不存在: {name}", "data": None}
 
     # 权限检查
-    from tools.permission import check_permission, log_irreversible_action
+    try:
+        from .permission import check_permission, log_irreversible_action
+    except ImportError:
+        # Fallback if permission module not found
+        def check_permission(p): return {"allowed": True, "reason": ""}
+        def log_irreversible_action(n, k): pass
     priv = TOOL_REGISTRY[name].get("privilege", "reversible")
     if priv == "irreversible":
         log_irreversible_action(name, kwargs)

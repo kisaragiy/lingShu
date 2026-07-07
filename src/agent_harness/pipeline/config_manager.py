@@ -116,7 +116,7 @@ def find_comfyui() -> Optional[str]:
 def check_port(port: int, host: str = "127.0.0.1") -> bool:
     """Check if a port is listening."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(2)
+    s.settimeout(1)
     try:
         s.connect((host, port))
         s.close()
@@ -247,10 +247,23 @@ def test_llm_connection(endpoint: str, model: str = "", api_key: str = "") -> di
 
 def full_env_check() -> dict:
     """Run all environment checks in one call."""
-    return {
-        "llm_backends": check_llm_backend(),
-        "services": check_services(),
-        "paths": check_paths(),
-        "python_version": sys.version,
-        "platform": sys.platform,
-    }
+    import concurrent.futures
+
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {
+            "llm_backends": pool.submit(check_llm_backend),
+            "services": pool.submit(check_services),
+            "paths": pool.submit(check_paths),
+        }
+        for name, future in futures.items():
+            try:
+                results[name] = future.result(timeout=8)
+            except concurrent.futures.TimeoutError:
+                results[name] = {"error": "timeout"}
+            except Exception as e:
+                results[name] = {"error": str(e)}
+
+    results["python_version"] = sys.version
+    results["platform"] = sys.platform
+    return results

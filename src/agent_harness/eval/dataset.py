@@ -24,7 +24,7 @@ EVAL_DATASET = [
     {
         "id": "eval-002",
         "request": "计算 (123 + 456) * 789 的结果",
-        "expected_keywords": ["456", "或", "计算"],
+        "expected_keywords": ["456831", "456", "计算"],
         "expected_tool_used": "code_execute",
         "category": "analyze",
         "weight": 1,
@@ -87,7 +87,7 @@ EVAL_DATASET = [
     {
         "id": "eval-009",
         "request": "列出 5 个常用的 Python 标准库，并简要说明每个的用途",
-        "expected_keywords": ["os", "sys", "json", "datetime", "re"],
+        "expected_keywords": ["os", "sys", "json", "re", "datetime", "collections"],
         "expected_tool_used": "think",
         "category": "analyze",
         "weight": 1,

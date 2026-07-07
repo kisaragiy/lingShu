@@ -5,6 +5,7 @@ Workers are designed to be called in parallel by the supervisor.
 """
 
 import json
+import re
 import time
 from typing import Literal, Any
 from langgraph.graph import StateGraph, END
@@ -107,6 +108,46 @@ def _worker_planner(state: WorkerState) -> dict:
     }
 
 
+# ─── Auto-routing helpers ───
+
+_MATH_PATTERN = re.compile(
+    r'(计算[式:：]?|^算[一下]?|求值|等于多少|加减乘除|'
+    r'\d+\s*[+\-*/]\s*\d+)',
+    re.IGNORECASE,
+)
+
+
+def _is_math_task(task: str) -> bool:
+    """Detect if a task involves math calculation."""
+    return bool(_MATH_PATTERN.search(task))
+
+
+def _extract_for_code(task: str) -> str:
+    """Extract a Python expression from a math task, stripping surrounding text."""
+    # Remove common Chinese prefixes
+    for prefix in ['计算', '算一下', '求值', '等于多少', '的结果', '告诉我', '用Python', '用 python']:
+        task = task.replace(prefix, '')
+    task = task.strip().strip('，。,:：；;')
+    # Find the math expression: from a digit or paren, ending at digit or paren
+    m = re.search(r'[\d(][\d+\-*/().%\s]*[\d)]', task)
+    if m:
+        expr = m.group().strip()
+        # Remove trailing Chinese chars
+        expr = re.sub(r'[^\d+\-*/().%\s]+$', '', expr).strip()
+        # Fix unmatched parentheses
+        if expr.count('(') > expr.count(')'):
+            expr += ')' * (expr.count('(') - expr.count(')'))
+        return f'print({expr})'
+    # Fallback: wrap whole task as string
+    return f'print("{task}")'
+
+
+def _is_search_task(task: str) -> bool:
+    """Detect if a task involves searching."""
+    search_keywords = ['搜索', '查', '查找', '找', '搜', '查询', 'search', 'find', 'look up']
+    return any(kw in task.lower() for kw in search_keywords)
+
+
 # ─── Worker executor node ───
 
 def _worker_executor(state: WorkerState) -> dict:
@@ -120,12 +161,36 @@ def _worker_executor(state: WorkerState) -> dict:
     step = plan[step_idx]
     tool_name = step.get("tool", "think")
     args = step.get("args", {})
+    worker_name = state.get("worker_name", "")
+
+    # Auto-route: force tool usage based on task type
+    task = state.get("task", "")
+    if tool_name == "think" and _is_math_task(task) and "code_execute" in state.get("available_tools", []):
+        tool_name = "code_execute"
+        code = _extract_for_code(task)
+        args = {"code": code}
+        print(f"  [Auto-route] {worker_name}: think→code_execute ({code})")
+
+    if tool_name == "think" and _is_search_task(task) and "search" in state.get("available_tools", []):
+        tool_name = "search"
+        args = {"query": task}
+        print(f"  [Auto-route] {worker_name}: think→search ({task[:40]})")
 
     t0 = time.time()
     try:
         result = call_tool(tool_name, **args)
     except Exception as e:
         result = {"success": False, "error": str(e), "data": None}
+
+    # If auto-routed tool failed, fall back to think
+    if not result.get("success") and tool_name != "think":
+        print(f"  [Auto-route] {worker_name}: {tool_name} failed, fallback to think")
+        tool_name = "think"
+        args = {"prompt": task}
+        try:
+            result = call_tool(tool_name, **args)
+        except Exception as e2:
+            result = {"success": False, "error": str(e2), "data": None}
 
     elapsed = time.time() - t0
     validation = validate_result(tool_name, result)
