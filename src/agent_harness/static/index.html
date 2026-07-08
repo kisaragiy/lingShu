@@ -26,21 +26,48 @@
 <div id="toast" class="toast"></div>
 
 <script>
-// ─── API helper ───
+// ─── API helper (with auth) ───
+function _apiHeaders() {
+  const h = {'Content-Type': 'application/json'};
+  if (window.__API_TOKEN__) h['X-API-Key'] = window.__API_TOKEN__;
+  return h;
+}
+function _apiGetHeaders() {
+  const h = {};
+  if (window.__API_TOKEN__) h['X-API-Key'] = window.__API_TOKEN__;
+  return h;
+}
 const API = {
   async get(path) {
-    const r = await fetch(path); const d = await r.json(); return d;
+    const r = await fetch(path, {headers: _apiGetHeaders()});
+    const d = await r.json(); return d;
   },
   async post(path, body) {
     const r = await fetch(path, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
+      method: 'POST', headers: _apiHeaders(),
       body: JSON.stringify(body),
     }); return await r.json();
   },
   async upload(path, formData) {
-    const r = await fetch(path, { method: 'POST', body: formData });
+    const r = await fetch(path, { method: 'POST', body: formData, headers: _apiGetHeaders() });
     return await r.json();
   },
+};
+
+// ─── Auto-attach API token to all /v1/* fetch calls ───
+const _origFetch = window.fetch;
+window.fetch = function(url, opts) {
+  opts = opts || {};
+  const urlStr = (typeof url === 'string') ? url : url.url;
+  if (urlStr && urlStr.startsWith('/v1/') && window.__API_TOKEN__) {
+    opts.headers = opts.headers || {};
+    if (opts.headers instanceof Headers) {
+      if (!opts.headers.has('X-API-Key')) opts.headers.set('X-API-Key', window.__API_TOKEN__);
+    } else if (!opts.headers['X-API-Key']) {
+      opts.headers['X-API-Key'] = window.__API_TOKEN__;
+    }
+  }
+  return _origFetch.call(window, url, opts);
 };
 
 // ─── Toast ───

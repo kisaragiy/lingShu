@@ -68,28 +68,115 @@ def _tool_summarize(text: str, max_output: int = 500) -> str:
 
 
 def _tool_code_execute(code: str) -> str:
-    """执行 Python 代码并返回输出"""
+    """执行 Python 代码并返回输出（沙箱模式：限定安全模块和 builtins）"""
     import io
     import sys as _sys
     import traceback as _tb
+    import signal as _sig
+
+    # ─── Restricted builtins ───
+    _SAFE_BUILTINS = {
+        'abs': abs, 'all': all, 'any': any, 'ascii': ascii, 'bin': bin,
+        'bool': bool, 'bytearray': bytearray, 'bytes': bytes, 'callable': callable,
+        'chr': chr, 'complex': complex, 'dict': dict, 'dir': dir, 'divmod': divmod,
+        'enumerate': enumerate, 'filter': filter, 'float': float, 'format': format,
+        'frozenset': frozenset, 'getattr': getattr, 'hasattr': hasattr,
+        'hash': hash, 'hex': hex, 'id': id, 'int': int, 'isinstance': isinstance,
+        'issubclass': issubclass, 'iter': iter, 'len': len, 'list': list,
+        'map': map, 'max': max, 'min': min, 'next': next, 'object': object,
+        'oct': oct, 'ord': ord, 'pow': pow, 'print': print, 'range': range,
+        'repr': repr, 'reversed': reversed, 'round': round, 'set': set,
+        'slice': slice, 'sorted': sorted, 'str': str, 'sum': sum,
+        'tuple': tuple, 'type': type, 'zip': zip,
+        'True': True, 'False': False, 'None': None,
+    }
+
+    # ─── Safe module whitelist (only these can be imported) ───
+    _SAFE_MODULES = {
+        'math', 'statistics', 'random', 'json', 'csv', 're', 'string',
+        'collections', 'itertools', 'functools', 'datetime', 'time',
+        'decimal', 'fractions', 'typing', 'dataclasses',
+        'hashlib', 'base64', 'uuid', 'bisect', 'heapq',
+        'textwrap', 'pprint', 'enum',
+    }
+
+    class _SafeImporter:
+        """Custom import hook that only allows whitelisted modules."""
+        def __init__(self, whitelist):
+            self._whitelist = whitelist
+        def find_spec(self, fullname, path, target=None):
+            base = fullname.split('.')[0]
+            if base in self._whitelist:
+                return None  # Use default import
+            raise ImportError("模块 '%s' 不在安全沙箱白名单中。只允许: %s" %
+                              (fullname, ', '.join(sorted(self._whitelist))))
+
+    # ─── Pre-scan for dangerous patterns ───
+    _DANGEROUS_KEYWORDS = [
+        '__import__', '__builtins__', '__subclass', '__base__',
+        '__mro__', '__globals__', '__code__', '__closure__',
+        'os.system', 'os.popen', 'subprocess', 'shutil',
+        'ctypes', 'socket', 'win32api', 'multiprocessing',
+        'threading', '_thread', 'importlib',
+    ]
+    for kw in _DANGEROUS_KEYWORDS:
+        if kw in code:
+            return "[code_execute] ⚠️ 安全沙箱拒绝: 代码包含危险关键字 '%s'" % kw
 
     # Capture stdout
     old_stdout = _sys.stdout
     redirected = io.StringIO()
     _sys.stdout = redirected
 
+    # ─── Timeout (30s max) ───
+    def _timeout_handler(signum, frame):
+        raise TimeoutError("代码执行超时（30s）")
+
     try:
-        # Compile and exec
-        compiled = compile(code, '<exec>', 'exec')
-        exec(compiled, {})
+        compiled = compile(code.strip(), '<exec>', 'exec')
+
+        # Set timeout on Windows
+        old_alarm = None
+        if hasattr(_sig, 'SIGALRM'):
+            _sig.signal(_sig.SIGALRM, _timeout_handler)
+            _sig.alarm(30)
+
+        # Install safe importer
+        safe_importer = _SafeImporter(_SAFE_MODULES)
+        if 'sys' in _sys.modules:
+            orig_meta_path = list(_sys.meta_path)
+        _sys.meta_path.insert(0, safe_importer)
+
+        safe_globals = {
+            '__builtins__': _SAFE_BUILTINS,
+            '__name__': '__sandbox__',
+        }
+
+        exec(compiled, safe_globals)
+
+        # Clear alarm
+        if hasattr(_sig, 'SIGALRM'):
+            _sig.alarm(0)
+
         output = redirected.getvalue()
         if not output:
             return "[code_execute] 代码执行完成（无输出）"
         return output.strip()
+
+    except TimeoutError:
+        return "[code_execute] ⚠️ 代码执行超时（30s）"
     except Exception as e:
         return "[code_execute] 执行失败: %s\n%s" % (e, _tb.format_exc()[:200])
     finally:
         _sys.stdout = old_stdout
+        # Restore original meta path
+        if 'orig_meta_path' in dir():
+            _sys.meta_path = orig_meta_path
+        if hasattr(_sig, 'SIGALRM'):
+            try:
+                _sig.alarm(0)
+            except (ValueError, OSError):
+                pass
 
 
 def _tool_github_issues(repo: str = "", state: str = "open", limit: int = 10) -> str:
@@ -202,9 +289,9 @@ register_tool("think", _tool_think, {
     "properties": {"prompt": "string"},
 }, privilege="read-only")
 register_tool("code_execute", _tool_code_execute, {
-    "description": "执行 Python 代码",
+    "description": "执行 Python 代码（沙箱模式）",
     "properties": {"code": "string"},
-}, privilege="reversible")
+}, privilege="irreversible")
 register_tool("github_issues", _tool_github_issues, {
     "description": "列出或检查 GitHub Issues",
     "properties": {"repo": "string", "state": "string", "limit": "integer"},

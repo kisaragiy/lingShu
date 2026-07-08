@@ -36,8 +36,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 
+from .api_security import (
+    load_or_generate_token,
+    reset_token as _reset_token,
+    validate_token,
+    audit_config as _audit_config,
+    log_audit as _log_audit,
+)
+
 HOST = os.environ.get("HARNESS_API_HOST", "127.0.0.1")
 PORT = int(os.environ.get("HARNESS_API_PORT", "8788"))
+
+# ─── API Token (auto-generated on first boot) ───
+_API_TOKEN: str = load_or_generate_token()
+
+# ─── Auth exempt paths (no token required) ───
+_AUTH_EXEMPT_PREFIXES = ("/health",)
+_AUTH_EXEMPT_EXACT = ("/", "/setup", "/dashboard")
 
 # ─── Token optimization: conversation window ───
 # 分析结论：80% 请求 ≤2轮，95% ≤4轮，99%+ ≤6轮
@@ -286,13 +301,93 @@ app = FastAPI(
     title="Agent Harness API",
     version="1.0.0",
     description="OpenAI-compatible API for Agent Harness — single & multi-agent modes",
+    # /docs disabled by default — set HARNESS_ENABLE_DOCS=1 to enable
+    openapi_url=("/openapi.json" if os.environ.get("HARNESS_ENABLE_DOCS") else None),
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://127.0.0.1:%d" % PORT,
+        "http://localhost:%d" % PORT,
+        "http://%s:%d" % (HOST, PORT),
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─── API Auth Middleware ───
+
+
+@app.middleware("http")
+async def _api_auth_middleware(request: Request, call_next):
+    """Check API token on all /v1/* endpoints.
+
+    Accepts token via:
+      - X-API-Key header
+      - Authorization: Bearer <token> header
+      - api_token query parameter
+    Frontend endpoints (/, /setup, /dashboard, /health, static files) are exempt.
+    """
+    path = request.url.path
+
+    # Check if path is exempt
+    if any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES):
+        return await call_next(request)
+    if path in _AUTH_EXEMPT_EXACT:
+        return await call_next(request)
+    if path.startswith("/static/"):
+        return await call_next(request)
+
+    # Only protect /v1/ paths
+    if not path.startswith("/v1/"):
+        return await call_next(request)
+
+    # Extract token from request
+    token = request.headers.get("x-api-key", "")
+    if not token:
+        auth = request.headers.get("authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+    if not token:
+        token = request.query_params.get("api_token", "")
+
+    if not validate_token(token, _API_TOKEN):
+        # Return 401 (not 403) — auth is missing, not forbidden
+        return JSONResponse(
+            {"error": "API token required. Set X-API-Key header or pass ?api_token="},
+            status_code=401,
+        )
+
+    return await call_next(request)
+
+# ─── Security Headers Middleware (CSP + HSTS) ───
+
+
+@app.middleware("http")
+async def _security_headers_middleware(request: Request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    # Content-Security-Policy: allow scripts/styles from self
+    # 'unsafe-inline' needed for inline event handlers + token injection
+    csp = (
+        "default-src 'self';"
+        "script-src 'self' 'unsafe-inline' https://api.github.com;"
+        "style-src 'self' 'unsafe-inline';"
+        "img-src 'self' data: https:;"
+        "font-src 'self';"
+        "connect-src 'self' https://api.github.com;"
+        "frame-ancestors 'none';"
+        "base-uri 'self';"
+        "form-action 'self'"
+    )
+    response.headers["Content-Security-Policy"] = csp
+    return response
+
 
 # ─── Static files (灵枢 frontend) ───
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -306,7 +401,16 @@ if STATIC_DIR.exists():
 async def serve_frontend():
     index = STATIC_DIR / "index.html"
     if index.exists():
-        return FileResponse(str(index))
+        html = index.read_text("utf-8")
+        # Inject API token into the page for frontend JS
+        import re
+        token_script = '<script>window.__API_TOKEN__="%s";</script>' % _API_TOKEN
+        # Inject before closing </head> or <meta charset
+        if "</head>" in html:
+            html = html.replace("</head>", token_script + "</head>")
+        else:
+            html = html.replace("<head>", "<head>" + token_script)
+        return HTMLResponse(html)
     return JSONResponse({"message": "灵枢 API 运行中", "docs": "/docs"}, status_code=200)
 
 
@@ -566,6 +670,20 @@ async def list_tools():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# ─── Path traversal sanitizer ───
+
+
+def _safe_path_param(value: str) -> str:
+    """Sanitize path parameters — reject '..' and slashes."""
+    if not value or value.strip() in ("", ".", ".."):
+        raise ValueError("Invalid path parameter: empty or dot")
+    if ".." in value:
+        raise ValueError("Path traversal detected: '..' not allowed")
+    if "/" in value or "\\" in value:
+        raise ValueError("Path traversal detected: slashes not allowed")
+    return value.strip()
+
+
 # ─── Report API ───
 
 
@@ -603,6 +721,12 @@ async def get_report(report_id: str):
     """
     from .pipeline.report_store import REPORTS_DIR as _RD
 
+    # Path traversal safeguard
+    try:
+        _safe_path_param(report_id)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
     # Try finding the file directly
     for ext in [".html", ".md"]:
         path = _RD / ("%s%s" % (report_id, ext))
@@ -625,6 +749,12 @@ async def get_report(report_id: str):
 @app.delete("/v1/reports/{report_id}")
 async def delete_report(report_id: str):
     """Delete a report."""
+    # Path traversal safeguard
+    try:
+        _safe_path_param(report_id)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
     if _get_rs().delete_report(report_id):
         return {"status": "deleted"}
     return JSONResponse({"error": "Report not found"}, status_code=404)
@@ -678,6 +808,12 @@ async def list_sessions():
 @app.delete("/v1/sessions/{session_id}")
 async def delete_session_endpoint(session_id: str):
     """Delete a specific session."""
+    # Path traversal safeguard
+    try:
+        _safe_path_param(session_id)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
     if _delete_session(session_id):
         return {"status": "deleted", "session_id": session_id}
     return JSONResponse(
@@ -689,6 +825,12 @@ async def delete_session_endpoint(session_id: str):
 @app.get("/v1/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str):
     """Get full message history for a session."""
+    # Path traversal safeguard
+    try:
+        _safe_path_param(session_id)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
     msgs = _load_session(session_id)
     if msgs is None:
         return JSONResponse({"error": "Session not found"}, status_code=404)
@@ -818,6 +960,30 @@ async def kb_delete_collection(name: str):
     )
 
 
+# ─── Auth Management API ───
+
+
+@app.get("/v1/auth/token")
+async def get_current_token():
+    """Get current API token (masked for security)."""
+    return {
+        "token": _API_TOKEN,
+        "hint": "Set X-API-Key: <token> header on all /v1/* requests",
+    }
+
+
+@app.post("/v1/auth/reset")
+async def regenerate_token():
+    """Regenerate API token. All existing sessions using the old token are invalidated."""
+    global _API_TOKEN
+    _API_TOKEN = _reset_token()
+    return {
+        "token": _API_TOKEN,
+        "status": "regenerated",
+        "warning": "所有使用旧 token 的客户端需要更新",
+    }
+
+
 # ─── Direct entry point ───
 
 
@@ -832,8 +998,18 @@ def main():
     print("  " + ("-" * 40))
     print("  API:       http://%s:%d/v1" % (HOST, PORT))
     print("  Frontend:  http://%s:%d" % (HOST, PORT))
-    print("  Docs:      http://%s:%d/docs" % (HOST, PORT))
+    print("  Token:     %s...%s" % (_API_TOKEN[:8], _API_TOKEN[-4:]))
     print("  " + ("-" * 40))
+    print("")
+
+    # Print config warnings
+    try:
+        from .config import print_config_warnings
+        print_config_warnings()
+    except ImportError:
+        pass
+    if count:
+        print("  会话: %d 个" % count)
     print("")
 
     uvicorn.run(

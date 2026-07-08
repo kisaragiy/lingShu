@@ -49,20 +49,34 @@ def _capture_error_screenshot(tool_name: str, kwargs: dict, error: str):
 # ─── 工具调用（含参数别名规范化）───
 
 def call_tool(name: str, **kwargs) -> dict:
-    """调用已注册工具的通用入口，带参数别名规范化"""
+    """调用已注册工具的通用入口，带参数别名规范化和权限检查"""
     if name not in TOOL_REGISTRY:
         return {"success": False, "error": f"工具不存在: {name}", "data": None}
 
     # 权限检查
     try:
-        from .permission import check_permission, log_irreversible_action
+        from .permission import check_permission, log_audit
     except ImportError:
         # Fallback if permission module not found
-        def check_permission(p): return {"allowed": True, "reason": ""}
-        def log_irreversible_action(n, k): pass
+        def check_permission(p, source="harness", auto_confirm=True): return True
+        def log_audit(n, s, k, result="", duration_ms=0): pass
+
     priv = TOOL_REGISTRY[name].get("privilege", "reversible")
+
+    # 严格模式：source="api" 时 irreversible 工具需要显式确认
+    source = kwargs.pop("_source", "harness")
+    auto_confirm = kwargs.pop("_auto_confirm", True)
+    if not check_permission(name, source=source, auto_confirm=auto_confirm):
+        return {
+            "success": False,
+            "error": f"[权限拒绝] 工具 '{name}' 不可逆，需要用户确认。"
+                     f"请通过前端确认弹窗后再调用。",
+            "data": None,
+        }
+
+    # 记录 irreversible 审计日志
     if priv == "irreversible":
-        log_irreversible_action(name, kwargs)
+        log_audit(name, source, kwargs)
 
     # planner 有时用 text/content 代替 schema 定义的参数名
     if name == "think" and "prompt" not in kwargs:
