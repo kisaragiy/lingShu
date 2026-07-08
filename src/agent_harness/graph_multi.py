@@ -184,7 +184,12 @@ def supervisor_finalize(state: SupervisorState) -> dict:
     from .agents.supervisor import _call_llm
     system = (
         "你是最终回复生成器。根据所有 Worker 的结果，给用户一个完整、准确的回复。\n"
-        "引用具体数据，用中文。"
+        "引用具体数据和来源，用中文。\n"
+        "规则:\n"
+        "1. 如果引用了搜索结果中的信息，请在引用处标注 [来源 N]（N 从 1 开始编号）\n"
+        "2. 在回复末尾列出「📎 参考来源」小节，包含所有引用过的 URL\n"
+        "3. 来源标注格式: [来源 1], [来源 2], ... 每个来源对应一个 URL\n"
+        "4. 搜索结果中的 URL 通常出现在方括号末尾，如 [...]"
     )
     final = _call_llm(
         [{"role": "user", "content": f"用户请求: {state['request']}\n\nWorker 结果:\n{combined}"}],

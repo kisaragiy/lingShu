@@ -410,6 +410,9 @@ function renderDashboard() {
           </button>
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
+        <div class="sidebar-footer" id="sidebar-footer">
+          <span class="sidebar-version">v0.13.0</span>
+        </div>
       </div>
 
       <!-- Main content -->
@@ -546,12 +549,16 @@ function renderDashChat() {
   el.innerHTML = `
     <div class="chat-card">
       <div class="chat-messages" id="chat-messages">
-        <div class="text-center text-muted text-sm" style="padding:40px">加载中...</div>
+        <div class="chat-empty">
+          <div class="chat-empty-icon">⚡</div>
+          <div class="chat-empty-text">灵枢 — AI 调研助手</div>
+          <div class="chat-empty-hint">输入关键词开始调研，或上传文档到知识库</div>
+        </div>
       </div>
       <div id="chat-thinking" class="chat-thinking hidden"></div>
       <div class="chat-input-bar">
-        <input id="chat-input" class="form-input" placeholder="输入消息，按 Enter 发送..."
-          onkeydown="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); sendChatMessage() }">
+        <input id="chat-input" class="form-input" placeholder="输入消息，Enter 发送 / Ctrl+Enter 换行..."
+          onkeydown="if(event.key==='Enter' && !event.shiftKey && !event.ctrlKey) { event.preventDefault(); sendChatMessage() } else if(event.key==='Escape') { cancelChatMessage() }">
         <button class="btn btn-primary" onclick="sendChatMessage()" id="chat-send-btn">发送</button>
         <button class="btn btn-danger hidden" onclick="cancelChatMessage()" id="chat-cancel-btn">取消</button>
       </div>

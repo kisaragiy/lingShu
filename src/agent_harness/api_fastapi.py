@@ -650,11 +650,12 @@ async def formalize_report(request: Request):
     content = body.get("content", "")
     tags = body.get("tags", [])
     source_session = body.get("source_session", "")
+    sources = body.get("sources", [])  # [{url, title}, ...]
 
     from .pipeline import report_formatter
 
-    # Generate HTML report
-    html = report_formatter.generate_report_html(title, content)
+    # Generate HTML report with sources
+    html = report_formatter.generate_report_html(title, content, sources=sources)
 
     # Save as formal report
     meta = report_formatter.save_formal_report(

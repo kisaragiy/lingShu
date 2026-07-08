@@ -154,6 +154,37 @@ body {
 .sidebar-list::-webkit-scrollbar { width: 4px; }
 .sidebar-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+.sidebar-footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+.sidebar-version {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+/* ── Chat empty state ── */
+.chat-empty {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+}
+.chat-empty-icon {
+  font-size: 48px; margin-bottom: 16px;
+  opacity: 0.4;
+}
+.chat-empty-text {
+  font-size: 18px; font-weight: 600;
+  color: var(--text-primary); margin-bottom: 8px;
+}
+.chat-empty-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 /* ── Session items ── */
 .session-item {
   display: flex; flex-direction: column;

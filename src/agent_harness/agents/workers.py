@@ -384,12 +384,15 @@ def build_worker(worker_name: str) -> StateGraph:
 
 # ─── Run a single worker ───
 
-def run_worker(worker_name: str, task: str) -> WorkerResult:
+def run_worker(worker_name: str, task: str, max_retries: int = 3) -> WorkerResult:
     """Run a worker agent synchronously and return its result.
+
+    Auto-retries on failure with exponential backoff (2s, 4s, 8s).
 
     Args:
         worker_name: One of "search", "analyze", "execute"
         task: The specific sub-task description
+        max_retries: Max retry attempts (0 = no retry)
 
     Returns:
         WorkerResult dict with output, traces, errors
@@ -397,38 +400,74 @@ def run_worker(worker_name: str, task: str) -> WorkerResult:
     t0 = time.time()
     tools = WORKER_CAPABILITIES.get(worker_name, {}).get("tools", [])
 
-    try:
-        worker = build_worker(worker_name)
-        initial_state: WorkerState = {
-            "worker_name": worker_name,
-            "task": task,
-            "available_tools": tools,
-            "plan": [],
-            "current_step": 0,
-            "results": [],
-            "errors": [],
-            "retry_count": 0,
-            "final_output": "",
-            "trace_steps": [],
-        }
-        final = worker.invoke(initial_state, config={"recursion_limit": 50})
+    last_error = ""
+    for attempt in range(1 + max_retries):
+        if attempt > 0:
+            wait = 2 ** attempt  # 2s, 4s, 8s
+            print(f"  [Retry] {worker_name} 第 {attempt}/{max_retries} 次重试 (等待 {wait}s)...")
+            time.sleep(wait)
 
-        return WorkerResult(
-            worker_name=worker_name,
-            success=True,
-            output=final.get("final_output", ""),
-            data=final.get("results", []),
-            trace_steps=final.get("trace_steps", []),
-            errors=final.get("errors", []),
-            elapsed_s=round(time.time() - t0, 2),
-        )
-    except Exception as e:
-        return WorkerResult(
-            worker_name=worker_name,
-            success=False,
-            output="",
-            data=None,
-            trace_steps=[],
-            errors=[str(e)],
-            elapsed_s=round(time.time() - t0, 2),
-        )
+        try:
+            worker = build_worker(worker_name)
+            initial_state: WorkerState = {
+                "worker_name": worker_name,
+                "task": task,
+                "available_tools": tools,
+                "plan": [],
+                "current_step": 0,
+                "results": [],
+                "errors": [],
+                "retry_count": 0,
+                "final_output": "",
+                "trace_steps": [],
+            }
+            final = worker.invoke(initial_state, config={"recursion_limit": 50})
+
+            result = WorkerResult(
+                worker_name=worker_name,
+                success=True,
+                output=final.get("final_output", ""),
+                data=final.get("results", []),
+                trace_steps=final.get("trace_steps", []),
+                errors=final.get("errors", []),
+                elapsed_s=round(time.time() - t0, 2),
+            )
+
+            # Check if result is meaningful — empty output counts as failure
+            output = result.get("output", "").strip()
+            if output and len(output) >= 5:
+                return result
+
+            last_error = f"输出为空 (attempt {attempt + 1})"
+            print(f"  [Retry] {worker_name}: {last_error}")
+            if attempt < max_retries:
+                continue  # retry with backoff
+            # After all retries exhausted, return as failed
+            result["success"] = False
+            result["errors"] = result.get("errors", []) + [last_error]
+            return result
+
+        except Exception as e:
+            last_error = str(e)
+            print(f"  [Retry] {worker_name} 异常: {e}")
+            if attempt >= max_retries:
+                return WorkerResult(
+                    worker_name=worker_name,
+                    success=False,
+                    output="",
+                    data=None,
+                    trace_steps=[],
+                    errors=[str(e)],
+                    elapsed_s=round(time.time() - t0, 2),
+                )
+
+    # Fallback (shouldn't reach here)
+    return WorkerResult(
+        worker_name=worker_name,
+        success=False,
+        output="",
+        data=None,
+        trace_steps=[],
+        errors=[last_error],
+        elapsed_s=round(time.time() - t0, 2),
+    )

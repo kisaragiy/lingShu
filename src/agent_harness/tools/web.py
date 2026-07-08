@@ -10,9 +10,14 @@ _SEARCH_CACHE_TTL = 300  # 5 分钟
 
 
 def _tool_search(query: str, max_results: int = 5) -> list:
-    """搜索 — 优先 SearXNG，降级 DuckDuckGo，再降级 Bing skill（5 分钟内存缓存）"""
+    """搜索 — 优先 SearXNG，降级 DuckDuckGo，再降级 search_tool skill（5 分钟内存缓存）
+
+    返回格式: ["title: snippet [url]", ...]
+    搜索失败时返回 ["[搜索失败] 原因"] 以便 validate_result 识别。
+    """
     import time as _time
     import re as _re
+    import sys
 
     # 缓存命中
     now = _time.time()
@@ -86,7 +91,7 @@ def _tool_search(query: str, max_results: int = 5) -> list:
 
     # 兜底
     if not results:
-        results = ["[搜索不可用] 请检查 SearXNG 或网络连接"]
+        results = ["[搜索失败] 所有搜索引擎不可用，请检查 SearXNG 或网络连接"]
 
     # 写入缓存
     _SEARCH_CACHE[cache_key] = (_time.time(), results)

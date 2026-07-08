@@ -122,6 +122,31 @@ def stop_server():
         _server.should_exit = True
 
 
+# ─── Window config persistence ───
+
+WINDOW_CONFIG_FILE = APP_DIR / "window_config.json"
+
+
+def _load_window_config() -> dict:
+    """Load saved window position/size."""
+    try:
+        if WINDOW_CONFIG_FILE.exists():
+            with open(WINDOW_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_window_config(width: int, height: int, x: int, y: int):
+    """Save window position/size to disk."""
+    try:
+        with open(WINDOW_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump({"width": width, "height": height, "x": x, "y": y}, f)
+    except Exception:
+        pass
+
+
 # ─── Window (pywebview) ───
 
 def create_window(port: int):
@@ -130,26 +155,42 @@ def create_window(port: int):
 
     url = "http://127.0.0.1:%d" % port
 
+    # Restore previous window geometry
+    cfg = _load_window_config()
+    w = cfg.get("width", 1100)
+    h = cfg.get("height", 750)
+    wx = cfg.get("x")
+    wy = cfg.get("y")
+
     # Window settings
     window = webview.create_window(
         title="灵枢 — AI 调研助手",
         url=url,
-        width=1100,
-        height=750,
+        width=w,
+        height=h,
+        x=wx,
+        y=wy,
         min_size=(800, 600),
         resizable=True,
         fullscreen=False,
         text_select=True,
         confirm_close=True,
+        easy_drag=False,  # allow normal window dragging for position tracking
     )
 
     # Run the window (blocking — returns when window closes)
     webview.start(
         debug=False,
-        http_server=False,  # pywebview does NOT need to serve — our FastAPI does
+        http_server=False,
         private_mode=False,
         storage_path=str(APP_DIR / "webview_data"),
     )
+
+    # Save window position on close
+    try:
+        _save_window_config(window.width, window.height, window.x, window.y)
+    except Exception:
+        pass
 
 
 # ─── Splash / Loading helper ───

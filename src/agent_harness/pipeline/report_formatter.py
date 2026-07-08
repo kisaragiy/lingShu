@@ -6,6 +6,7 @@ to add source citations, proper formatting, and generates a standalone HTML file
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from datetime import datetime
@@ -20,12 +21,57 @@ def _ensure():
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _extract_sources_from_text(text: str) -> list[dict]:
+    """Extract source URLs from text content.
+
+    Detects patterns like:
+      - http(s)://... URLs in the text
+      - [来源 N] markers followed by URLs
+      - URLs in brackets at end of lines
+    """
+    sources = []
+    seen = set()
+
+    # Pattern 1: explicit URLs
+    urls = re.findall(r'https?://[^\s\[\]()<>"]+', text)
+    for url in urls:
+        # Clean trailing punctuation
+        url = url.rstrip(".,;:!?")
+        if url not in seen and _is_valid_url(url):
+            seen.add(url)
+            sources.append({"url": url, "title": url.rsplit("/", 1)[-1][:50]})
+
+    return sources
+
+
+def _is_valid_url(url: str) -> bool:
+    """Basic URL validity check."""
+    return url.startswith("http") and len(url) > 15
+
+
+def _link_sources(text: str, sources: list[dict]) -> str:
+    """Convert [来源 N] markers to HTML sup tags with anchor links.
+
+    Also adds a source index at the end of the content from search results.
+    """
+    if not sources:
+        return text
+
+    # Replace [来源 N] → <sup class="cite"><a href="#source-N">[N]</a></sup>
+    def _replace_source(m):
+        num = m.group(1)
+        return f'<sup class="cite"><a href="#source-{num}">[{num}]</a></sup>'
+
+    text = re.sub(r'\[来源\s*(\d+)\]', _replace_source, text)
+    return text
+
+
 def generate_report_html(title: str, content: str, sources: list[dict] = None) -> str:
-    """Generate a professional HTML report with embedded CSS.
+    """Generate a professional HTML report with embedded CSS and source citations.
 
     Args:
         title: Report title
-        content: Markdown-ish content from the agent
+        content: Markdown-ish content from the agent (may contain [来源 N] markers)
         sources: Optional list of {url, title} for citations
 
     Returns:
@@ -34,19 +80,28 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
     now = datetime.now().strftime("%Y年%m月%d日")
     sources = sources or []
 
-    # Format the main content (simple markdown → HTML conversion)
-    body_html = _markdown_to_html(content)
+    # Auto-detect and extract URLs from content if no explicit sources provided
+    if not sources:
+        sources = _extract_sources_from_text(content)
 
-    # Build sources section
+    # Link source markers in text
+    linked_content = _link_sources(content, sources)
+
+    # Format the main content (simple markdown → HTML conversion)
+    body_html = _markdown_to_html(linked_content)
+
+    # Build sources section with anchor IDs
     sources_html = ""
     if sources:
-        items = "".join(
-            '<li><a href="%s" target="_blank" rel="noopener">%s</a></li>' % (s["url"], s.get("title", s["url"]))
-            for s in sources
-        )
+        items = ""
+        for i, s in enumerate(sources, 1):
+            title_text = s.get("title", s["url"])
+            items += '<li id="source-%d"><a href="%s" target="_blank" rel="noopener">%s</a></li>' % (
+                i, s["url"], title_text
+            )
         sources_html = """
         <div class="section">
-            <h2>📎 数据来源</h2>
+            <h2>📎 参考来源</h2>
             <ol class="sources">%s</ol>
         </div>""" % items
 
@@ -96,6 +151,17 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
   .tag {
     display: inline-block; padding: 2px 10px; border-radius: 4px;
     background: #f0ecfe; color: #7c5cfc; font-size: 11px; margin-right: 4px;
+  }
+  /* Citation superscripts */
+  sup.cite {
+    font-size: 11px; vertical-align: super; line-height: 0;
+    margin: 0 1px;
+  }
+  sup.cite a {
+    color: #2563eb; text-decoration: none; font-weight: 600;
+  }
+  sup.cite a:hover {
+    text-decoration: underline;
   }
   @media print {
     body { background: #fff; padding: 0; }
@@ -148,8 +214,15 @@ def save_formal_report(title: str, html: str, tags: list[str] = None, source_ses
 
 
 def _markdown_to_html(text: str) -> str:
-    """Simple Markdown to HTML conversion for report content."""
-    import re
+    """Simple Markdown to HTML conversion for report content.
+
+    Supports:
+      - # → h2, ## → h2, ### → h3
+      - Tables: | ... |
+      - Lists: -, *, 1.
+      - Bold: **text**
+      - [来源 N] → superscript citation links (already converted by _link_sources)
+    """
     lines = text.split("\n")
     html = []
     in_table = False
@@ -167,13 +240,10 @@ def _markdown_to_html(text: str) -> str:
             if not in_table:
                 html.append("<table>")
                 in_table = True
-            # Check if next line is a separator (header row)
             html.append("<tr><td>" + "</td><td>".join(cells) + "</td></tr>")
             continue
         else:
             if in_table:
-                # Convert first row to th if there was a separator
-                # Simple approach: first data row after separator is already a tr
                 html.append("</table>")
                 in_table = False
 
@@ -200,7 +270,7 @@ def _markdown_to_html(text: str) -> str:
             html.append("<li>%s</li>" % content)
         else:
             if in_list:
-                html.append("</ul></ol>" if in_list == "ol" else "</ul>")
+                html.append("</ul>")
                 in_list = False
             # Empty line = paragraph break
             if not stripped:
@@ -220,7 +290,6 @@ def _markdown_to_html(text: str) -> str:
 
 
 def _slugify(text: str) -> str:
-    import re
     text = re.sub(r'[^\w\s-]', '', text.lower())
     text = re.sub(r'[-\s]+', '_', text)
     return text.strip('_')[:30]
