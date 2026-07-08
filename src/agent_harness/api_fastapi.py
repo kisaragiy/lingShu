@@ -638,6 +638,15 @@ async def delete_session_endpoint(session_id: str):
     )
 
 
+@app.get("/v1/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    """Get full message history for a session."""
+    msgs = _load_session(session_id)
+    if msgs is None:
+        return JSONResponse({"error": "Session not found"}, status_code=404)
+    return {"messages": msgs, "count": len(msgs)}
+
+
 # ─── Task Cancel API ───
 
 
