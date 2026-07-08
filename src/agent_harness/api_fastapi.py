@@ -33,7 +33,7 @@ from fastapi.responses import FileResponse
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 
 HOST = os.environ.get("HARNESS_API_HOST", "127.0.0.1")
@@ -596,11 +596,30 @@ async def list_reports(limit: int = 50, offset: int = 0):
 
 @app.get("/v1/reports/{report_id}")
 async def get_report(report_id: str):
-    """Get a specific report with full content."""
-    report = _get_rs().get_report(report_id)
-    if not report:
-        return JSONResponse({"error": "Report not found"}, status_code=404)
-    return report
+    """Get a specific report with full content.
+    
+    For formal HTML reports, returns the HTML directly.
+    For markdown reports, returns JSON with content.
+    """
+    from .pipeline.report_store import REPORTS_DIR as _RD
+
+    # Try finding the file directly
+    for ext in [".html", ".md"]:
+        path = _RD / ("%s%s" % (report_id, ext))
+        if path.exists():
+            content = path.read_text(encoding="utf-8")
+            if ext == ".html":
+                return HTMLResponse(content)
+            # For .md, return JSON
+            return {"id": report_id, "content": content, "format": "md"}
+        # Also search for any file starting with report_id
+        for f in _RD.glob("%s*" % report_id):
+            content = f.read_text(encoding="utf-8")
+            if f.suffix == ".html":
+                return HTMLResponse(content)
+            return {"id": report_id, "content": content, "format": "md"}
+
+    return JSONResponse({"error": "Report not found"}, status_code=404)
 
 
 @app.delete("/v1/reports/{report_id}")
@@ -618,6 +637,34 @@ async def search_reports(q: str = ""):
         return {"reports": []}
     reports = _get_rs().search_reports(q)
     return {"reports": reports, "count": len(reports)}
+
+
+@app.post("/v1/reports/formalize")
+async def formalize_report(request: Request):
+    """Generate a formal HTML report from analysis content.
+
+    Takes raw analysis content, adds format + sources, outputs a standalone HTML.
+    """
+    body = await request.json()
+    title = body.get("title", "调研报告")
+    content = body.get("content", "")
+    tags = body.get("tags", [])
+    source_session = body.get("source_session", "")
+
+    from .pipeline import report_formatter
+
+    # Generate HTML report
+    html = report_formatter.generate_report_html(title, content)
+
+    # Save as formal report
+    meta = report_formatter.save_formal_report(
+        title=title,
+        html=html,
+        tags=tags,
+        source_session=source_session,
+    )
+
+    return {**meta, "html": html[:500] + "..."}
 
 
 @app.get("/v1/sessions")

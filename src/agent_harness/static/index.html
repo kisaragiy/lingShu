@@ -695,10 +695,12 @@ async function sendChatMessage() {
 
     // Add save report button if response is substantial
     if (fullContent.length > 100) {
-      const saveBtn = document.createElement('div');
-      saveBtn.style.cssText = 'align-self:flex-start; margin-top:4px';
-      saveBtn.innerHTML = `<button class="btn btn-secondary btn-sm" onclick="saveReport(this, \`${chatSessionId}\`)" data-content="${encodeURIComponent(fullContent.slice(0,80))}">💾 保存报告</button>`;
-      document.getElementById('chat-messages').appendChild(saveBtn);
+      const btns = document.createElement('div');
+      btns.style.cssText = 'align-self:flex-start; margin-top:4px; display:flex; gap:4px';
+      btns.innerHTML = `
+        <button class="btn btn-secondary btn-sm" onclick="saveReport(this, \`${chatSessionId}\`)">💾 保存报告</button>
+        <button class="btn btn-primary btn-sm" onclick="formalizeReport(this, \`${chatSessionId}\`)">📄 生成正式报告</button>`;
+      document.getElementById('chat-messages').appendChild(btns);
     }
 
   } catch(e) {
@@ -755,6 +757,34 @@ async function saveReport(btn, sessionId) {
   } catch(e) { toast('保存失败: ' + e.message, 'err'); btn.disabled = false; btn.innerHTML = '💾 保存报告'; }
 }
 
+async function formalizeReport(btn, sessionId) {
+  const container = document.getElementById('chat-messages');
+  const bubbles = container.querySelectorAll('div[style*="align-self:flex-start"]');
+  const last = bubbles[bubbles.length - 1];
+  if (!last) return;
+  const content = last.textContent || '';
+  const title = '正式报告_' + new Date().toISOString().slice(0,10);
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 生成中...';
+
+  try {
+    const r = await fetch('/v1/reports/formalize', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({title, content, tags:['正式报告'], source_session:sessionId}),
+    });
+    const data = await r.json();
+    if (data.id) {
+      toast('正式报告已生成 ✓', 'ok');
+      btn.innerHTML = '📄 已生成';
+      btn.onclick = () => window.open('/v1/reports/' + data.id, '_blank');
+    } else {
+      toast('生成失败', 'err'); btn.disabled = false; btn.innerHTML = '📄 生成正式报告';
+    }
+  } catch(e) {
+    toast('生成失败: ' + e.message, 'err');
+    btn.disabled = false; btn.innerHTML = '📄 生成正式报告';
+  }
+}
+
 // ── Reports Tab ──
 async function renderReports() {
   const el = document.getElementById('dash-content');
@@ -775,13 +805,8 @@ async function renderReports() {
 }
 
 async function viewReport(reportId) {
-  try {
-    const r = await API.get('/v1/reports/'+reportId);
-    if (!r||!r.content) { toast('报告加载失败','err'); return; }
-    const el = document.getElementById('dash-content');
-    const date = new Date(r.created_at*1000).toLocaleString('zh-CN');
-    el.innerHTML = '<div class="card"><div class="flex-between"><div><div class="card-title">'+r.title+'</div><div class="text-sm text-muted">'+date+' · '+r.chars+' 字</div></div><button class="btn btn-secondary btn-sm" onclick="renderReports()">← 返回列表</button></div><div style="margin-top:16px;font-size:14px;line-height:1.7;white-space:pre-wrap">'+r.content.replace(/</g,'&lt;')+'</div></div>';
-  } catch(e) { toast('加载失败','err'); }
+  // Open formal HTML reports in new tab
+  window.open('/v1/reports/' + reportId, '_blank');
 }
 
 async function deleteReport(reportId) {
