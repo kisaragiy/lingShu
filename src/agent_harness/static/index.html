@@ -3,11 +3,26 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>灵枢 — 超级智能体平台</title>
+<title>灵枢 — AI 调研助手</title>
 <link rel="stylesheet" href="/static/css/lingShu.css">
 </head>
 <body>
+
+<!-- ═══════════ SPLASH ═══════════ -->
+<div id="splash">
+  <div class="splash-content">
+    <div class="splash-logo">⚡</div>
+    <div class="splash-title">灵枢</div>
+    <div class="splash-subtitle">LingShu Agent · AI 调研助手</div>
+    <div class="splash-spinner"></div>
+    <div class="splash-status">初始化中...</div>
+  </div>
+</div>
+
+<!-- ═══════════ APP ═══════════ -->
 <div id="app"></div>
+
+<!-- ═══════════ TOAST ═══════════ -->
 <div id="toast" class="toast"></div>
 
 <script>
@@ -48,6 +63,8 @@ async function init() {
   } catch(e) {
     renderDashboard();
   }
+  // Hide splash
+  setTimeout(() => document.getElementById('splash').classList.add('hidden'), 200);
 }
 
 // ═══════════════════════════════════
@@ -63,7 +80,7 @@ function renderSetup() {
       <div class="welcome" id="setup-welcome">
         <h1 style="font-size:42px; letter-spacing:2px">⚡ 灵枢</h1>
         <div style="color:var(--accent); font-size:14px; margin-bottom:4px">LingShu Agent</div>
-        <p class="subtitle">基于 LangGraph 的多 Agent 超级智能体平台</p>
+        <p class="subtitle">AI 调研助手 — 64 秒出正式报告</p>
         <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap">
           <button class="btn btn-primary" onclick="startSetup()" style="font-size:16px; padding:14px 36px">
             开始配置 →
@@ -73,10 +90,10 @@ function renderSetup() {
           </button>
         </div>
         <div class="feature-list" style="margin-top:48px">
-          <div class="feature-item"><div class="icon">🧠</div><div class="name">多 Agent 编排</div><div class="desc">Supervisor-Worker 架构</div></div>
-          <div class="feature-item"><div class="icon">🔧</div><div class="name">41+ 工具</div><div class="desc">搜索/代码/桌面/AIGC</div></div>
+          <div class="feature-item"><div class="icon">🔍</div><div class="name">深度调研</div><div class="desc">多角度搜索 × AI 分析</div></div>
+          <div class="feature-item"><div class="icon">📄</div><div class="name">正式报告</div><div class="desc">A4 排版 · 一键生成</div></div>
           <div class="feature-item"><div class="icon">📚</div><div class="name">知识库</div><div class="desc">文件上传 RAG 检索</div></div>
-          <div class="feature-item"><div class="icon">💬</div><div class="name">Open WebUI</div><div class="desc">对话式交互</div></div>
+          <div class="feature-item"><div class="icon">💬</div><div class="name">对话式交互</div><div class="desc">智能体全程驱动</div></div>
         </div>
       </div>
       <div id="setup-content" class="hidden"></div>
@@ -91,7 +108,6 @@ function startSetup() {
 }
 
 async function quickStart() {
-  // One-click auto configure
   const el = document.getElementById('setup-content');
   el.classList.remove('hidden');
   el.innerHTML = '<div class="card text-center" style="padding:40px"><span class="spinner"></span><div class="mt-16">自动配置中...<br><span class="text-sm text-muted">启动服务、配置 LLM、检测环境</span></div></div>';
@@ -106,7 +122,7 @@ async function quickStart() {
       <div class="card text-center" style="padding:40px">
         <div style="font-size:48px; margin-bottom:16px">${ok ? '🎉' : '⚠️'}</div>
         <h2 style="margin-bottom:8px">${ok ? '配置完成！' : '部分完成'}</h2>
-        <p class="text-muted" style="margin-bottom:24px">${result.warning || '灵枢已就绪，开始使用超级智能体'}</p>
+        <p class="text-muted" style="margin-bottom:24px">${result.warning || '灵枢已就绪，可进行 AI 调研'}</p>
         <div style="text-align:left">${steps}</div>
         <div class="mt-16">
           <button class="btn btn-primary" onclick="renderDashboard()" style="font-size:16px; padding:14px 36px">
@@ -131,15 +147,9 @@ async function fixService(name) {
   const btn = event.target; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
   try {
     const result = await API.post('/v1/setup/fix', {action: 'start_' + name});
-    if (result.success) {
-      toast(name + ' 启动成功 ✓', 'ok');
-      renderStep3();  // Refresh
-    } else {
-      toast(name + ' 启动失败: ' + (result.error || '未知错误'), 'err');
-    }
-  } catch(e) {
-    toast('操作失败: ' + e.message, 'err');
-  }
+    if (result.success) { toast(name + ' 启动成功 ✓', 'ok'); renderStep3(); }
+    else { toast(name + ' 启动失败: ' + (result.error || '未知错误'), 'err'); }
+  } catch(e) { toast('操作失败: ' + e.message, 'err'); }
   btn.disabled = false; btn.innerHTML = '启动';
 }
 
@@ -156,7 +166,6 @@ function renderSteps() {
   }</div>`;
 }
 
-// Step 1: Path Detection
 async function renderStep1() {
   const el = document.getElementById('setup-content');
   el.innerHTML = renderSteps() + `
@@ -169,7 +178,6 @@ async function renderStep1() {
         <button class="btn btn-primary btn-sm hidden" id="step1-next" onclick="setupStep=2; renderStep2()">下一步 →</button>
       </div>
     </div>`;
-
   const data = await API.get('/v1/setup/check-paths');
   setupData.paths = data;
   const list = document.getElementById('path-list');
@@ -186,7 +194,6 @@ async function renderStep1() {
   document.getElementById('step1-next').classList.remove('hidden');
 }
 
-// Step 2: LLM Config
 async function renderStep2() {
   const el = document.getElementById('setup-content');
   el.innerHTML = renderSteps() + `
@@ -216,7 +223,6 @@ async function renderStep2() {
         <button class="btn btn-primary btn-sm" onclick="setupStep=3; renderStep3()">下一步 →</button>
       </div>
     </div>`;
-
   const backends = await API.get('/v1/setup/llm-backends');
   setupData.llm = backends;
   const container = document.getElementById('llm-backends');
@@ -247,19 +253,12 @@ function selectLLM(key) {
 }
 
 async function quickStartLLM() {
-  // Auto-configure LLM: start model_proxy and use it
   const btn = event.target; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
   try {
     const result = await API.post('/v1/setup/auto-configure', {});
-    if (result.llm_configured) {
-      toast('LLM 自动配置成功 ✓', 'ok');
-      setupStep = 3; renderStep3();
-    } else {
-      toast('自动配置失败: ' + (result.warning || '请手动选择'), 'err');
-    }
-  } catch(e) {
-    toast('自动配置出错: ' + e.message, 'err');
-  }
+    if (result.llm_configured) { toast('LLM 自动配置成功 ✓', 'ok'); setupStep = 3; renderStep3(); }
+    else { toast('自动配置失败: ' + (result.warning || '请手动选择'), 'err'); }
+  } catch(e) { toast('自动配置出错: ' + e.message, 'err'); }
   btn.disabled = false; btn.innerHTML = '⚡ 自动配置';
 }
 
@@ -277,7 +276,6 @@ async function testLLM() {
   btn.disabled = false; btn.textContent = '测试连接';
 }
 
-// Step 3: Environment Check
 async function renderStep3() {
   const el = document.getElementById('setup-content');
   el.innerHTML = renderSteps() + `
@@ -290,11 +288,9 @@ async function renderStep3() {
         <button class="btn btn-primary btn-sm" onclick="setupStep=4; renderStep4()">下一步 →</button>
       </div>
     </div>`;
-
   const env = await API.get('/v1/setup/env-check');
   setupData.env = env;
   const html = [];
-  // LLM backends
   html.push('<div class="card-title" style="font-size:13px;margin-top:8px">推理后端</div>');
   for (const [k, v] of Object.entries(env.llm_backends || {})) {
     const fixable = !v.available && ['model_proxy', 'ollama', 'llamacpp'].includes(k);
@@ -307,7 +303,6 @@ async function renderStep3() {
       ${fixable ? `<button class="btn btn-secondary btn-sm" onclick="fixService('${k}')">启动</button>` : ''}
     </div>`);
   }
-  // Services
   html.push('<div class="card-title" style="font-size:13px;margin-top:16px">辅助服务</div>');
   for (const [k, v] of Object.entries(env.services || {})) {
     const fixable = !v.available && ['searxng', 'comfyui'].includes(k);
@@ -320,7 +315,6 @@ async function renderStep3() {
       ${fixable ? `<button class="btn btn-secondary btn-sm" onclick="fixService('${k}')">启动</button>` : ''}
     </div>`);
   }
-  // Paths
   html.push('<div class="card-title" style="font-size:13px;margin-top:16px">路径</div>');
   for (const p of env.paths || []) {
     const ok = p.exists && !p.has_chinese;
@@ -329,64 +323,70 @@ async function renderStep3() {
   document.getElementById('env-results').innerHTML = html.join('');
 }
 
-// Step 4: Complete
 async function renderStep4() {
-  // Save config
   const llmKey = setupData.selectedLLM || 'model_proxy';
   const llmInfo = setupData.llm[llmKey] || {};
   await API.post('/v1/setup/config', {
     setup_complete: true,
-    llm: {
-      backend: llmKey,
-      api_url: llmInfo.endpoint || '',
-      api_key: '',
-      model: 'deepseek-v4',
-    },
+    llm: { backend: llmKey, api_url: llmInfo.endpoint || '', api_key: '', model: 'deepseek-v4' },
   });
-
   const el = document.getElementById('setup-content');
   el.innerHTML = renderSteps() + `
     <div class="card text-center" style="padding:60px">
       <div style="font-size:48px; margin-bottom:16px">🎉</div>
       <h2 style="margin-bottom:8px">配置完成！</h2>
-      <p class="text-muted" style="margin-bottom:24px">灵枢已就绪，开始使用超级智能体</p>
+      <p class="text-muted" style="margin-bottom:24px">灵枢已就绪，可进行 AI 调研</p>
       <button class="btn btn-primary" onclick="renderDashboard()" style="font-size:16px; padding:14px 36px">
         进入控制台 →
       </button>
-      <div class="text-sm text-muted mt-16">
-        Open WebUI 访问：<code style="color:var(--accent)">http://localhost:3000</code>
-      </div>
     </div>`;
 }
 
 // ═══════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════
-let dashTab = 'status';
+const DASH_TABS = [
+  { id: 'chat',    icon: '💬',  label: '对话' },
+  { id: 'reports', icon: '📄',  label: '报告' },
+  { id: 'status',  icon: '📊',  label: '服务' },
+  { id: 'knowledge', icon: '📚', label: '知识库' },
+  { id: 'mcp',     icon: '🔌',  label: '工具' },
+  { id: 'sessions', icon: '🗂️', label: '会话管理' },
+  { id: 'settings', icon: '⚙️', label: '设置' },
+  { id: 'skills',  icon: '🧠',  label: '技能' },
+];
+
+let dashTab = 'chat';
 let dashData = {};
 
-function renderDashboard() {
-  document.title = '灵枢 — 控制台';
-  dashTab = 'chat';
-  renderDashFrame();
-  renderDashChat();
-}
+// ─── Sidebar state ───
+let sidebarSessions = [];
+let chatSessionId = '';
+let chatAbortController = null;
+let chatHistory = [];
+let sidebarFilter = '';
 
-function renderDashFrame() {
-  document.getElementById('app').innerHTML = `
-    <div class="header">
-      <div class="header-left">
-        <span class="logo">⚡ 灵枢</span>
-        <span class="logo-sub">LingShu Agent</span>
+function renderDashboard() {
+  document.title = '灵枢 — AI 调研助手';
+  dashTab = 'chat';
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <!-- Header -->
+    <div class="app-header">
+      <div class="app-header-left">
+        <span class="app-header-logo">⚡ 灵枢</span>
+        <span class="app-header-sub">AI 调研助手</span>
       </div>
       <div style="display:flex;gap:4px;align-items:center">
         <div style="position:relative" id="settings-menu-container">
-          <button class="btn btn-secondary btn-sm" onclick="toggleSettingsMenu()">⚙️ 菜单 ▾</button>
-          <div id="settings-dropdown" class="hidden" style="position:absolute;top:100%;right:0;margin-top:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);min-width:160px;z-index:100;box-shadow:0 4px 20px rgba(0,0,0,0.4)">
+          <button class="btn btn-secondary btn-sm" onclick="toggleSettingsMenu()">☰ 菜单 ▾</button>
+          <div id="settings-dropdown" class="hidden" style="position:absolute;top:100%;right:0;margin-top:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);min-width:160px;z-index:100;box-shadow:0 4px 20px rgba(0,0,0,0.15)">
             <div class="dropdown-item" onclick="switchTab('settings'); closeSettingsMenu()">⚙️ 设置</div>
             <div class="dropdown-item" onclick="switchTab('reports'); closeSettingsMenu()">📄 报告列表</div>
-            <div class="dropdown-item" onclick="switchTab('mcp'); closeSettingsMenu()">🔌 MCP 工具列表</div>
-            <div class="dropdown-item" onclick="switchTab('skills'); closeSettingsMenu()">🧠 Skill 列表</div>
+            <div class="dropdown-item" onclick="switchTab('mcp'); closeSettingsMenu()">🔌 工具列表</div>
+            <div class="dropdown-item" onclick="switchTab('sessions'); closeSettingsMenu()">🗂️ 会话管理</div>
+            <div class="dropdown-item" onclick="switchTab('skills'); closeSettingsMenu()">🧠 技能</div>
             <div class="dropdown-divider"></div>
             <div class="dropdown-item" onclick="checkUpdate(); closeSettingsMenu()">📦 检查更新</div>
             <div class="dropdown-item" onclick="renderSetup(); closeSettingsMenu()">🔄 重新配置</div>
@@ -396,164 +396,185 @@ function renderDashFrame() {
         </div>
       </div>
     </div>
-    <div class="container">
-      <nav class="dash-nav" id="dash-nav">
-        <a href="#" data-tab="chat" onclick="return switchTab('chat')">💬 对话</a>
-        <a href="#" data-tab="reports" onclick="return switchTab('reports')">📄 报告</a>
-        <a href="#" data-tab="status" onclick="return switchTab('status')">📊 服务状态</a>
-        <a href="#" data-tab="knowledge" onclick="return switchTab('knowledge')">📚 知识库</a>
-        <a href="#" data-tab="sessions" onclick="return switchTab('sessions')">💬 会话</a>
-        <a href="#" data-tab="settings" onclick="return switchTab('settings')">⚙️ 设置</a>
-      </nav>
-      <div id="dash-content"></div>
-    </div>`;
+
+    <!-- Body: Sidebar + Main -->
+    <div class="app-body">
+      <!-- Sidebar -->
+      <div class="app-sidebar" id="sidebar">
+        <div class="sidebar-search">
+          <input id="sidebar-search-input" type="text" placeholder="搜索会话..." oninput="onSidebarFilterChange()" autocomplete="off">
+        </div>
+        <div class="sidebar-actions">
+          <button class="sidebar-new-btn" onclick="switchToNewSession()">
+            <span>✕</span> 新会话
+          </button>
+        </div>
+        <div class="sidebar-list" id="sidebar-list"></div>
+      </div>
+
+      <!-- Main content -->
+      <div class="app-main">
+        <div class="main-tabs" id="main-tabs"></div>
+        <div class="main-content" id="dash-content"></div>
+      </div>
+    </div>
+  `;
+
+  // Build tab bar
+  renderTabBar();
+  // Open chat tab
+  switchTab('chat');
+  // Load session list
+  loadSidebarSessions();
 }
 
+function renderTabBar() {
+  const bar = document.getElementById('main-tabs');
+  bar.innerHTML = DASH_TABS.map(t =>
+    `<a class="main-tab" data-tab="${t.id}" href="#" onclick="return switchTab('${t.id}')">${t.icon} ${t.label}</a>`
+  ).join('');
+}
+
+// ═══════════════════════════════════
+// SIDEBAR
+// ═══════════════════════════════════
+async function loadSidebarSessions() {
+  try {
+    const data = await API.get('/v1/sessions');
+    sidebarSessions = data.sessions || [];
+  } catch(e) {
+    sidebarSessions = [];
+  }
+  renderSidebarList();
+}
+
+function renderSidebarList() {
+  const list = document.getElementById('sidebar-list');
+  if (!list) return;
+  const filter = sidebarFilter.toLowerCase();
+  const filtered = sidebarSessions.filter(s =>
+    !filter || (s.preview || '').toLowerCase().includes(filter) || s.id.toLowerCase().includes(filter)
+  );
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="text-center text-muted text-sm" style="padding:20px">暂无会话</div>';
+    return;
+  }
+  list.innerHTML = filtered.map(s => {
+    const isActive = s.id === chatSessionId;
+    const preview = (s.preview || '新会话').slice(0, 35);
+    const time = formatSidebarTime(s.last_active);
+    return `<div class="session-item ${isActive ? 'active' : ''}" onclick="switchToSession('${s.id}')" data-sid="${s.id}">
+      <div class="session-item-title">${escHtml(preview)}</div>
+      <div class="session-item-preview">${s.exchanges || 0} 条消息</div>
+      <div class="session-item-time">${time}</div>
+    </div>`;
+  }).join('');
+}
+
+function formatSidebarTime(seconds) {
+  if (seconds == null) return '';
+  if (seconds < 60) return '刚刚';
+  if (seconds < 3600) return Math.floor(seconds/60) + '分前';
+  if (seconds < 86400) return Math.floor(seconds/3600) + '时前';
+  return Math.floor(seconds/86400) + '天前';
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function onSidebarFilterChange() {
+  sidebarFilter = document.getElementById('sidebar-search-input').value;
+  renderSidebarList();
+}
+
+async function switchToSession(sessionId) {
+  if (sessionId === chatSessionId) return;
+  chatSessionId = sessionId;
+  renderSidebarList();
+  await restoreChatSession(sessionId);
+}
+
+function switchToNewSession() {
+  chatSessionId = 'chat-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
+  chatHistory = [];
+  renderSidebarList();
+  const container = document.getElementById('chat-messages');
+  if (container) {
+    container.innerHTML = '<div class="text-center text-muted text-sm" style="padding:40px">输入消息开始与灵枢对话</div>';
+  }
+  const count = document.getElementById('chat-msg-count');
+  if (count) count.textContent = '';
+}
+
+// ═══════════════════════════════════
+// TAB SWITCHING
+// ═══════════════════════════════════
 function switchTab(tab) {
   dashTab = tab;
-  document.querySelectorAll('.dash-nav a').forEach(a => a.classList.remove('active'));
-  document.querySelector(`.dash-nav a[data-tab="${tab}"]`).classList.add('active');
+  document.querySelectorAll('.main-tab').forEach(a => a.classList.remove('active'));
+  document.querySelector(`.main-tab[data-tab="${tab}"]`)?.classList.add('active');
+  closeSettingsMenu();
+
+  const content = document.getElementById('dash-content');
   if (tab === 'chat') renderDashChat();
   else if (tab === 'status') renderDashStatus();
   else if (tab === 'knowledge') renderDashKnowledge();
   else if (tab === 'sessions') renderDashSessions();
   else if (tab === 'settings') renderDashSettings();
+  else if (tab === 'mcp') renderMCP();
+  else if (tab === 'reports') renderReports();
+  else if (tab === 'skills') renderSkills();
   return false;
 }
 
-// ── Status Tab ──
-async function renderDashStatus() {
-  const el = document.getElementById('dash-content');
-  el.innerHTML = '<div class="text-center mt-24"><span class="spinner"></span></div>';
-  const env = await API.get('/v1/setup/env-check');
-  const health = await API.get('/health');
-
-  let html = `<div class="flex-between mb-16">
-    <div><span class="card-title" style="font-size:18px;margin:0">服务状态</span></div>
-    <button class="btn btn-secondary btn-sm" onclick="renderDashStatus()">🔄 刷新</button>
-  </div>`;
-
-  // LLM backends
-  html += '<div class="card"><div class="card-title">🤖 推理后端</div><div class="service-grid">';
-  for (const [k, v] of Object.entries(env.llm_backends || {})) {
-    html += `<div class="service-card">
-      <span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span>
-      <div class="service-info">
-        <div class="service-name">${v.label}</div>
-        <div class="service-detail">${v.available ? '运行中' : '离线'} ${v.port ? '· port ' + v.port : ''}</div>
-      </div>
-    </div>`;
-  }
-  html += '</div></div>';
-
-  // Services
-  html += '<div class="card"><div class="card-title">🔧 辅助服务</div><div class="service-grid">';
-  for (const [k, v] of Object.entries(env.services || {})) {
-    html += `<div class="service-card">
-      <span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span>
-      <div class="service-info">
-        <div class="service-name">${v.label}</div>
-        <div class="service-detail">${v.available ? '运行中' : '离线'} ${v.port ? '· port ' + v.port : ''}</div>
-      </div>
-    </div>`;
-  }
-  html += '</div></div>';
-
-  // Summary
-  html += `<div class="card"><div class="card-title">📊 概览</div>
-    <div class="service-grid">
-      <div class="service-card"><div class="service-info"><div class="service-name">活跃会话</div><div class="service-detail">${health.active_sessions}</div></div></div>
-    </div>
-  </div>`;
-
-  // Running tasks
-  try {
-    const tasksData = await API.get('/v1/tasks');
-    if (tasksData.tasks && tasksData.tasks.length > 0) {
-      html += `<div class="card"><div class="card-title">⚡ 运行中的任务</div>`;
-      html += tasksData.tasks.map(t => `
-        <div class="service-card">
-          <span class="dot dot-ok" style="animation:pulse 1s infinite"></span>
-          <div class="service-info">
-            <div class="service-name">${t.session_id.slice(0,12)}...</div>
-            <div class="service-detail">运行中</div>
-          </div>
-          <button class="btn btn-danger btn-sm" onclick="cancelTask('${t.session_id}')">取消</button>
-        </div>
-      `).join('');
-      html += '</div>';
-    }
-  } catch(e) {}
-
-  el.innerHTML = html;
+// ── Settings dropdown ──
+function toggleSettingsMenu() {
+  document.getElementById('settings-dropdown').classList.toggle('hidden');
+}
+function closeSettingsMenu() {
+  document.getElementById('settings-dropdown').classList.add('hidden');
 }
 
-async function cancelTask(sessionId) {
-  try {
-    await fetch('/v1/tasks/' + sessionId + '/cancel', { method: 'POST' });
-    toast('已发送取消请求', 'info');
-    renderDashStatus();
-  } catch(e) {
-    toast('取消失败: ' + e, 'err');
-  }
-}
-
-// ── Chat Tab ──
-let chatSessionId = '';
-let chatAbortController = null;
-let chatHistory = [];
-
+// ═══════════════════════════════════
+// CHAT TAB
+// ═══════════════════════════════════
 function renderDashChat() {
   const el = document.getElementById('dash-content');
   el.innerHTML = `
-    <div class="card" style="display:flex;flex-direction:column;height:calc(100vh - 200px);padding:0">
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
-        <span style="font-weight:600">💬 灵枢对话</span>
-        <select id="chat-session-selector" class="form-input" style="flex:1;padding:6px 10px;font-size:12px"
-          onchange="switchChatSession(this.value)">
-          <option value="__new__">+ 新会话</option>
-        </select>
-        <span class="text-sm text-muted" id="chat-msg-count"></span>
-      </div>
-      <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px">
+    <div class="chat-card">
+      <div class="chat-messages" id="chat-messages">
         <div class="text-center text-muted text-sm" style="padding:40px">加载中...</div>
       </div>
-      <div id="chat-thinking" class="hidden" style="padding:8px 16px;border-top:1px solid var(--border);background:var(--bg-secondary);font-size:12px;color:var(--text-secondary);max-height:120px;overflow-y:auto"></div>
-      <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px">
-        <input id="chat-input" class="form-input" placeholder="输入消息，按 Enter 发送..." style="flex:1"
+      <div id="chat-thinking" class="chat-thinking hidden"></div>
+      <div class="chat-input-bar">
+        <input id="chat-input" class="form-input" placeholder="输入消息，按 Enter 发送..."
           onkeydown="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); sendChatMessage() }">
         <button class="btn btn-primary" onclick="sendChatMessage()" id="chat-send-btn">发送</button>
         <button class="btn btn-danger hidden" onclick="cancelChatMessage()" id="chat-cancel-btn">取消</button>
       </div>
     </div>`;
-  loadChatSessions();
+  // Restore session messages if we have one
+  if (chatSessionId && chatHistory.length > 0) {
+    renderMessages(chatHistory.map(h => ({role: h.role, content: h.content})));
+    document.getElementById('chat-msg-count')?.remove();
+  } else {
+    loadDefaultChatSession();
+  }
 }
 
-async function loadChatSessions() {
-  // Load session list and restore the most recent one
+async function loadDefaultChatSession() {
   chatAbortController = null;
   chatHistory = [];
-
   try {
     const data = await API.get('/v1/sessions');
-    const sel = document.getElementById('chat-session-selector');
     const sessions = data.sessions || [];
-
-    // Keep the "+ 新会话" option, add existing sessions
-    sel.innerHTML = '<option value="__new__">+ 新会话</option>';
-    sessions.forEach(s => {
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      const preview = (s.preview || '').slice(0, 30);
-      const time = s.last_active < 120 ? '刚刚' : Math.floor(s.last_active/60) + '分前';
-      opt.textContent = preview ? preview + ' (' + time + ')' : time;
-      sel.appendChild(opt);
-    });
-
-    // Auto-restore most recent session if it has exchanges
     if (sessions.length > 0 && sessions[0].exchanges > 0) {
-      sel.value = sessions[0].id;
-      await restoreSession(sessions[0].id);
+      chatSessionId = sessions[0].id;
+      await restoreChatSession(sessions[0].id);
+      renderSidebarList();
     } else {
       startNewChat();
     }
@@ -562,16 +583,12 @@ async function loadChatSessions() {
   }
 }
 
-async function restoreSession(sessionId) {
-  chatSessionId = sessionId;
-  document.getElementById('chat-session-selector').value = sessionId;
-
+async function restoreChatSession(sessionId) {
   try {
     const data = await API.get('/v1/sessions/' + sessionId + '/messages');
     const msgs = data.messages || [];
     chatHistory = msgs.map(m => ({role: m.role, content: m.content}));
     renderMessages(msgs);
-    document.getElementById('chat-msg-count').textContent = msgs.length + ' 条消息';
   } catch(e) {
     startNewChat();
   }
@@ -581,13 +598,14 @@ function startNewChat() {
   chatSessionId = 'chat-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
   chatHistory = [];
   const container = document.getElementById('chat-messages');
-  container.innerHTML = '<div class="text-center text-muted text-sm" style="padding:40px">输入消息开始与灵枢对话</div>';
-  document.getElementById('chat-msg-count').textContent = '';
-  document.getElementById('chat-session-selector').value = '__new__';
+  if (container) {
+    container.innerHTML = '<div class="text-center text-muted text-sm" style="padding:40px">输入消息开始与灵枢对话</div>';
+  }
 }
 
 function renderMessages(msgs) {
   const container = document.getElementById('chat-messages');
+  if (!container) return;
   container.innerHTML = '';
   if (!msgs || msgs.length === 0) {
     container.innerHTML = '<div class="text-center text-muted text-sm" style="padding:40px">输入消息开始与灵枢对话</div>';
@@ -600,44 +618,30 @@ function renderMessages(msgs) {
   container.scrollTop = container.scrollHeight;
 }
 
-async function switchChatSession(sessionId) {
-  if (sessionId === '__new__') {
-    startNewChat();
-    return;
-  }
-  await restoreSession(sessionId);
-}
-
 async function sendChatMessage() {
   const input = document.getElementById('chat-input');
   const msg = input.value.trim();
   if (!msg) return;
 
-  // Clear placeholder
   document.querySelector('#chat-messages .text-center')?.remove();
 
-  // Add user message bubble
   addChatBubble('user', msg);
   input.value = '';
   input.disabled = true;
   document.getElementById('chat-send-btn').classList.add('hidden');
   document.getElementById('chat-cancel-btn').classList.remove('hidden');
 
-  // Thinking area
   const thinkingEl = document.getElementById('chat-thinking');
   thinkingEl.classList.remove('hidden');
   thinkingEl.innerHTML = '<span class="spinner"></span> 分析中...';
   let thinkingText = '';
 
-  // Assistant message area
   const assistantId = 'assistant-' + Date.now();
   addChatBubble('assistant', '<span class="spinner"></span>', assistantId);
   const assistantEl = document.getElementById(assistantId);
 
-  // Build messages with history
   const messages = [...chatHistory, {role: 'user', content: msg}];
 
-  // SSE streaming
   chatAbortController = new AbortController();
   try {
     const resp = await fetch('/v1/chat/completions', {
@@ -671,15 +675,13 @@ async function sendChatMessage() {
           const content = parsed.choices?.[0]?.delta?.content || '';
           if (content) {
             fullContent += content;
-            // Check if it's thinking progress or final output
-            if (content.startsWith('🤔') || content.startsWith('🔀') || content.startsWith('▶️') || 
-                content.startsWith('✅') || content.startsWith('  ✅') || content.startsWith('  ❌') || 
+            if (content.startsWith('🤔') || content.startsWith('🔀') || content.startsWith('▶️') ||
+                content.startsWith('✅') || content.startsWith('  ✅') || content.startsWith('  ❌') ||
                 content.startsWith('🧠') || content.startsWith('⚡') || content.startsWith('📚')) {
               currentThinking += content;
               thinkingEl.innerHTML = currentThinking.replace(/\n/g, '<br>');
               thinkingEl.scrollTop = thinkingEl.scrollHeight;
             } else {
-              // It's actual response content
               if (assistantEl) assistantEl.innerHTML = fullContent.replace(/\n/g, '<br>');
             }
           }
@@ -687,21 +689,23 @@ async function sendChatMessage() {
       }
     }
 
-    // Finalize
     chatHistory = messages;
     chatHistory.push({role: 'assistant', content: fullContent});
     if (assistantEl) assistantEl.innerHTML = fullContent.replace(/\n/g, '<br>');
     thinkingEl.classList.add('hidden');
 
-    // Add save report button if response is substantial
     if (fullContent.length > 100) {
       const btns = document.createElement('div');
-      btns.style.cssText = 'align-self:flex-start; margin-top:4px; display:flex; gap:4px';
+      btns.className = 'chat-bubble';
+      btns.style.cssText = 'align-self:flex-start; margin-top:4px; display:flex; gap:4px; max-width:100%; background:none; border:none; padding:0';
       btns.innerHTML = `
-        <button class="btn btn-secondary btn-sm" onclick="saveReport(this, \`${chatSessionId}\`)">💾 保存报告</button>
-        <button class="btn btn-primary btn-sm" onclick="formalizeReport(this, \`${chatSessionId}\`)">📄 生成正式报告</button>`;
+        <button class="btn btn-secondary btn-sm" onclick="saveReport(this, '${chatSessionId}')">💾 保存报告</button>
+        <button class="btn btn-primary btn-sm" onclick="formalizeReport(this, '${chatSessionId}')">📄 生成正式报告</button>`;
       document.getElementById('chat-messages').appendChild(btns);
     }
+
+    // Refresh sidebar (new session may appear)
+    loadSidebarSessions();
 
   } catch(e) {
     if (e.name === 'AbortError') {
@@ -711,7 +715,6 @@ async function sendChatMessage() {
     }
   }
 
-  // Re-enable input
   input.disabled = false;
   input.focus();
   document.getElementById('chat-send-btn').classList.remove('hidden');
@@ -719,15 +722,13 @@ async function sendChatMessage() {
   document.getElementById('chat-thinking').classList.add('hidden');
   chatAbortController = null;
 
-  // Scroll to bottom
   const msgContainer = document.getElementById('chat-messages');
-  msgContainer.scrollTop = msgContainer.scrollHeight;
+  if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
 }
 
 function cancelChatMessage() {
   if (chatAbortController) {
     chatAbortController.abort();
-    // Also hit the cancel API
     fetch('/v1/tasks/' + chatSessionId + '/cancel', {method: 'POST'}).catch(()=>{});
   }
 }
@@ -736,7 +737,7 @@ function addChatBubble(role, content, id, isSystem) {
   const container = document.getElementById('chat-messages');
   const div = document.createElement('div');
   div.id = id || '';
-  div.style.cssText = `max-width:80%; padding:10px 14px; border-radius:10px; font-size:13px; line-height:1.5; ${role === 'user' ? 'align-self:flex-end; background:var(--accent); color:#fff;' : isSystem ? 'align-self:center; background:var(--bg-hover); color:var(--text-secondary); text-align:center; font-size:12px;' : 'align-self:flex-start; background:var(--bg-card); border:1px solid var(--border);'}`;
+  div.className = 'chat-bubble ' + (isSystem ? 'system' : role);
   div.innerHTML = content.replace(/\n/g, '<br>');
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
@@ -744,7 +745,7 @@ function addChatBubble(role, content, id, isSystem) {
 
 async function saveReport(btn, sessionId) {
   const container = document.getElementById('chat-messages');
-  const bubbles = container.querySelectorAll('div[style*="align-self:flex-start"]');
+  const bubbles = container.querySelectorAll('.chat-bubble.assistant');
   const last = bubbles[bubbles.length - 1];
   if (!last) return;
   const content = last.textContent || '';
@@ -759,7 +760,7 @@ async function saveReport(btn, sessionId) {
 
 async function formalizeReport(btn, sessionId) {
   const container = document.getElementById('chat-messages');
-  const bubbles = container.querySelectorAll('div[style*="align-self:flex-start"]');
+  const bubbles = container.querySelectorAll('.chat-bubble.assistant');
   const last = bubbles[bubbles.length - 1];
   if (!last) return;
   const content = last.textContent || '';
@@ -785,7 +786,78 @@ async function formalizeReport(btn, sessionId) {
   }
 }
 
-// ── Reports Tab ──
+// ═══════════════════════════════════
+// STATUS TAB
+// ═══════════════════════════════════
+async function renderDashStatus() {
+  const el = document.getElementById('dash-content');
+  el.innerHTML = '<div class="text-center mt-24"><span class="spinner"></span></div>';
+  const env = await API.get('/v1/setup/env-check');
+  const health = await API.get('/health');
+
+  let html = `<div class="flex-between mb-16">
+    <div><span class="card-title" style="font-size:18px;margin:0">📊 服务状态</span></div>
+    <button class="btn btn-secondary btn-sm" onclick="renderDashStatus()">🔄 刷新</button>
+  </div>`;
+
+  html += '<div class="card"><div class="card-title">🤖 推理后端</div><div class="service-grid">';
+  for (const [k, v] of Object.entries(env.llm_backends || {})) {
+    html += `<div class="service-card">
+      <span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span>
+      <div class="service-info">
+        <div class="service-name">${v.label}</div>
+        <div class="service-detail">${v.available ? '运行中' : '离线'} ${v.port ? '· port ' + v.port : ''}</div>
+      </div>
+    </div>`;
+  }
+  html += '</div></div>';
+
+  html += '<div class="card"><div class="card-title">🔧 辅助服务</div><div class="service-grid">';
+  for (const [k, v] of Object.entries(env.services || {})) {
+    html += `<div class="service-card">
+      <span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span>
+      <div class="service-info">
+        <div class="service-name">${v.label}</div>
+        <div class="service-detail">${v.available ? '运行中' : '离线'} ${v.port ? '· port ' + v.port : ''}</div>
+      </div>
+    </div>`;
+  }
+  html += '</div></div>';
+
+  html += `<div class="card"><div class="card-title">📊 概览</div>
+    <div class="service-grid">
+      <div class="service-card"><div class="service-info"><div class="service-name">活跃会话</div><div class="service-detail">${health.active_sessions}</div></div></div>
+    </div>
+  </div>`;
+
+  try {
+    const tasksData = await API.get('/v1/tasks');
+    if (tasksData.tasks && tasksData.tasks.length > 0) {
+      html += '<div class="card"><div class="card-title">⚡ 运行中的任务</div>';
+      html += tasksData.tasks.map(t => `
+        <div class="service-card">
+          <span class="dot dot-ok" style="animation:pulse 1s infinite"></span>
+          <div class="service-info">
+            <div class="service-name">${t.session_id.slice(0,12)}...</div>
+            <div class="service-detail">运行中</div>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="cancelTask('${t.session_id}')">取消</button>
+        </div>
+      `).join('');
+      html += '</div>';
+    }
+  } catch(e) {}
+  el.innerHTML = html;
+}
+
+async function cancelTask(sessionId) {
+  try { await fetch('/v1/tasks/' + sessionId + '/cancel', { method: 'POST' }); toast('已发送取消请求', 'info'); renderDashStatus(); }
+  catch(e) { toast('取消失败: ' + e, 'err'); }
+}
+
+// ═══════════════════════════════════
+// REPORTS TAB
+// ═══════════════════════════════════
 async function renderReports() {
   const el = document.getElementById('dash-content');
   el.innerHTML = '<div class="card"><div class="flex-between"><div class="card-title">📄 报告列表</div><button class="btn btn-secondary btn-sm" onclick="renderReports()">🔄 刷新</button></div><div id="report-list"><div class="text-center"><span class="spinner"></span> 加载中...</div></div></div>';
@@ -793,30 +865,27 @@ async function renderReports() {
     const data = await API.get('/v1/reports');
     const list = document.getElementById('report-list');
     if (!data.reports || !data.reports.length) {
-      list.innerHTML = '<div class="text-center text-muted" style="padding:20px">暂无报告。在「💬 对话」中聊天后，点击「💾 保存报告」按钮即可保存。</div>';
+      list.innerHTML = '<div class="text-center text-muted" style="padding:20px">暂无报告。在「💬 对话」中聊天后保存即可。</div>';
       return;
     }
     list.innerHTML = data.reports.map(r => {
       const date = new Date(r.created_at*1000).toLocaleString('zh-CN');
-      const tags = (r.tags||[]).map(t => '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:var(--accent-glow);color:var(--accent);font-size:11px;margin-right:4px">'+t+'</span>').join('');
-      return '<div class="service-card"><div class="service-info"><div class="service-name">'+r.title+'</div><div class="service-detail">'+date+' · '+r.chars+' 字 '+tags+'</div></div><button class="btn btn-secondary btn-sm" onclick="viewReport(\''+r.id+'\')" style="margin-right:4px">查看</button><button class="btn btn-danger btn-sm" onclick="deleteReport(\''+r.id+'\')">删除</button></div>';
+      const tags = (r.tags||[]).map(t => '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:var(--accent-light);color:var(--accent);font-size:11px;margin-right:4px">'+escHtml(t)+'</span>').join('');
+      return '<div class="service-card"><div class="service-info"><div class="service-name">'+escHtml(r.title)+'</div><div class="service-detail">'+date+' · '+r.chars+' 字 '+tags+'</div></div><button class="btn btn-secondary btn-sm" onclick="viewReport(\''+r.id+'\')" style="margin-right:4px">查看</button><button class="btn btn-danger btn-sm" onclick="deleteReport(\''+r.id+'\')">删除</button></div>';
     }).join('');
   } catch(e) {}
 }
 
-async function viewReport(reportId) {
-  // Open formal HTML reports in new tab
-  window.open('/v1/reports/' + reportId, '_blank');
-}
-
+async function viewReport(reportId) { window.open('/v1/reports/' + reportId, '_blank'); }
 async function deleteReport(reportId) {
   if (!confirm('删除此报告？')) return;
   try { await fetch('/v1/reports/'+reportId,{method:'DELETE'}); toast('已删除','ok'); renderReports(); }
   catch(e) { toast('删除失败','err'); }
 }
 
-
-// ── Knowledge Tab ──
+// ═══════════════════════════════════
+// KNOWLEDGE TAB
+// ═══════════════════════════════════
 async function renderDashKnowledge() {
   const el = document.getElementById('dash-content');
   el.innerHTML = `<div class="card">
@@ -844,12 +913,12 @@ async function renderCollections() {
     el.innerHTML = '<h4 style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">已有知识库</h4>' +
     data.collections.map(c => `<div class="service-card">
       <div class="service-info">
-        <div class="service-name">${c.name}</div>
-        <div class="service-detail">${c.chunks} 个片段 · ${c.doc_count} 个文件 · ${c.sources.join(', ') || ''}</div>
+        <div class="service-name">${escHtml(c.name)}</div>
+        <div class="service-detail">${c.chunks} 个片段 · ${c.doc_count} 个文件 · ${(c.sources||[]).join(', ')}</div>
       </div>
       <button class="btn btn-danger btn-sm" onclick="deleteCollection('${c.name}')">删除</button>
     </div>`).join('');
-  } catch(e) { /* ignore */ }
+  } catch(e) {}
 }
 
 async function uploadFile(input) {
@@ -863,32 +932,26 @@ async function uploadFile(input) {
     await API.upload('/v1/knowledge/upload', fd);
     toast('文件已索引 ✓', 'ok');
     renderCollections();
-  } catch(e) {
-    toast('上传失败: ' + e, 'err');
-  }
+  } catch(e) { toast('上传失败: ' + e, 'err'); }
   document.getElementById('upload-progress').classList.add('hidden');
   input.value = '';
 }
 
 async function deleteCollection(name) {
   if (!confirm(`确定删除知识库「${name}」？`)) return;
-  try {
-    await fetch('/v1/knowledge/collections/' + name, { method: 'DELETE' });
-    toast('已删除', 'ok');
-    renderCollections();
-  } catch(e) {
-    toast('删除失败', 'err');
-  }
+  try { await fetch('/v1/knowledge/collections/' + name, { method: 'DELETE' }); toast('已删除', 'ok'); renderCollections(); }
+  catch(e) { toast('删除失败', 'err'); }
 }
 
-// ── Sessions Tab ──
+// ═══════════════════════════════════
+// SESSIONS TAB
+// ═══════════════════════════════════
 async function renderDashSessions() {
   const el = document.getElementById('dash-content');
   el.innerHTML = `<div class="card">
-    <div class="flex-between"><div class="card-title">💬 会话历史</div><button class="btn btn-secondary btn-sm" onclick="renderDashSessions()">🔄 刷新</button></div>
+    <div class="flex-between"><div class="card-title">🗂️ 会话历史</div><button class="btn btn-secondary btn-sm" onclick="renderDashSessions()">🔄 刷新</button></div>
     <div id="session-list"><div class="text-center"><span class="spinner"></span> 加载中...</div></div>
   </div>`;
-
   try {
     const data = await API.get('/v1/sessions');
     const list = document.getElementById('session-list');
@@ -898,27 +961,24 @@ async function renderDashSessions() {
     }
     list.innerHTML = '<table><tr><th>会话 ID</th><th>轮次</th><th>最后活跃</th><th>预览</th><th></th></tr>' +
     data.sessions.map(s => `<tr>
-      <td><code>${s.id}</code></td>
+      <td><code>${escHtml(s.id)}</code></td>
       <td>${s.exchanges}</td>
       <td>${s.last_active < 60 ? s.last_active + '秒前' : Math.floor(s.last_active/60) + '分钟前'}</td>
-      <td class="text-muted text-sm">${(s.preview || '').slice(0, 40)}</td>
-      <td><button class="btn btn-danger btn-sm" onclick="deleteSession('${s.id}')">删除</button></td>
+      <td class="text-muted text-sm">${escHtml((s.preview || '').slice(0, 40))}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteSessionFromList('${s.id}')">删除</button></td>
     </tr>`).join('') + '</table>';
-  } catch(e) { /* ignore */ }
+  } catch(e) {}
 }
 
-async function deleteSession(sessionId) {
+async function deleteSessionFromList(sessionId) {
   if (!confirm('删除此会话？')) return;
-  try {
-    await fetch('/v1/sessions/' + sessionId, { method: 'DELETE' });
-    toast('已删除', 'ok');
-    renderDashSessions();
-  } catch(e) {
-    toast('删除失败', 'err');
-  }
+  try { await fetch('/v1/sessions/' + sessionId, { method: 'DELETE' }); toast('已删除', 'ok'); renderDashSessions(); loadSidebarSessions(); }
+  catch(e) { toast('删除失败', 'err'); }
 }
 
-// ── Settings Tab ──
+// ═══════════════════════════════════
+// SETTINGS TAB
+// ═══════════════════════════════════
 async function renderDashSettings() {
   const el = document.getElementById('dash-content');
   const config = await API.get('/v1/setup/config');
@@ -926,16 +986,16 @@ async function renderDashSettings() {
     <div class="card-title">⚙️ 设置</div>
     <div class="form-group">
       <label class="form-label">LLM 后端</label>
-      <input class="form-input" id="set-llm-backend" value="${config.llm?.backend || 'auto'}">
-      <div class="form-hint">当前: ${config.llm?.backend || '未配置'}</div>
+      <input class="form-input" id="set-llm-backend" value="${escHtml(config.llm?.backend || 'auto')}">
+      <div class="form-hint">当前: ${escHtml(config.llm?.backend || '未配置')}</div>
     </div>
     <div class="form-group">
       <label class="form-label">API 地址</label>
-      <input class="form-input" id="set-llm-url" value="${config.llm?.api_url || ''}">
+      <input class="form-input" id="set-llm-url" value="${escHtml(config.llm?.api_url || '')}">
     </div>
     <div class="form-group">
       <label class="form-label">模型</label>
-      <input class="form-input" id="set-llm-model" value="${config.llm?.model || ''}">
+      <input class="form-input" id="set-llm-model" value="${escHtml(config.llm?.model || '')}">
     </div>
     <button class="btn btn-primary btn-sm" onclick="saveSettings()">保存设置</button>
     <div class="mt-16" style="border-top:1px solid var(--border);padding-top:16px">
@@ -958,16 +1018,6 @@ async function saveSettings() {
   toast('设置已保存 ✓', 'ok');
 }
 
-// ── Settings dropdown menu ──
-function toggleSettingsMenu() {
-  const el = document.getElementById('settings-dropdown');
-  el.classList.toggle('hidden');
-}
-
-function closeSettingsMenu() {
-  document.getElementById('settings-dropdown').classList.add('hidden');
-}
-
 async function checkUpdate() {
   closeSettingsMenu();
   toast('检查更新中...', 'info');
@@ -976,17 +1026,14 @@ async function checkUpdate() {
     const data = await r.json();
     const latest = (data.tag_name || '').replace('v', '');
     const current = '0.12.0';
-    if (latest && latest !== current) {
-      toast('发现新版本: v' + latest + ' (当前: v' + current + ')', 'info');
-    } else {
-      toast('已是最新版本 v' + current, 'ok');
-    }
-  } catch(e) {
-    toast('检查更新失败: ' + e.message, 'err');
-  }
+    if (latest && latest !== current) { toast('发现新版本: v' + latest + ' (当前: v' + current + ')', 'info'); }
+    else { toast('已是最新版本 v' + current, 'ok'); }
+  } catch(e) { toast('检查更新失败: ' + e.message, 'err'); }
 }
 
-// ── MCP Tools Tab ──
+// ═══════════════════════════════════
+// MCP TOOLS TAB
+// ═══════════════════════════════════
 async function renderMCP() {
   const el = document.getElementById('dash-content');
   el.innerHTML = '<div class="card"><div class="card-title">🔌 MCP 工具列表</div><div class="text-center"><span class="spinner"></span> 加载中...</div></div>';
@@ -995,17 +1042,16 @@ async function renderMCP() {
     if (registry) {
       html = await registry.renderTools();
     } else {
-      // Fallback: list via API
       const r = await fetch('/v1/tools').catch(() => null);
       if (r) {
         const data = await r.json();
         const tools = data.tools || {};
         el.innerHTML = `<div class="card"><div class="card-title">🔌 MCP 工具列表 (${Object.keys(tools).length})</div>
           <div class="service-grid">${Object.entries(tools).map(([k,v]) =>
-            `<div class="service-card"><div class="service-info"><div class="service-name">${k}</div><div class="service-detail">${(v.description||'').slice(0,60)}</div></div></div>`
+            `<div class="service-card"><div class="service-info"><div class="service-name">${escHtml(k)}</div><div class="service-detail">${escHtml((v.description||'').slice(0,60))}</div></div></div>`
           ).join('')}</div></div>`;
       } else {
-        el.innerHTML = '<div class="card"><div class="card-title">🔌 MCP 工具列表</div><div class="text-center text-muted">MCP API 不可用（确认服务已启动且端口正确）</div></div>';
+        el.innerHTML = '<div class="card"><div class="card-title">🔌 MCP 工具列表</div><div class="text-center text-muted">MCP API 不可用</div></div>';
       }
     }
   } catch(e) {
@@ -1013,11 +1059,13 @@ async function renderMCP() {
   }
 }
 
-// ── Skills Tab ──
+// ═══════════════════════════════════
+// SKILLS TAB
+// ═══════════════════════════════════
 async function renderSkills() {
   const el = document.getElementById('dash-content');
   el.innerHTML = `<div class="card">
-    <div class="card-title">🧠 Skill 列表</div>
+    <div class="card-title">🧠 技能列表</div>
     <div class="text-muted text-sm mb-16">灵枢的扩展技能模块，用于特定任务场景</div>
     <table><tr><th>名称</th><th>描述</th><th>状态</th></tr>
       <tr><td>agent-orchestration</td><td>LangGraph 多 Agent 编排</td><td><span class="dot dot-ok"></span> 内置</td></tr>
@@ -1032,25 +1080,9 @@ async function renderSkills() {
   </div>`;
 }
 
-// Add to switchTab
-const _origSwitch = switchTab;
-switchTab = function(tab) {
-  dashTab = tab;
-  document.querySelectorAll('.dash-nav a').forEach(a => a.classList.remove('active'));
-  document.querySelector('.dash-nav a[data-tab="' + tab + '"]')?.classList.add('active');
-  if (tab === 'chat') renderDashChat();
-  else if (tab === 'status') renderDashStatus();
-  else if (tab === 'knowledge') renderDashKnowledge();
-  else if (tab === 'sessions') renderDashSessions();
-  else if (tab === 'settings') renderDashSettings();
-  else if (tab === 'mcp') renderMCP();
-  else if (tab === 'reports') renderReports();
-  else if (tab === 'skills') renderSkills();
-  closeSettingsMenu();
-  return false;
-};
-
-// ── Start ──
+// ═══════════════════════════════════
+// START
+// ═══════════════════════════════════
 init();
 </script>
 </body>

@@ -132,7 +132,7 @@ def create_window(port: int):
 
     # Window settings
     window = webview.create_window(
-        title="灵枢 — LingShu Agent",
+        title="灵枢 — AI 调研助手",
         url=url,
         width=1100,
         height=750,
@@ -165,7 +165,7 @@ def show_loading_screen(port: int):
 
 def main():
     print("")
-    print("  灵枢 — LingShu Agent")
+    print("  灵枢 — AI 调研助手")
     print("  " + ("-" * 40))
     logger.info("Starting...")
 
