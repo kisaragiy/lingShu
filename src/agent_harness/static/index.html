@@ -629,8 +629,6 @@ const DASH_TABS = [
   { id: 'knowledge', icon: '📚', label: '知识库' },
   { id: 'mcp',     icon: '🔌',  label: '工具' },
   { id: 'sessions', icon: '🗂️', label: '会话管理' },
-  { id: 'cron',    icon: '⏰', label: '定时任务' },
-  { id: 'plugins', icon: '🧩', label: '插件', adminOnly: true },
   { id: 'admin-users', icon: '👥', label: '用户管理', adminOnly: true },
   { id: 'settings', icon: '⚙️', label: '设置', adminOnly: true },
   { id: 'skills',  icon: '🧠',  label: '技能', adminOnly: true },
@@ -705,7 +703,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v1.0.0</span>
+          <span class="sidebar-version">v0.19.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -831,8 +829,6 @@ function switchTab(tab) {
   else if (tab === 'reports') renderReports();
   else if (tab === 'skills') renderSkills();
   else if (tab === 'admin-users') renderAdminUsers();
-  else if (tab === 'cron') renderCronTasks();
-  else if (tab === 'plugins') renderPluginList();
   return false;
 }
 
@@ -1533,88 +1529,6 @@ async function adminDeleteUser(userId, username) {
     toast('用户已删除', 'ok');
     await adminRefreshUsers();
   } catch(e) { toast('删除失败: ' + e.message, 'err'); }
-}
-
-// ═══════════════════════════════════
-// CRON SCHEDULER TAB
-// ═══════════════════════════════════
-
-async function renderCronTasks() {
-  const el = document.getElementById('dash-content');
-  el.innerHTML = '<div class="card"><div class="card-title">⏰ 定时任务</div><div id="cron-list"><div class="skeleton-card"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-line"></div></div></div></div>';
-  try {
-    const data = await API.get('/v1/scheduler/tasks');
-    const list = document.getElementById('cron-list');
-    if (!data.tasks || data.tasks.length === 0) {
-      list.innerHTML = '<div class="text-center text-muted" style="padding:20px">暂无定时任务。<br><br>' +
-        '<div class="card" style="text-align:left;max-width:500px;margin:0 auto">' +
-        '<div class="card-title" style="font-size:13px">创建定时任务</div>' +
-        '<div class="form-group"><label class="form-label">任务 ID</label><input class="form-input" id="cron-new-id" placeholder="daily_report"></div>' +
-        '<div class="form-group"><label class="form-label">调度表达式</label><input class="form-input" id="cron-new-schedule" placeholder="0 9 * * * 或 every 30m"></div>' +
-        '<div class="form-group"><label class="form-label">任务提示词</label><textarea class="form-input" id="cron-new-prompt" rows="3" placeholder="生成昨日行业简报"></textarea></div>' +
-        '<button class="btn btn-primary btn-sm" onclick="cronCreateTask()">创建</button><div id="cron-error" class="text-sm text-danger mt-8" style="display:none"></div></div></div>';
-      return;
-    }
-    list.innerHTML = '<div style="display:flex;gap:8px;margin-bottom:16px"><input class="form-input" id="cron-new-id" placeholder="task_id" style="flex:1"><input class="form-input" id="cron-new-schedule" placeholder="every 30m" style="flex:1"><button class="btn btn-primary btn-sm" onclick="cronCreateTask()">+ 创建</button></div><div id="cron-error" class="text-sm text-danger mb-8" style="display:none"></div>' +
-    data.tasks.map(t => {
-      const status = t.enabled ? '🟢' : '🔴';
-      const lastRun = t.last_run ? new Date(t.last_run*1000).toLocaleString('zh-CN') : '从未';
-      const runs = t.run_count || 0;
-      return '<div class="service-card"><div class="service-info"><div class="service-name">' + escHtml(t.id) + ' ' + status + '</div>' +
-        '<div class="service-detail">调度: ' + escHtml(t.schedule) + ' · 运行: ' + runs + ' 次 · 上次: ' + lastRun + '</div>' +
-        '<div class="text-sm text-muted">' + escHtml((t.prompt||"").slice(0,80)) + '</div></div>' +
-        '<button class="btn btn-secondary btn-sm" onclick="cronToggle(\''+t.id+'\')" style="margin-right:4px">'+(t.enabled?'暂停':'启用')+'</button>' +
-        '<button class="btn btn-danger btn-sm" onclick="cronDelete(\''+t.id+'\')">删除</button></div>';
-    }).join('');
-  } catch(e) { showErrorEl(document.getElementById('cron-list'), '加载失败', e.message, renderCronTasks); }
-}
-
-async function cronCreateTask() {
-  const id = document.getElementById('cron-new-id').value.trim();
-  const schedule = document.getElementById('cron-new-schedule').value.trim();
-  const prompt = document.getElementById('cron-new-prompt') ? document.getElementById('cron-new-prompt').value.trim() : '定时调研任务';
-  const errEl = document.getElementById('cron-error');
-  if (!id || !schedule) { errEl.textContent = '请填写任务 ID 和调度表达式'; errEl.style.display = 'block'; return; }
-  errEl.style.display = 'none';
-  try {
-    const r = await _origFetch('/v1/scheduler/tasks', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,schedule,prompt})});
-    const data = await r.json();
-    if (r.status !== 200) throw new Error(data.error);
-    toast('定时任务已创建', 'ok');
-    renderCronTasks();
-  } catch(e) { errEl.textContent = e.message; errEl.style.display = 'block'; }
-}
-
-async function cronToggle(taskId) {
-  try { await _origFetch('/v1/scheduler/tasks/' + taskId + '/toggle', {method:'POST'}); toast('已切换', 'ok'); renderCronTasks(); }
-  catch(e) { toast('操作失败', 'err'); }
-}
-
-async function cronDelete(taskId) {
-  if (!confirm('删除定时任务「' + taskId + '」？')) return;
-  try { await _origFetch('/v1/scheduler/tasks/' + taskId, {method:'DELETE'}); toast('已删除', 'ok'); renderCronTasks(); }
-  catch(e) { toast('删除失败', 'err'); }
-}
-
-// ═══════════════════════════════════
-// PLUGINS TAB
-// ═══════════════════════════════════
-
-async function renderPluginList() {
-  const el = document.getElementById('dash-content');
-  el.innerHTML = '<div class="card"><div class="card-title">🧩 插件管理</div><div id="plugin-list"><div class="skeleton-card"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-line"></div></div></div></div>';
-  try {
-    const data = await API.get('/v1/plugins');
-    const list = document.getElementById('plugin-list');
-    if (!data.plugins || data.plugins.length === 0) {
-      list.innerHTML = '<div class="text-center text-muted" style="padding:24px">暂无插件。<br>将 .py 文件放入 ~/.agent-harness/plugins/ 目录后重启即可加载。</div>';
-      return;
-    }
-    list.innerHTML = '<table><tr><th>文件名</th><th>状态</th><th>错误</th></tr>' +
-    data.plugins.map(p => '<tr><td><code>' + escHtml(p.file) + '</code></td>' +
-      '<td>' + (p.success ? '<span class="dot dot-ok"></span> 已加载' : '<span class="dot dot-fail"></span> 失败') + '</td>' +
-      '<td class="text-sm text-muted">' + escHtml(p.error || '') + '</td></tr>').join('') + '</table>';
-  } catch(e) { showErrorEl(document.getElementById('plugin-list'), '加载失败', e.message, renderPluginList); }
 }
 
 // ═══════════════════════════════════

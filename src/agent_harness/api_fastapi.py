@@ -1297,79 +1297,6 @@ async def admin_delete_user(user_id: str, request: Request):
     return JSONResponse({"error": "用户不存在"}, status_code=404)
 
 
-# ═══════════════════════════════════════
-# PLUGINS API
-# ═══════════════════════════════════════
-
-
-@app.get("/v1/plugins")
-async def list_plugins():
-    """List loaded plugins."""
-    try:
-        from .plugin_loader import list_plugins as _list
-        plugins = _list()
-        return {"plugins": plugins, "count": len(plugins)}
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-# ═══════════════════════════════════════
-# SCHEDULER API
-# ═══════════════════════════════════════
-
-
-@app.get("/v1/scheduler/tasks")
-async def scheduler_list_tasks():
-    """List scheduled tasks."""
-    try:
-        from .agent_cron import list_tasks as _list
-        return {"tasks": _list(), "count": 0}
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-@app.post("/v1/scheduler/tasks")
-async def scheduler_create_task(request: Request):
-    """Create a scheduled task."""
-    body = await request.json()
-    task_id = body.get("id", "")
-    schedule = body.get("schedule", "")
-    prompt = body.get("prompt", "")
-
-    if not task_id or not schedule or not prompt:
-        return JSONResponse({"error": "需要 id, schedule, prompt 参数"}, status_code=400)
-
-    try:
-        from .agent_cron import add_task
-        task = add_task(task_id, schedule, prompt)
-        return {"status": "created", "task": task}
-    except ValueError as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-@app.delete("/v1/scheduler/tasks/{task_id}")
-async def scheduler_delete_task(task_id: str):
-    """Delete a scheduled task."""
-    from .agent_cron import delete_task
-    if delete_task(task_id):
-        return {"status": "deleted"}
-    return JSONResponse({"error": "任务不存在"}, status_code=404)
-
-
-@app.post("/v1/scheduler/tasks/{task_id}/toggle")
-async def scheduler_toggle_task(task_id: str):
-    """Enable or disable a scheduled task."""
-    from .agent_cron import get_task, update_task
-    task = get_task(task_id)
-    if task is None:
-        return JSONResponse({"error": "任务不存在"}, status_code=404)
-    new_state = not task.get("enabled", True)
-    update_task(task_id, enabled=new_state)
-    return {"status": "updated", "enabled": new_state}
-
-
 # ─── Direct entry point ───
 
 
@@ -1409,33 +1336,6 @@ def main():
         pass
     if count:
         print("  会话: %d 个" % count)
-
-    # Load plugins
-    plugins_loaded = 0
-    try:
-        from .plugin_loader import load_plugins as _load_plugins
-        plugin_results = _load_plugins()
-        plugins_loaded = sum(1 for p in plugin_results if p["success"])
-        if plugins_loaded:
-            print("  插件:     %d 个已加载" % plugins_loaded)
-        for p in plugin_results:
-            if not p["success"]:
-                print("  ⚠️  插件加载失败: %s — %s" % (p["file"], p.get("error", "")))
-    except Exception:
-        pass
-
-    # Start cron scheduler
-    try:
-        from .agent_cron import get_scheduler
-        sched = get_scheduler()
-        sched.start()
-        scheduled_count = len(__import__("json").loads(
-            __import__("os").environ.get("HARNESS_SCHEDULER_COUNT", "0")
-        ) if False else 0)
-        print("  调度器:  运行中")
-    except Exception:
-        pass
-
     print("")
 
     # Multi-worker support
