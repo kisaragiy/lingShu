@@ -218,6 +218,10 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
         from .pipeline.cancel import set_cancel_event, clear_cancel_event, is_cancelled
         set_progress_queue(q)
 
+        # Acquire agent semaphore
+        if _agent_semaphore is not None:
+            _agent_semaphore.acquire()
+
         # Register this task for cancellation
         if session_id:
             cancel_event = _threading.Event()
@@ -261,6 +265,9 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
         q.put({"type": "done"})
     finally:
         try:
+            # Release agent semaphore
+            if _agent_semaphore is not None:
+                _agent_semaphore.release()
             from .graph_multi import clear_progress_queue
             from .pipeline.cancel import clear_cancel_event
             clear_progress_queue()
