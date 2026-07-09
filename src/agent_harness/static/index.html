@@ -704,7 +704,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.22.0</span>
+          <span class="sidebar-version">v0.23.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -1008,8 +1008,19 @@ async function sendChatMessage() {
       btns.style.cssText = 'align-self:flex-start; margin-top:4px; display:flex; gap:4px; max-width:100%; background:none; border:none; padding:0';
       btns.innerHTML = `
         <button class="btn btn-secondary btn-sm" onclick="saveReport(this, '${chatSessionId}')">💾 保存报告</button>
-        <button class="btn btn-primary btn-sm" onclick="formalizeReport(this, '${chatSessionId}')">📄 生成正式报告</button>`;
+        <button class="btn btn-primary btn-sm" onclick="formalizeAndOpen(this, '${chatSessionId}')">📄 生成正式报告</button>`;
       document.getElementById('chat-messages').appendChild(btns);
+
+      // Auto-save draft (silent, background)
+      if (fullContent.length > 300) {
+        const title = '草稿_' + new Date().toISOString().slice(0,10);
+        _origFetch('/v1/reports', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({title, content: fullContent.slice(0, 2000), tags:['chat', 'draft'], source_session: chatSessionId}),
+        }).then(r => r.json()).then(d => {
+          if (d && d.id) { window._lastReportId = d.id; }
+        }).catch(() => {});
+      }
     }
 
     // Refresh sidebar (new session may appear)
@@ -1066,7 +1077,7 @@ async function saveReport(btn, sessionId) {
   } catch(e) { toast('保存失败: ' + e.message, 'err'); btn.disabled = false; btn.innerHTML = '💾 保存报告'; }
 }
 
-async function formalizeReport(btn, sessionId) {
+async function formalizeAndOpen(btn, sessionId) {
   const container = document.getElementById('chat-messages');
   const bubbles = container.querySelectorAll('.chat-bubble.assistant');
   const last = bubbles[bubbles.length - 1];
@@ -1082,9 +1093,10 @@ async function formalizeReport(btn, sessionId) {
     });
     const data = await r.json();
     if (data.id) {
-      toast('正式报告已生成 ✓', 'ok');
+      toast('正式报告已生成 ✓ 正在打开...', 'ok');
       btn.innerHTML = '📄 已生成';
-      btn.onclick = () => window.open('/v1/reports/' + data.id, '_blank');
+      // Open report in new tab after a brief delay
+      setTimeout(() => window.open('/v1/reports/' + data.id, '_blank'), 500);
     } else {
       toast('生成失败', 'err'); btn.disabled = false; btn.innerHTML = '📄 生成正式报告';
     }
@@ -1186,8 +1198,10 @@ async function renderReports() {
     }
     list.innerHTML = data.reports.map(r => {
       const date = new Date(r.created_at*1000).toLocaleString('zh-CN');
+      const isDraft = (r.tags||[]).includes('draft');
+      const draftBadge = isDraft ? '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:#fef3c7;color:#92400e;font-size:11px;margin-right:4px">📝 草稿</span>' : '';
       const tags = (r.tags||[]).map(t => '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:var(--accent-light);color:var(--accent);font-size:11px;margin-right:4px">'+escHtml(t)+'</span>').join('');
-      return '<div class="service-card"><div class="service-info"><div class="service-name">'+escHtml(r.title)+'</div><div class="service-detail">'+date+' · '+r.chars+' 字 '+tags+'</div></div><button class="btn btn-secondary btn-sm" onclick="viewReport(\''+r.id+'\')" style="margin-right:4px">查看</button><button class="btn btn-success btn-sm" onclick="downloadReport(\''+r.id+'\',\''+escHtml(r.title).replace(/'/g,"\\'")+'\')" style="margin-right:4px">⬇</button><button class="btn btn-danger btn-sm" onclick="deleteReport(\''+r.id+'\')">删除</button></div>';
+      return '<div class="service-card"><div class="service-info"><div class="service-name">'+escHtml(r.title)+draftBadge+'</div><div class="service-detail">'+date+' · '+r.chars+' 字 '+tags+'</div></div><button class="btn btn-secondary btn-sm" onclick="viewReport(\''+r.id+'\')" style="margin-right:4px">查看</button><button class="btn btn-success btn-sm" onclick="downloadReport(\''+r.id+'\',\''+escHtml(r.title).replace(/'/g,"\\'")+'\')" style="margin-right:4px">⬇</button><button class="btn btn-danger btn-sm" onclick="deleteReport(\''+r.id+'\')">删除</button></div>';
     }).join('');
   } catch(e) {}
 }
