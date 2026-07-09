@@ -240,11 +240,18 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
   sup.cite { font-size: 11px; vertical-align: super; line-height: 0; margin: 0 2px; }
   sup.cite a { color: #2563eb; text-decoration: none; font-weight: 600; }
   sup.cite a:hover { text-decoration: underline; }
-  /* ─── Footer ─── */
+  /* ─── Footer / Print bar ─── */
   .footer { text-align: center; font-size: 12px; color: #94a3b8; padding: 24px 0; }
+  .print-bar { text-align: center; margin-bottom: 12px; }
+  .print-btn {
+    background: #2563eb; color: #fff; border: none; padding: 8px 20px;
+    border-radius: 8px; font-size: 13px; cursor: pointer; transition: background .15s;
+  }
+  .print-btn:hover { background: #1d4ed8; }
   @media print {
     body { background: #fff; padding: 0; }
     .report-container { box-shadow: none; border-radius: 0; padding: 40px; break-inside: avoid; }
+    .print-bar { display: none; }
     .footer { position: running(footer); }
     h2, h3 { break-after: avoid; }
     table { break-inside: avoid; }
@@ -265,8 +272,11 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
   %s
   %s
   %s
+  %s
 </div>
+<div class="print-bar"><button class="print-btn" onclick="window.print()">🖨️ 打印 / 导出 PDF</button></div>
 <div class="footer">由灵枢 (LingShu Agent) 自动生成 · 数据基于公开搜索结果 · 仅供参考</div>
+<script>document.addEventListener('keydown',function(e){if(e.key==='p'&&(e.ctrlKey||e.metaKey))window.print()});</script>
 </body>
 </html>""" % (title, title, now, "%d" % word_count, "%d" % read_time,
             toc_html, body_html, sources_html, "<div class='tags'>%s</div>" % " ".join('<span class="tag">%s</span>' % t for t in tags) if tags else "")

@@ -704,7 +704,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.23.0</span>
+          <span class="sidebar-version">v0.24.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -1188,10 +1188,20 @@ async function cancelTask(sessionId) {
 // ═══════════════════════════════════
 async function renderReports() {
   const el = document.getElementById('dash-content');
-  el.innerHTML = '<div class="card"><div class="flex-between"><div class="card-title">📄 报告列表</div><button class="btn btn-secondary btn-sm" onclick="renderReports()">🔄 刷新</button></div><div id="report-list"><div class="text-center"><span class="spinner"></span> 加载中...</div></div></div>';
+  el.innerHTML = '<div class="card"><div class="flex-between"><div class="card-title">📄 报告列表</div><button class="btn btn-secondary btn-sm" onclick="renderReports()">🔄 刷新</button></div>' +
+    '<div style="display:flex;gap:8px;margin-bottom:12px">' +
+    '<input class="form-input" id="report-search-input" placeholder="搜索报告标题或标签..." onkeydown="if(event.key===\'Enter\') searchReports()">' +
+    '<button class="btn btn-primary btn-sm" onclick="searchReports()">搜索</button>' +
+    '</div><div id="report-list"><div class="text-center"><span class="spinner"></span> 加载中...</div></div></div>';
+  await loadReports();
+}
+
+async function loadReports(q) {
+  const list = document.getElementById('report-list');
+  if (!list) return;
   try {
-    const data = await API.get('/v1/reports');
-    const list = document.getElementById('report-list');
+    const url = q ? '/v1/reports/search?q=' + encodeURIComponent(q) : '/v1/reports';
+    const data = await API.get(url);
     if (!data.reports || !data.reports.length) {
       list.innerHTML = '<div class="text-center text-muted" style="padding:20px">暂无报告。在「💬 对话」中聊天后保存即可。</div>';
       return;
@@ -1207,6 +1217,11 @@ async function renderReports() {
 }
 
 async function viewReport(reportId) { window.open('/v1/reports/' + reportId, '_blank'); }
+async function searchReports() {
+  const q = document.getElementById('report-search-input').value.trim();
+  document.getElementById('report-list').innerHTML = '<div class="text-center"><span class="spinner"></span> 搜索中...</div>';
+  await loadReports(q || null);
+}
 async function downloadReport(reportId, title) {
   const a = document.createElement('a');
   a.href = '/v1/reports/' + reportId;
@@ -1470,7 +1485,7 @@ async function checkUpdate() {
     const r = await fetch('https://api.github.com/repos/kisaragiy/lingShu/releases/latest', {signal: AbortSignal.timeout(5000)});
     const data = await r.json();
     const latest = (data.tag_name || '').replace('v', '');
-    const current = '0.12.0';
+    const current = '0.23.0';
     if (latest && latest !== current) { toast('发现新版本: v' + latest + ' (当前: v' + current + ')', 'info'); }
     else { toast('已是最新版本 v' + current, 'ok'); }
   } catch(e) { toast('检查更新失败: ' + e.message, 'err'); }
