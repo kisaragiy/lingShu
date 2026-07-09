@@ -704,7 +704,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.21.0</span>
+          <span class="sidebar-version">v0.22.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -1402,28 +1402,38 @@ async function schedulerCreate() {
 // ═══════════════════════════════════
 async function renderDashSettings() {
   const el = document.getElementById('dash-content');
-  const config = await API.get('/v1/setup/config');
-  el.innerHTML = `<div class="card">
-    <div class="card-title">⚙️ 设置</div>
-    <div class="form-group">
-      <label class="form-label">LLM 后端</label>
-      <input class="form-input" id="set-llm-backend" value="${escHtml(config.llm?.backend || 'auto')}">
-      <div class="form-hint">当前: ${escHtml(config.llm?.backend || '未配置')}</div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">API 地址</label>
-      <input class="form-input" id="set-llm-url" value="${escHtml(config.llm?.api_url || '')}">
-    </div>
-    <div class="form-group">
-      <label class="form-label">模型</label>
-      <input class="form-input" id="set-llm-model" value="${escHtml(config.llm?.model || '')}">
-    </div>
-    <button class="btn btn-primary btn-sm" onclick="saveSettings()">保存设置</button>
-    <div class="mt-16" style="border-top:1px solid var(--border);padding-top:16px">
-      <button class="btn btn-secondary btn-sm" onclick="renderSetup()">重新运行配置向导</button>
-      <span class="text-sm text-muted" style="margin-left:12px">清空配置并从头设置</span>
-    </div>
-  </div>`;
+  const config = await API.get('/v1/setup/config').catch(() => null);
+  const health = await API.get('/health').catch(() => null);
+
+  let html = '<div class="card"><div class="card-title">⚙️ 设置</div>';
+
+  // LLM config section
+  html += '<div class="card-title" style="font-size:14px;margin-top:16px">LLM 配置</div>';
+  const llm = config && config.llm;
+  html += '<div class="form-group"><label class="form-label">LLM 后端</label>' +
+    '<input class="form-input" id="set-llm-backend" value="' + escHtml(llm?.backend || 'auto') + '">' +
+    '<div class="form-hint">当前: ' + escHtml(llm?.backend || '未配置') + '</div></div>';
+  html += '<div class="form-group"><label class="form-label">API 地址</label>' +
+    '<input class="form-input" id="set-llm-url" value="' + escHtml(llm?.api_url || '') + '"></div>';
+  html += '<div class="form-group"><label class="form-label">模型</label>' +
+    '<input class="form-input" id="set-llm-model" value="' + escHtml(llm?.model || '') + '"></div>';
+  html += '<button class="btn btn-primary btn-sm" onclick="saveSettings()">保存设置</button>';
+
+  // About section
+  html += '<div class="card-title" style="font-size:14px;margin-top:24px">📦 关于灵枢</div>' +
+    '<table><tr><td style="width:100px;padding:6px 0">版本</td><td><code>v0.22.0</code></td></tr>' +
+    '<tr><td style="padding:6px 0">API 版本</td><td>' + (health ? escHtml(health.version || '1.0.0') : '—') + '</td></tr>' +
+    '<tr><td style="padding:6px 0">活跃会话</td><td>' + (health ? health.active_sessions + ' 个' : '—') + '</td></tr>' +
+    '<tr><td style="padding:6px 0">数据目录</td><td><code>~/.agent-harness/</code></td></tr>' +
+    '<tr><td style="padding:6px 0">GitHub</td><td><a href="https://github.com/kisaragiy/lingShu" target="_blank" rel="noopener">kisaragiy/lingShu</a></td></tr></table>' +
+    '<div class="btn-group mt-16" style="display:flex;gap:8px">' +
+    '<button class="btn btn-secondary btn-sm" onclick="renderSetup()">🔄 重新配置向导</button>' +
+    '<button class="btn btn-secondary btn-sm" onclick="checkUpdate()">📦 检查更新</button>' +
+    '</div>';
+
+  html += '</div>';
+  el.innerHTML = html;
+}
 }
 
 async function saveSettings() {
