@@ -1451,6 +1451,82 @@ async def list_plugins():
 
 
 # ═══════════════════════════════════════
+# DATA EXPORT API
+# ═══════════════════════════════════════
+
+import io
+import zipfile
+from pathlib import Path as _P
+
+
+@app.get("/v1/export/sessions")
+async def export_sessions():
+    """Export all sessions as a JSON file download (admin only)."""
+    sessions = _list_sessions()
+    data = []
+    for s in sessions:
+        msgs = _load_session(s["id"])
+        if msgs:
+            data.append({"session_id": s["id"], "messages": msgs, "meta": s})
+    return StreamingResponse(
+        iter([json.dumps(data, ensure_ascii=False, indent=2)]),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=sessions_export.json"},
+    )
+
+
+@app.get("/v1/export/reports")
+async def export_reports():
+    """Export all reports as JSON metadata + Markdown content."""
+    from .pipeline.report_store import REPORTS_DIR as _RD, _load_index
+    index = _load_index()
+    data = []
+    for meta in index:
+        fp = _RD / meta.get("filename", "")
+        content = fp.read_text("utf-8") if fp.exists() else ""
+        data.append({**meta, "content": content})
+    return StreamingResponse(
+        iter([json.dumps(data, ensure_ascii=False, indent=2)]),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=reports_export.json"},
+    )
+
+
+@app.get("/v1/export/backup")
+async def export_backup():
+    """Download a full backup ZIP: sessions + reports + auth db."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Sessions
+        sessions = _list_sessions()
+        sessions_data = []
+        for s in sessions:
+            msgs = _load_session(s["id"])
+            if msgs:
+                sessions_data.append({"id": s["id"], "messages": msgs})
+        zf.writestr("sessions.json", json.dumps(sessions_data, ensure_ascii=False, indent=2))
+        # Reports
+        from .pipeline.report_store import REPORTS_DIR as _RD, _load_index
+        index = _load_index()
+        reports_data = []
+        for meta in index:
+            fp = _RD / meta.get("filename", "")
+            content = fp.read_text("utf-8") if fp.exists() else ""
+            reports_data.append({**meta, "content": content})
+        zf.writestr("reports.json", json.dumps(reports_data, ensure_ascii=False, indent=2))
+        # Auth DB
+        db_path = _auth_db.DB_PATH
+        if db_path.exists():
+            zf.write(str(db_path), "auth.db")
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=lingShu_backup_%d.zip" % int(time.time())},
+    )
+
+
+# ═══════════════════════════════════════
 # SCHEDULER (CRON) API
 # ═══════════════════════════════════════
 
