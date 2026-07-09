@@ -54,21 +54,89 @@ const API = {
   },
 };
 
-// ─── Auto-attach API token to all /v1/* fetch calls ───
+// ─── Auth state ───
+window.__auth = { token: null, user: null };
+
+// Load saved JWT from localStorage
+const _savedToken = localStorage.getItem('lingShu_jwt');
+if (_savedToken) window.__auth.token = _savedToken;
+
+// ─── Auto-attach auth header to all /v1/* fetch calls ───
 const _origFetch = window.fetch;
 window.fetch = function(url, opts) {
   opts = opts || {};
   const urlStr = (typeof url === 'string') ? url : url.url;
-  if (urlStr && urlStr.startsWith('/v1/') && window.__API_TOKEN__) {
+  if (urlStr && urlStr.startsWith('/v1/')) {
     opts.headers = opts.headers || {};
     if (opts.headers instanceof Headers) {
-      if (!opts.headers.has('X-API-Key')) opts.headers.set('X-API-Key', window.__API_TOKEN__);
-    } else if (!opts.headers['X-API-Key']) {
-      opts.headers['X-API-Key'] = window.__API_TOKEN__;
+      // JWT Bearer (preferred)
+      if (window.__auth.token && !opts.headers.has('Authorization')) {
+        opts.headers.set('Authorization', 'Bearer ' + window.__auth.token);
+      }
+      // API Key fallback
+      if (window.__API_TOKEN__ && !opts.headers.has('X-API-Key')) {
+        opts.headers.set('X-API-Key', window.__API_TOKEN__);
+      }
+    } else {
+      // Plain object
+      if (window.__auth.token && !opts.headers['Authorization']) {
+        opts.headers['Authorization'] = 'Bearer ' + window.__auth.token;
+      }
+      if (window.__API_TOKEN__ && !opts.headers['X-API-Key']) {
+        opts.headers['X-API-Key'] = window.__API_TOKEN__;
+      }
     }
   }
   return _origFetch.call(window, url, opts);
 };
+
+// ─── Auth helpers ───
+async function authLogin(username, password) {
+  const r = await _origFetch('/v1/auth/login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username, password}),
+  });
+  const data = await r.json();
+  if (r.status !== 200) throw new Error(data.error || '登录失败');
+  window.__auth.token = data.access_token;
+  window.__auth.user = data.user;
+  localStorage.setItem('lingShu_jwt', data.access_token);
+  localStorage.setItem('lingShu_user', JSON.stringify(data.user));
+  return data;
+}
+
+async function authLogout() {
+  await _origFetch('/v1/auth/logout', {method: 'POST'}).catch(()=>{});
+  window.__auth.token = null;
+  window.__auth.user = null;
+  localStorage.removeItem('lingShu_jwt');
+  localStorage.removeItem('lingShu_user');
+}
+
+async function authCheck() {
+  // Try JWT auth first
+  if (window.__auth.token) {
+    try {
+      const r = await _origFetch('/v1/auth/me', {headers: {'Authorization': 'Bearer ' + window.__auth.token}});
+      if (r.status === 200) {
+        const data = await r.json();
+        window.__auth.user = data.user;
+        return 'authenticated';
+      }
+    } catch(e) {}
+  }
+  // Try API key fallback (for Open WebUI / CLI)
+  try {
+    const r = await _origFetch('/v1/auth/me', {headers: {'X-API-Key': window.__API_TOKEN__}});
+    if (r.status === 200) {
+      const data = await r.json();
+      window.__auth.user = data.user;
+      return 'authenticated';
+    }
+  } catch(e) {}
+  return 'unauthenticated';
+}
 
 // ─── Toast ───
 function toast(msg, type='info') {
@@ -80,6 +148,20 @@ function toast(msg, type='info') {
 
 // ─── Router ───
 async function init() {
+  // Check first-boot (admin not created yet)
+  if (window.__NEEDS_ADMIN__) {
+    renderSetupAdmin();
+    return;
+  }
+
+  // Check authentication
+  const status = await authCheck();
+  if (status !== 'authenticated') {
+    renderLogin();
+    return;
+  }
+
+  // Authenticated — check setup status
   try {
     const config = await API.get('/v1/setup/config');
     if (config.setup_complete) {
@@ -92,6 +174,128 @@ async function init() {
   }
   // Hide splash
   setTimeout(() => document.getElementById('splash').classList.add('hidden'), 200);
+}
+
+// ═══════════════════════════════════
+// LOGIN / ADMIN SETUP
+// ═══════════════════════════════════
+
+function renderSetupAdmin() {
+  document.title = '灵枢 — 创建管理员';
+  document.getElementById('app').innerHTML = `
+    <div class="container" style="max-width:480px;margin-top:120px">
+      <div class="card text-center" style="padding:48px">
+        <div style="font-size:48px;margin-bottom:16px">⚡</div>
+        <h2 style="margin-bottom:4px">首次启动设置</h2>
+        <p class="text-muted text-sm" style="margin-bottom:24px">创建管理员账号以开始使用灵枢</p>
+        <div class="form-group text-left">
+          <label class="form-label">管理员用户名</label>
+          <input class="form-input" id="setup-admin-username" placeholder="admin" value="admin">
+        </div>
+        <div class="form-group text-left">
+          <label class="form-label">密码（至少 6 位）</label>
+          <input class="form-input" id="setup-admin-password" type="password" placeholder="••••••">
+        </div>
+        <div class="form-group text-left">
+          <label class="form-label">确认密码</label>
+          <input class="form-input" id="setup-admin-password2" type="password" placeholder="••••••">
+        </div>
+        <div id="setup-admin-error" class="text-sm text-left" style="color:var(--danger);margin-bottom:12px;display:none"></div>
+        <button class="btn btn-primary" onclick="doSetupAdmin()" id="setup-admin-btn" style="width:100%;font-size:16px;padding:14px">
+          创建管理员 →
+        </button>
+      </div>
+    </div>`;
+}
+
+async function doSetupAdmin() {
+  const username = document.getElementById('setup-admin-username').value.trim();
+  const password = document.getElementById('setup-admin-password').value;
+  const password2 = document.getElementById('setup-admin-password2').value;
+  const errEl = document.getElementById('setup-admin-error');
+
+  if (!username) { errEl.textContent = '请输入用户名'; errEl.style.display = 'block'; return; }
+  if (password.length < 6) { errEl.textContent = '密码至少 6 位'; errEl.style.display = 'block'; return; }
+  if (password !== password2) { errEl.textContent = '两次密码不一致'; errEl.style.display = 'block'; return; }
+
+  const btn = document.getElementById('setup-admin-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 创建中...';
+  errEl.style.display = 'none';
+
+  try {
+    const r = await _origFetch('/v1/auth/setup-admin', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username, password}),
+    });
+    const data = await r.json();
+    if (r.status !== 200) throw new Error(data.error || '创建失败');
+
+    // Auto login after creation
+    await authLogin(username, password);
+    toast('管理员已创建，欢迎使用灵枢！', 'ok');
+    init();  // Re-init (will go to setup wizard now)
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+    btn.disabled = false; btn.innerHTML = '创建管理员 →';
+  }
+}
+
+function renderLogin() {
+  document.title = '灵枢 — 登录';
+  document.getElementById('splash').classList.add('hidden');
+  document.getElementById('app').innerHTML = `
+    <div class="container" style="max-width:420px;margin-top:100px">
+      <div class="card text-center" style="padding:48px">
+        <div style="font-size:48px;margin-bottom:8px">⚡</div>
+        <h2 style="margin-bottom:4px">灵枢</h2>
+        <div style="color:var(--accent);font-size:13px;margin-bottom:24px">LingShu Agent · AI 调研助手</div>
+        <div id="login-error" class="text-sm text-left" style="color:var(--danger);margin-bottom:12px;display:none"></div>
+        <div class="form-group text-left">
+          <label class="form-label">用户名</label>
+          <input class="form-input" id="login-username" placeholder="admin" autocomplete="username"
+            onkeydown="if(event.key==='Enter') document.getElementById('login-password').focus()">
+        </div>
+        <div class="form-group text-left">
+          <label class="form-label">密码</label>
+          <input class="form-input" id="login-password" type="password" placeholder="••••••" autocomplete="current-password"
+            onkeydown="if(event.key==='Enter') doLogin()">
+        </div>
+        <button class="btn btn-primary" onclick="doLogin()" id="login-btn" style="width:100%;font-size:16px;padding:14px">
+          登录
+        </button>
+      </div>
+    </div>`;
+  // Focus username
+  setTimeout(() => document.getElementById('login-username').focus(), 100);
+}
+
+async function doLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+
+  if (!username || !password) {
+    errEl.textContent = '请输入用户名和密码';
+    errEl.style.display = 'block'; return;
+  }
+
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 登录中...';
+  errEl.style.display = 'none';
+
+  try {
+    await authLogin(username, password);
+    // Redirect to dashboard
+    init();
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+    btn.disabled = false; btn.innerHTML = '登录';
+    document.getElementById('login-password').value = '';
+    document.getElementById('login-password').focus();
+  }
 }
 
 // ═══════════════════════════════════
@@ -379,9 +583,15 @@ const DASH_TABS = [
   { id: 'knowledge', icon: '📚', label: '知识库' },
   { id: 'mcp',     icon: '🔌',  label: '工具' },
   { id: 'sessions', icon: '🗂️', label: '会话管理' },
-  { id: 'settings', icon: '⚙️', label: '设置' },
-  { id: 'skills',  icon: '🧠',  label: '技能' },
+  { id: 'admin-users', icon: '👥', label: '用户管理', adminOnly: true },
+  { id: 'settings', icon: '⚙️', label: '设置', adminOnly: true },
+  { id: 'skills',  icon: '🧠',  label: '技能', adminOnly: true },
 ];
+
+function _visibleTabs() {
+  const isAdmin = window.__auth.user && window.__auth.user.role === 'admin';
+  return DASH_TABS.filter(t => !t.adminOnly || isAdmin);
+}
 
 let dashTab = 'chat';
 let dashData = {};
@@ -398,27 +608,36 @@ function renderDashboard() {
   dashTab = 'chat';
 
   const app = document.getElementById('app');
+  const isAdmin = window.__auth.user && window.__auth.user.role === 'admin';
+  const userName = (window.__auth.user && window.__auth.user.display_name) || '用户';
+  const userBadge = isAdmin ? 'admin' : 'user';
+
   app.innerHTML = `
     <!-- Header -->
     <div class="app-header">
       <div class="app-header-left">
         <span class="app-header-logo">⚡ 灵枢</span>
         <span class="app-header-sub">AI 调研助手</span>
+        <span class="header-user-badge" style="font-size:11px;padding:2px 8px;border-radius:10px;background:${isAdmin?'var(--accent-light)':'#f0f0f0'};color:${isAdmin?'var(--accent)':'#666'};margin-left:8px">${userName} · ${userBadge}</span>
       </div>
       <div style="display:flex;gap:4px;align-items:center">
         <div style="position:relative" id="settings-menu-container">
           <button class="btn btn-secondary btn-sm" onclick="toggleSettingsMenu()">☰ 菜单 ▾</button>
-          <div id="settings-dropdown" class="hidden" style="position:absolute;top:100%;right:0;margin-top:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);min-width:160px;z-index:100;box-shadow:0 4px 20px rgba(0,0,0,0.15)">
-            <div class="dropdown-item" onclick="switchTab('settings'); closeSettingsMenu()">⚙️ 设置</div>
+          <div id="settings-dropdown" class="hidden" style="position:absolute;top:100%;right:0;margin-top:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);min-width:180px;z-index:100;box-shadow:0 4px 20px rgba(0,0,0,0.15)">
+            <div class="dropdown-item text-sm" style="cursor:default;color:var(--text-secondary);border-bottom:1px solid var(--border);margin-bottom:4px">
+              ${userName} · ${isAdmin ? '管理员' : '普通用户'}
+            </div>
+            ${isAdmin ? '<div class="dropdown-item" onclick="switchTab(\'settings\'); closeSettingsMenu()">⚙️ 设置</div>' : ''}
+            ${isAdmin ? '<div class="dropdown-item" onclick="switchTab(\'admin-users\'); closeSettingsMenu()">👥 用户管理</div>' : ''}
             <div class="dropdown-item" onclick="switchTab('reports'); closeSettingsMenu()">📄 报告列表</div>
             <div class="dropdown-item" onclick="switchTab('mcp'); closeSettingsMenu()">🔌 工具列表</div>
             <div class="dropdown-item" onclick="switchTab('sessions'); closeSettingsMenu()">🗂️ 会话管理</div>
-            <div class="dropdown-item" onclick="switchTab('skills'); closeSettingsMenu()">🧠 技能</div>
+            ${isAdmin ? '<div class="dropdown-item" onclick="switchTab(\'skills\'); closeSettingsMenu()">🧠 技能</div>' : ''}
             <div class="dropdown-divider"></div>
             <div class="dropdown-item" onclick="checkUpdate(); closeSettingsMenu()">📦 检查更新</div>
-            <div class="dropdown-item" onclick="renderSetup(); closeSettingsMenu()">🔄 重新配置</div>
+            ${isAdmin ? '<div class="dropdown-item" onclick="renderSetup(); closeSettingsMenu()">🔄 重新配置</div>' : ''}
             <div class="dropdown-divider"></div>
-            <div class="dropdown-item" onclick="closeSettingsMenu()">❌ 关闭</div>
+            <div class="dropdown-item" onclick="doLogout(); closeSettingsMenu()" style="color:var(--danger)">🚪 退出登录</div>
           </div>
         </div>
       </div>
@@ -438,7 +657,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.14.0</span>
+          <span class="sidebar-version">v0.15.0</span>
         </div>
       </div>
 
@@ -460,7 +679,7 @@ function renderDashboard() {
 
 function renderTabBar() {
   const bar = document.getElementById('main-tabs');
-  bar.innerHTML = DASH_TABS.map(t =>
+  bar.innerHTML = _visibleTabs().map(t =>
     `<a class="main-tab" data-tab="${t.id}" href="#" onclick="return switchTab('${t.id}')">${t.icon} ${t.label}</a>`
   ).join('');
 }
@@ -557,6 +776,7 @@ function switchTab(tab) {
   else if (tab === 'mcp') renderMCP();
   else if (tab === 'reports') renderReports();
   else if (tab === 'skills') renderSkills();
+  else if (tab === 'admin-users') renderAdminUsers();
   return false;
 }
 
@@ -1112,6 +1332,126 @@ async function renderSkills() {
       <tr><td>comfyui-pipeline</td><td>ComfyUI AI 绘画集成</td><td><span class="dot dot-warn"></span> 需启动 ComfyUI</td></tr>
     </table>
   </div>`;
+}
+
+// ─── Auth / Logout ───
+async function doLogout() {
+  await authLogout();
+  window.__NEEDS_ADMIN__ = false;
+  init();
+}
+
+// ═══════════════════════════════════
+// ADMIN — USER MANAGEMENT
+// ═══════════════════════════════════
+
+async function renderAdminUsers() {
+  const el = document.getElementById('dash-content');
+  el.innerHTML = `<div class="card">
+    <div class="flex-between">
+      <div class="card-title">👥 用户管理</div>
+      <button class="btn btn-secondary btn-sm" onclick="renderAdminUsers()">🔄 刷新</button>
+    </div>
+    <div class="mt-16" id="admin-users-list"><div class="text-center"><span class="spinner"></span> 加载中...</div></div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-title" style="font-size:13px">创建新用户</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+        <div class="form-group" style="flex:2;min-width:140px">
+          <label class="form-label">用户名</label>
+          <input class="form-input" id="admin-new-username" placeholder="username">
+        </div>
+        <div class="form-group" style="flex:2;min-width:140px">
+          <label class="form-label">密码</label>
+          <input class="form-input" id="admin-new-password" type="password" placeholder="••••••">
+        </div>
+        <div class="form-group" style="flex:1;min-width:100px">
+          <label class="form-label">角色</label>
+          <select class="form-input" id="admin-new-role">
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="adminCreateUser()" style="margin-bottom:4px">创建</button>
+      </div>
+      <div id="admin-new-error" class="text-sm" style="color:var(--danger);margin-top:8px;display:none"></div>
+    </div>
+  </div>`;
+  await adminRefreshUsers();
+}
+
+async function adminRefreshUsers() {
+  try {
+    const data = await API.get('/v1/admin/users');
+    const list = document.getElementById('admin-users-list');
+    const currentUserId = window.__auth.user && window.__auth.user.id;
+    if (!data.users || data.users.length === 0) {
+      list.innerHTML = '<div class="text-center text-muted">暂无用户</div>'; return;
+    }
+    list.innerHTML = '<table><tr><th>用户名</th><th>角色</th><th>显示名</th><th>创建时间</th><th>最后登录</th><th></th></tr>' +
+    data.users.map(u => {
+      const isSelf = u.id === currentUserId;
+      const date = u.created_at ? new Date(u.created_at * 1000).toLocaleString('zh-CN') : '—';
+      const lastLogin = u.last_login ? new Date(u.last_login * 1000).toLocaleString('zh-CN') : '从未';
+      const roleOpts = `<select onchange="adminChangeRole('${u.id}', this.value)" ${isSelf ? 'disabled' : ''}>
+        <option value="user" ${u.role === 'user' ? 'selected' : ''}>user</option>
+        <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>admin</option>
+      </select>`;
+      return `<tr>
+        <td><code>${escHtml(u.username)}</code></td>
+        <td>${roleOpts}</td>
+        <td>${escHtml(u.display_name)}</td>
+        <td class="text-muted text-sm">${date}</td>
+        <td class="text-muted text-sm">${lastLogin}</td>
+        <td>${isSelf ? '<span class="text-muted text-sm">当前</span>' : '<button class="btn btn-danger btn-sm" onclick="adminDeleteUser(\''+u.id+'\',\''+escHtml(u.username)+'\')">删除</button>'}</td>
+      </tr>`;
+    }).join('') + '</table>';
+  } catch(e) {}
+}
+
+async function adminCreateUser() {
+  const username = document.getElementById('admin-new-username').value.trim();
+  const password = document.getElementById('admin-new-password').value;
+  const role = document.getElementById('admin-new-role').value;
+  const errEl = document.getElementById('admin-new-error');
+
+  if (!username || !password) { errEl.textContent = '请填写用户名和密码'; errEl.style.display = 'block'; return; }
+
+  try {
+    const r = await _origFetch('/v1/admin/users', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username, password, role}),
+    });
+    const data = await r.json();
+    if (r.status !== 200) throw new Error(data.error || '创建失败');
+    document.getElementById('admin-new-username').value = '';
+    document.getElementById('admin-new-password').value = '';
+    errEl.style.display = 'none';
+    toast('用户 "' + username + '" 已创建', 'ok');
+    await adminRefreshUsers();
+  } catch(e) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+}
+
+async function adminChangeRole(userId, newRole) {
+  try {
+    const r = await _origFetch('/v1/admin/users/' + userId + '/role', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({role: newRole}),
+    });
+    const data = await r.json();
+    if (r.status !== 200) throw new Error(data.error || '修改失败');
+    toast('角色已更新 (将强制该用户重新登录)', 'ok');
+  } catch(e) { toast('修改失败: ' + e.message, 'err'); }
+}
+
+async function adminDeleteUser(userId, username) {
+  if (!confirm('确定删除用户「' + username + '」？\n该用户的所有会话将被保留。')) return;
+  try {
+    const r = await _origFetch('/v1/admin/users/' + userId, {method: 'DELETE'});
+    const data = await r.json();
+    if (r.status !== 200) throw new Error(data.error || '删除失败');
+    toast('用户已删除', 'ok');
+    await adminRefreshUsers();
+  } catch(e) { toast('删除失败: ' + e.message, 'err'); }
 }
 
 // ═══════════════════════════════════

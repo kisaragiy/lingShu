@@ -31,7 +31,7 @@ from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
@@ -43,16 +43,19 @@ from .api_security import (
     audit_config as _audit_config,
     log_audit as _log_audit,
 )
+from . import auth_db as _auth_db
+from . import auth_jwt as _auth_jwt
 
 HOST = os.environ.get("HARNESS_API_HOST", "127.0.0.1")
 PORT = int(os.environ.get("HARNESS_API_PORT", "8788"))
 
-# ─── API Token (auto-generated on first boot) ───
+# ─── API Key (CLI / Open WebUI fallback) ───
 _API_TOKEN: str = load_or_generate_token()
 
-# ─── Auth exempt paths (no token required) ───
+# ─── Auth exempt paths (no authentication required) ───
 _AUTH_EXEMPT_PREFIXES = ("/health",)
 _AUTH_EXEMPT_EXACT = ("/", "/setup", "/dashboard")
+_AUTH_EXEMPT_V1 = ("/v1/auth/login", "/v1/auth/refresh", "/v1/setup/config")  # needs check for first-boot
 
 # ─── Token optimization: conversation window ───
 # 分析结论：80% 请求 ≤2轮，95% ≤4轮，99%+ ≤6轮
@@ -316,50 +319,65 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── API Auth Middleware ───
+# ─── API Auth Middleware (JWT + API Key dual-mode) ───
 
 
 @app.middleware("http")
 async def _api_auth_middleware(request: Request, call_next):
-    """Check API token on all /v1/* endpoints.
+    """Authenticate all /v1/* endpoints.
 
-    Accepts token via:
-      - X-API-Key header
-      - Authorization: Bearer <token> header
-      - api_token query parameter
-    Frontend endpoints (/, /setup, /dashboard, /health, static files) are exempt.
+    Supports two authentication modes:
+      1. JWT (web frontend) — Authorization: Bearer <jwt>
+      2. API Key (CLI/Open WebUI) — X-API-Key: <token>
+
+    Sets request.state.user with user dict if authenticated via JWT.
     """
     path = request.url.path
 
-    # Check if path is exempt
+    # Exempt non-API paths
     if any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES):
         return await call_next(request)
     if path in _AUTH_EXEMPT_EXACT:
         return await call_next(request)
     if path.startswith("/static/"):
         return await call_next(request)
-
-    # Only protect /v1/ paths
     if not path.startswith("/v1/"):
         return await call_next(request)
 
-    # Extract token from request
-    token = request.headers.get("x-api-key", "")
-    if not token:
-        auth = request.headers.get("authorization", "")
-        if auth.startswith("Bearer "):
-            token = auth[7:]
-    if not token:
-        token = request.query_params.get("api_token", "")
+    # Exempt auth endpoints + setup config (needed for first-boot check)
+    if path in _AUTH_EXEMPT_V1:
+        return await call_next(request)
 
-    if not validate_token(token, _API_TOKEN):
-        # Return 401 (not 403) — auth is missing, not forbidden
-        return JSONResponse(
-            {"error": "API token required. Set X-API-Key header or pass ?api_token="},
-            status_code=401,
-        )
+    # ─── Mode 1: JWT (preferred for web frontend) ───
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        jwt_token = auth_header[7:]
+        payload = _auth_jwt.verify_token(jwt_token)
+        if payload is not None:
+            # Set user info on request state for downstream handlers
+            user = _auth_db.get_user(payload["sub"])
+            if user:
+                request.state.user = user
+                return await call_next(request)
 
-    return await call_next(request)
+    # ─── Mode 2: API Key (CLI / Open WebUI fallback) ───
+    api_key = request.headers.get("x-api-key", "") or request.query_params.get("api_token", "")
+    if api_key and validate_token(api_key, _API_TOKEN):
+        # API key maps to admin role (the single machine token)
+        request.state.user = {
+            "id": "__api_key__",
+            "username": "api",
+            "role": "admin",
+            "display_name": "API Client",
+        }
+        return await call_next(request)
+
+    # ─── Neither valid → 401 ───
+    return JSONResponse(
+        {"error": "认证失败。请登录 (POST /v1/auth/login) 或提供 API Key (X-API-Key header)。"},
+        status_code=401,
+    )
+
 
 # ─── Security Headers Middleware (CSP + HSTS) ───
 
@@ -402,16 +420,20 @@ async def serve_frontend():
     index = STATIC_DIR / "index.html"
     if index.exists():
         html = index.read_text("utf-8")
-        # Inject API token into the page for frontend JS
-        import re
-        token_script = '<script>window.__API_TOKEN__="%s";</script>' % _API_TOKEN
-        # Inject before closing </head> or <meta charset
+        # Inject API token + first-boot status into frontend
+        needs_admin = _auth_db.needs_initial_admin()
+        token_script = (
+            '<script>'
+            'window.__API_TOKEN__="%s";'
+            'window.__NEEDS_ADMIN__=%s;'
+            '</script>'
+        ) % (_API_TOKEN, "true" if needs_admin else "false")
         if "</head>" in html:
             html = html.replace("</head>", token_script + "</head>")
         else:
             html = html.replace("<head>", "<head>" + token_script)
         return HTMLResponse(html)
-    return JSONResponse({"message": "灵枢 API 运行中", "docs": "/docs"}, status_code=200)
+    return JSONResponse({"message": "灵枢 API 运行中"}, status_code=200)
 
 
 class ChatRequest(BaseModel):
@@ -960,21 +982,164 @@ async def kb_delete_collection(name: str):
     )
 
 
-# ─── Auth Management API ───
+# ═══════════════════════════════════════
+# AUTH API
+# ═══════════════════════════════════════
+
+
+@app.get("/v1/auth/login")
+async def login_form():
+    """GET is not supported — use POST with JSON body."""
+    return JSONResponse({"error": "使用 POST /v1/auth/login 并传入 JSON body ({\"username\": \"...\", \"password\": \"...\"})"}, status_code=405)
+
+
+@app.post("/v1/auth/login")
+async def login(request: Request):
+    """Authenticate user and return JWT tokens."""
+    body = await request.json()
+    username = (body.get("username", "") or "").strip()
+    password = body.get("password", "") or ""
+
+    if not username or not password:
+        return JSONResponse({"error": "请输入用户名和密码"}, status_code=400)
+
+    user = _auth_db.authenticate_user(username, password)
+    if user is None:
+        return JSONResponse({"error": "用户名或密码错误"}, status_code=401)
+
+    # Generate tokens
+    access_token = _auth_jwt.create_access_token(
+        user["id"], user["username"], user["role"]
+    )
+    refresh_token = _auth_jwt.create_refresh_token(
+        user["id"], user["username"], user["role"]
+    )
+
+    # Store sessions in DB (for revocation)
+    import time as _t
+    _auth_db.save_session(
+        _auth_jwt.verify_token(access_token)["jti"],
+        user["id"],
+        int(_t.time()) + 8 * 3600,
+    )
+    _auth_db.save_session(
+        _auth_jwt.verify_token(refresh_token)["jti"],
+        user["id"],
+        int(_t.time()) + 30 * 86400,
+        token_type="refresh",
+    )
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "Bearer",
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "role": user["role"],
+            "display_name": user["display_name"],
+        },
+    }
+
+
+@app.post("/v1/auth/logout")
+async def logout(request: Request):
+    """Revoke current JWT token."""
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        jwt_token = auth[7:]
+        payload = _auth_jwt.verify_token(jwt_token)
+        if payload and payload.get("jti"):
+            _auth_db.revoke_session(payload["jti"])
+    return {"status": "logged_out"}
+
+
+@app.get("/v1/auth/me")
+async def get_current_user(request: Request):
+    """Get current authenticated user info."""
+    user = getattr(request.state, "user", None)
+    if user is None:
+        return JSONResponse({"error": "未认证"}, status_code=401)
+    return {
+        "user": user,
+        "authenticated": True,
+    }
+
+
+@app.post("/v1/auth/refresh")
+async def refresh_token(request: Request):
+    """Exchange a refresh token for a new access token."""
+    body = await request.json()
+    refresh_token_str = body.get("refresh_token", "")
+
+    payload = _auth_jwt.verify_token(refresh_token_str, expected_type="refresh")
+    if payload is None:
+        return JSONResponse({"error": "Refresh token 无效或已过期"}, status_code=401)
+
+    # Check if refresh token is still valid in DB
+    session = _auth_db.is_session_valid(payload["jti"])
+    if session is None:
+        return JSONResponse({"error": "Refresh token 已被撤销"}, status_code=401)
+
+    # Generate new access token
+    new_access = _auth_jwt.create_access_token(
+        payload["sub"], payload["username"], payload["role"]
+    )
+    new_payload = _auth_jwt.verify_token(new_access)
+    if new_payload:
+        import time as _t
+        _auth_db.save_session(
+            new_payload["jti"], payload["sub"],
+            int(_t.time()) + 8 * 3600,
+        )
+
+    return {
+        "access_token": new_access,
+        "token_type": "Bearer",
+    }
+
+
+@app.post("/v1/auth/setup-admin")
+async def setup_initial_admin(request: Request):
+    """Create the first admin account (only works if no admin exists)."""
+    if not _auth_db.needs_initial_admin():
+        return JSONResponse({"error": "管理员已存在，不能重复创建"}, status_code=400)
+
+    body = await request.json()
+    username = (body.get("username", "") or "").strip()
+    password = body.get("password", "") or ""
+
+    if not username or len(username) < 2:
+        return JSONResponse({"error": "用户名至少 2 个字符"}, status_code=400)
+    if len(password) < 6:
+        return JSONResponse({"error": "密码至少 6 位"}, status_code=400)
+
+    try:
+        user = _auth_db.create_user(username, password, role="admin",
+                                    display_name=username)
+        return {"status": "created", "user": user,
+                "message": "管理员账号已创建，请登录"}
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+# ═══════════════════════════════════════
+# API TOKEN MANAGEMENT (legacy)
+# ═══════════════════════════════════════
 
 
 @app.get("/v1/auth/token")
-async def get_current_token():
-    """Get current API token (masked for security)."""
+async def get_api_token():
+    """Get the machine API token (admin-only via API Key)."""
     return {
         "token": _API_TOKEN,
-        "hint": "Set X-API-Key: <token> header on all /v1/* requests",
+        "hint": "Set X-API-Key: <token> header on all /v1/* requests (admin-level access)",
     }
 
 
 @app.post("/v1/auth/reset")
-async def regenerate_token():
-    """Regenerate API token. All existing sessions using the old token are invalidated."""
+async def regenerate_api_token():
+    """Regenerate the machine API token."""
     global _API_TOKEN
     _API_TOKEN = _reset_token()
     return {
@@ -982,6 +1147,87 @@ async def regenerate_token():
         "status": "regenerated",
         "warning": "所有使用旧 token 的客户端需要更新",
     }
+
+
+# ═══════════════════════════════════════
+# ADMIN API (user management)
+# ═══════════════════════════════════════
+
+
+@app.get("/v1/admin/users")
+async def admin_list_users(request: Request):
+    """List all users (admin only)."""
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
+    users = _auth_db.list_users()
+    return {"users": users, "count": len(users)}
+
+
+@app.post("/v1/admin/users")
+async def admin_create_user(request: Request):
+    """Create a new user (admin only)."""
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
+
+    body = await request.json()
+    username = (body.get("username", "") or "").strip()
+    password = body.get("password", "") or ""
+    role = (body.get("role", "user") or "").strip()
+
+    try:
+        new_user = _auth_db.create_user(username, password, role=role)
+        return {"status": "created", "user": new_user}
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/v1/admin/users/{user_id}/role")
+async def admin_update_user_role(user_id: str, request: Request):
+    """Change a user's role (admin only)."""
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
+
+    body = await request.json()
+    new_role = (body.get("role", "") or "").strip()
+
+    if _auth_db.update_user_role(user_id, new_role):
+        _auth_db.revoke_all_user_sessions(user_id)
+        return {"status": "updated", "user_id": user_id, "role": new_role}
+    return JSONResponse({"error": "用户不存在或角色无效"}, status_code=404)
+
+
+@app.post("/v1/admin/users/{user_id}/reset-password")
+async def admin_reset_password(user_id: str, request: Request):
+    """Reset a user's password (admin only)."""
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
+
+    body = await request.json()
+    new_password = body.get("password", "") or ""
+
+    if _auth_db.update_user_password(user_id, new_password):
+        _auth_db.revoke_all_user_sessions(user_id)
+        return {"status": "password_updated", "user_id": user_id}
+    return JSONResponse({"error": "密码更新失败（至少 6 位）"}, status_code=400)
+
+
+@app.delete("/v1/admin/users/{user_id}")
+async def admin_delete_user(user_id: str, request: Request):
+    """Delete a user (admin only). Cannot delete self."""
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
+
+    if user_id == user.get("id"):
+        return JSONResponse({"error": "不能删除自己"}, status_code=400)
+
+    if _auth_db.delete_user(user_id):
+        return {"status": "deleted", "user_id": user_id}
+    return JSONResponse({"error": "用户不存在"}, status_code=404)
 
 
 # ─── Direct entry point ───
@@ -992,12 +1238,23 @@ def main():
 
     # Initialize persistent session store
     _init_session_store()
+
+    # Initialize auth database (ensure tables exist)
+    _auth_db._get_db()
+    admin_needed = _auth_db.needs_initial_admin()
+    user_count = _auth_db.user_count()
+    _auth_db.cleanup_expired_sessions()
+
     count = _session_count()
     print("")
     print("  ⚡ 灵枢 — LingShu Agent")
     print("  " + ("-" * 40))
     print("  API:       http://%s:%d/v1" % (HOST, PORT))
     print("  Frontend:  http://%s:%d" % (HOST, PORT))
+    if admin_needed:
+        print("  ⚠️  首次启动 — 需创建管理员账号")
+    else:
+        print("  用户:     %d 人" % user_count)
     print("  Token:     %s...%s" % (_API_TOKEN[:8], _API_TOKEN[-4:]))
     print("  " + ("-" * 40))
     print("")
