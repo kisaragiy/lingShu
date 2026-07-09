@@ -82,10 +82,12 @@ _running_tasks: dict[str, _threading.Event] = {}
 _running_tasks_lock = _threading.Lock()
 
 # ─── Agent concurrency control ───
-# Limit simultaneous agent executions to prevent overload
-# Default: 2 concurrent agents (LLM API rate limit friendly)
-# Set HARNESS_MAX_CONCURRENT_AGENTS=0 to disable limit
-_MAX_CONCURRENT_AGENTS = int(os.environ.get("HARNESS_MAX_CONCURRENT_AGENTS", "2"))
+# Limit simultaneous agent executions to prevent overload.
+# Only affects research tasks (/v1/chat/completions, both stream & non-stream).
+# Lightweight endpoints (auth, sessions, reports, config, tools) bypass this.
+# Default: 5 concurrent agents — enough for 2-3 simultaneous users.
+# Set HARNESS_MAX_CONCURRENT_AGENTS=0 to disable limit.
+_MAX_CONCURRENT_AGENTS = int(os.environ.get("HARNESS_MAX_CONCURRENT_AGENTS", "5"))
 if _MAX_CONCURRENT_AGENTS > 0:
     _agent_semaphore = _threading.Semaphore(_MAX_CONCURRENT_AGENTS)
 else:
