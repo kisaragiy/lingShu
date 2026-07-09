@@ -189,7 +189,7 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
     return html
 
 
-def save_formal_report(title: str, html: str, tags: list[str] = None, source_session: str = "") -> dict:
+def save_formal_report(title: str, html: str, tags: list[str] = None, source_session: str = "", owner_id: str = "") -> dict:
     """Save a formal report as HTML file and return metadata."""
     _ensure()
     timestamp = int(time.time())
@@ -206,9 +206,10 @@ def save_formal_report(title: str, html: str, tags: list[str] = None, source_ses
         "created_at": timestamp,
         "tags": tags or [],
         "source_session": source_session,
+        "owner_id": owner_id,
         "filename": filename,
+        "format": "html",
         "chars": len(html),
-        "type": "formal_html",
     }
     return meta
 

@@ -1,12 +1,15 @@
 """Report Store — persist agent-generated reports as Markdown files.
 
 Each report is saved as a .md file with JSON metadata index.
+Thread-safe with file lock.
 Storage: ~/.agent-harness/reports/
+Supports owner_id for multi-user isolation.
 """
 
 import json
 import os
 import time
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +18,8 @@ REPORTS_DIR = Path(os.environ.get(
     os.path.expanduser("~/.agent-harness/reports"),
 ))
 INDEX_FILE = REPORTS_DIR / "index.json"
+
+_lock = threading.Lock()
 
 
 def _ensure():
@@ -25,7 +30,7 @@ def _load_index() -> list[dict]:
     _ensure()
     if INDEX_FILE.exists():
         try:
-            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+            with _lock, open(INDEX_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             pass
@@ -34,11 +39,12 @@ def _load_index() -> list[dict]:
 
 def _save_index(index: list[dict]):
     _ensure()
-    with open(INDEX_FILE, "w", encoding="utf-8") as f:
+    with _lock, open(INDEX_FILE, "w", encoding="utf-8") as f:
         json.dump(index, f, ensure_ascii=False, indent=2)
 
 
-def save_report(title: str, content: str, tags: list[str] = None, source_session: str = "") -> dict:
+def save_report(title: str, content: str, tags: list[str] = None,
+                source_session: str = "", owner_id: str = "") -> dict:
     """Save a report to disk.
 
     Args:
@@ -46,6 +52,7 @@ def save_report(title: str, content: str, tags: list[str] = None, source_session
         content: Markdown content
         tags: Optional tags for categorization
         source_session: Session ID that generated this report
+        owner_id: User ID who owns this report
 
     Returns:
         Report metadata dict
@@ -57,34 +64,51 @@ def save_report(title: str, content: str, tags: list[str] = None, source_session
     filepath = REPORTS_DIR / filename
 
     # Write markdown file
-    with open(filepath, "w", encoding="utf-8") as f:
+    content_bytes = content.encode("utf-8")
+    with _lock, open(filepath, "w", encoding="utf-8") as f:
         f.write("---\n")
         f.write("title: %s\n" % title)
         f.write("created: %d\n" % timestamp)
         f.write("tags: %s\n" % json.dumps(tags or [], ensure_ascii=False))
+        f.write("owner_id: %s\n" % owner_id)
         f.write("---\n\n")
         f.write(content)
 
-    # Update index
+    # Update index (atomic: write to tmp then replace)
     meta = {
         "id": report_id,
         "title": title,
         "created_at": timestamp,
         "tags": tags or [],
         "source_session": source_session,
+        "owner_id": owner_id,
         "filename": filename,
         "chars": len(content),
     }
-    index = _load_index()
-    index.insert(0, meta)
-    _save_index(index)
+    with _lock:
+        index = _load_index()
+        index.insert(0, meta)
+        _save_index(index)
 
     return meta
 
 
-def list_reports(limit: int = 50, offset: int = 0) -> list[dict]:
-    """List reports, newest first."""
+def list_reports(limit: int = 50, offset: int = 0,
+                 owner_id: str | None = None) -> list[dict]:
+    """List reports, newest first.
+
+    Args:
+        limit: Max reports to return
+        offset: Pagination offset
+        owner_id: If set, only return reports owned by this user.
+                  If None, return all (admin view).
+
+    Returns:
+        List of report metadata dicts
+    """
     index = _load_index()
+    if owner_id is not None:
+        index = [m for m in index if m.get("owner_id", "") == owner_id]
     return index[offset:offset + limit]
 
 
@@ -103,26 +127,36 @@ def get_report(report_id: str) -> Optional[dict]:
 
 def delete_report(report_id: str) -> bool:
     """Delete a report and remove from index."""
-    index = _load_index()
-    for i, meta in enumerate(index):
-        if meta["id"] == report_id:
-            # Delete file
-            filepath = REPORTS_DIR / meta["filename"]
-            if filepath.exists():
-                filepath.unlink()
-            # Remove from index
-            index.pop(i)
-            _save_index(index)
-            return True
+    with _lock:
+        index = _load_index()
+        for i, meta in enumerate(index):
+            if meta["id"] == report_id:
+                filepath = REPORTS_DIR / meta["filename"]
+                if filepath.exists():
+                    filepath.unlink()
+                index.pop(i)
+                _save_index(index)
+                return True
     return False
 
 
-def search_reports(query: str) -> list[dict]:
-    """Search reports by title and tags."""
+def search_reports(query: str, owner_id: str | None = None) -> list[dict]:
+    """Search reports by title and tags.
+
+    Args:
+        query: Search string
+        owner_id: If set, only search this user's reports.
+
+    Returns:
+        List of matching report metadata dicts
+    """
     q = query.lower()
     index = _load_index()
     results = []
     for meta in index:
+        # Filter by owner
+        if owner_id is not None and meta.get("owner_id", "") != owner_id:
+            continue
         if q in meta.get("title", "").lower():
             results.append(meta)
             continue

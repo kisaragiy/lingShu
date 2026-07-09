@@ -750,20 +750,25 @@ def _get_rs():
 @app.post("/v1/reports")
 async def create_report(request: Request):
     """Save a report."""
+    owner_id = getattr(request.state, "user", {}).get("id", "")
     body = await request.json()
     meta = _get_rs().save_report(
         title=body.get("title", "未命名报告"),
         content=body.get("content", ""),
         tags=body.get("tags", []),
         source_session=body.get("source_session", ""),
+        owner_id=owner_id,
     )
     return meta
 
 
 @app.get("/v1/reports")
-async def list_reports(limit: int = 50, offset: int = 0):
-    """List saved reports."""
-    reports = _get_rs().list_reports(limit=limit, offset=offset)
+async def list_reports(request: Request, limit: int = 50, offset: int = 0):
+    """List saved reports. Filters by owner if non-admin."""
+    user = getattr(request.state, "user", None)
+    is_admin = user and user.get("role") == "admin"
+    owner_filter = None if is_admin else (user.get("id", "") if user else "")
+    reports = _get_rs().list_reports(limit=limit, offset=offset, owner_id=owner_filter)
     return {"reports": reports, "count": len(reports)}
 
 
@@ -816,11 +821,14 @@ async def delete_report(report_id: str):
 
 
 @app.get("/v1/reports/search")
-async def search_reports(q: str = ""):
-    """Search reports by title/tags."""
+async def search_reports(request: Request, q: str = ""):
+    """Search reports by title/tags. Filters by owner if non-admin."""
     if not q:
         return {"reports": []}
-    reports = _get_rs().search_reports(q)
+    user = getattr(request.state, "user", None)
+    is_admin = user and user.get("role") == "admin"
+    owner_filter = None if is_admin else (user.get("id", "") if user else "")
+    reports = _get_rs().search_reports(q, owner_id=owner_filter)
     return {"reports": reports, "count": len(reports)}
 
 
@@ -830,6 +838,7 @@ async def formalize_report(request: Request):
 
     Takes raw analysis content, adds format + sources, outputs a standalone HTML.
     """
+    owner_id = getattr(request.state, "user", {}).get("id", "")
     body = await request.json()
     title = body.get("title", "调研报告")
     content = body.get("content", "")
@@ -848,6 +857,7 @@ async def formalize_report(request: Request):
         html=html,
         tags=tags,
         source_session=source_session,
+        owner_id=owner_id,
     )
 
     return {**meta, "html": html[:500] + "..."}
