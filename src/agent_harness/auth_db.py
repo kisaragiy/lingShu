@@ -11,6 +11,7 @@ import json
 import os
 import secrets
 import sqlite3
+import threading
 import time
 from datetime import datetime, timezone
 from hashlib import pbkdf2_hmac
@@ -44,27 +45,53 @@ def _verify_password(password: str, stored: str) -> bool:
 # ─── DB initialization ───
 
 _DB_INITIALIZED = False
-_DB: sqlite3.Connection | None = None
+_thread_local = None  # threading.local set during init
+
+
+def _get_conn() -> sqlite3.Connection:
+    """Get a SQLite connection for the current thread (per-thread, WAL mode).
+
+    Each thread gets its own connection — safe for concurrent reads/writes
+    with WAL mode. Connections are cached in threading.local.
+    """
+    global _thread_local
+    if _thread_local is None:
+        _thread_local = threading.local()
+
+    if not hasattr(_thread_local, 'conn') or _thread_local.conn is None:
+        conn = sqlite3.connect(str(DB_PATH), timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")  # 5s retry on busy
+        _thread_local.conn = conn
+    return _thread_local.conn
+
+
+def close_all_connections():
+    """Close all cached connections (call on shutdown)."""
+    global _thread_local
+    if _thread_local is None:
+        return
+    for attr in dir(_thread_local):
+        conn = getattr(_thread_local, attr, None)
+        if isinstance(conn, sqlite3.Connection):
+            try:
+                conn.close()
+            except Exception:
+                pass
+    _thread_local = None
 
 
 def _get_db() -> sqlite3.Connection:
-    """Get or create the SQLite connection (thread-safe for reads)."""
-    global _DB, _DB_INITIALIZED
-    if _DB is not None:
-        return _DB
-    HARNESS_DIR.mkdir(parents=True, exist_ok=True)
-    _DB = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-    _DB.row_factory = sqlite3.Row
-    _DB.execute("PRAGMA journal_mode=WAL")
-    _DB.execute("PRAGMA foreign_keys=ON")
-    _init_schema()
-    _DB_INITIALIZED = True
-    return _DB
+    """Alias for _get_conn() — backward compatibility."""
+    return _get_conn()
 
 
 def _init_schema():
-    """Create tables if they don't exist."""
-    _DB.executescript("""
+    """Create tables if they don't exist (run once at startup)."""
+    conn = _get_conn()
+    conn.executescript("""
         CREATE TABLE IF NOT EXISTS users (
             id          TEXT PRIMARY KEY,
             username    TEXT UNIQUE NOT NULL,
@@ -84,7 +111,7 @@ def _init_schema():
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
     """)
-    _DB.commit()
+    conn.commit()
 
 
 # ─── User CRUD ───

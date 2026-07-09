@@ -81,6 +81,19 @@ import threading as _threading
 _running_tasks: dict[str, _threading.Event] = {}
 _running_tasks_lock = _threading.Lock()
 
+# ─── Agent concurrency control ───
+# Limit simultaneous agent executions to prevent overload
+# Default: 2 concurrent agents (LLM API rate limit friendly)
+# Set HARNESS_MAX_CONCURRENT_AGENTS=0 to disable limit
+_MAX_CONCURRENT_AGENTS = int(os.environ.get("HARNESS_MAX_CONCURRENT_AGENTS", "2"))
+if _MAX_CONCURRENT_AGENTS > 0:
+    _agent_semaphore = _threading.Semaphore(_MAX_CONCURRENT_AGENTS)
+else:
+    _agent_semaphore = None
+
+# Thread pool for async file I/O (sessions, reports)
+_io_executor = None
+
 
 def _build_history_context(messages: list[dict]) -> str:
     """Build context string from recent conversation history (capped to save tokens)."""
@@ -543,7 +556,18 @@ async def chat_completions(req: ChatRequest, request: Request):
         )
 
     # ── Non-streaming ──
+    owner_id = getattr(request.state, "user", {}).get("id", "")
+    acquired = False
     try:
+        # Acquire agent semaphore (with timeout to avoid deadlock)
+        if _agent_semaphore is not None:
+            acquired = _agent_semaphore.acquire(timeout=300)  # 5min max wait
+            if not acquired:
+                return JSONResponse(
+                    {"error": "服务器繁忙，当前有 %d 个任务在执行中，请稍后重试" % _MAX_CONCURRENT_AGENTS},
+                    status_code=503,
+                )
+
         # Register for cancellation
         cancel_event = _threading.Event()
         with _running_tasks_lock:
@@ -565,14 +589,13 @@ async def chat_completions(req: ChatRequest, request: Request):
             rounds = result.get("rounds", 1)
             workers = list(result.get("worker_results", {}).keys())
 
-        # Save session (capped to MAX_HISTORY_ROUNDS to prevent unbounded growth)
+        # Save session (capped to MAX_HISTORY_ROUNDS)
         session = _load_session(session_id) or []
         session.append({"role": "user", "content": last_user_msg, "ts": time.time()})
         session.append({"role": "assistant", "content": response_text, "ts": time.time()})
-        # Trim old rounds
         if len(session) > SESSION_TRIM_AT:
             session = session[-SESSION_TRIM_AT:]
-        _save_session(session_id, session)
+        _save_session(session_id, session, owner_id=owner_id)
 
         print(
             "[Harness] [%s] ✅ (%d chars, %d 轮, workers: %s)" % (
@@ -584,6 +607,9 @@ async def chat_completions(req: ChatRequest, request: Request):
         traceback.print_exc()
         response_text = "[HarnessError] %s" % e
     finally:
+        # Release agent semaphore
+        if acquired and _agent_semaphore is not None:
+            _agent_semaphore.release()
         # Clean up task registration
         with _running_tasks_lock:
             _running_tasks.pop(session_id, None)
@@ -821,14 +847,19 @@ async def formalize_report(request: Request):
 
 
 @app.get("/v1/sessions")
-async def list_sessions():
-    """List active sessions (persisted on disk)."""
-    sessions = _list_sessions()
+async def list_sessions(request: Request):
+    """List active sessions (persisted on disk). Filters by owner if non-admin."""
+    user = getattr(request.state, "user", None)
+    is_admin = user and user.get("role") == "admin"
+
+    # Admin sees all, user sees only own sessions
+    owner_filter = None if is_admin else (user.get("id", "") if user else "")
+    sessions = _list_sessions(owner_id=owner_filter)
     return {"sessions": sessions, "count": len(sessions)}
 
 
 @app.delete("/v1/sessions/{session_id}")
-async def delete_session_endpoint(session_id: str):
+async def delete_session_endpoint(session_id: str, request: Request):
     """Delete a specific session."""
     # Path traversal safeguard
     try:
@@ -1255,6 +1286,8 @@ def main():
         print("  ⚠️  首次启动 — 需创建管理员账号")
     else:
         print("  用户:     %d 人" % user_count)
+    if _MAX_CONCURRENT_AGENTS > 0:
+        print("  并发:     %d 个 Agent 同时执行" % _MAX_CONCURRENT_AGENTS)
     print("  Token:     %s...%s" % (_API_TOKEN[:8], _API_TOKEN[-4:]))
     print("  " + ("-" * 40))
     print("")
@@ -1269,12 +1302,18 @@ def main():
         print("  会话: %d 个" % count)
     print("")
 
+    # Multi-worker support
+    # WARNING: SQLite + multi-process can cause WAL contention.
+    # Use HARNESS_WORKERS=1 (default) for most setups.
+    _workers = int(os.environ.get("HARNESS_WORKERS", "1"))
+
     uvicorn.run(
         "agent_harness.api_fastapi:app",
         host=HOST,
         port=PORT,
         log_level="info",
         reload=False,
+        workers=_workers,
     )
 
 

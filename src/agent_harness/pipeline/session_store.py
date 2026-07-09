@@ -1,7 +1,7 @@
 """Session Store — persistent session storage using JSON files.
 
-Saves conversation sessions to disk so they survive server restarts.
-Auto-prunes sessions older than the configured TTL.
+Thread-safe with a single RLock covering all file operations.
+Supports owner_id for multi-user session isolation.
 
 Usage:
     from agent_harness.pipeline.session_store import (
@@ -10,9 +10,9 @@ Usage:
     )
 
     init_store()
-    save_session("session-123", [{"role": "user", "content": "hi", "ts": ...}])
+    save_session("session-123", msgs, owner_id="u_xxx")
     msgs = load_session("session-123")
-    sessions = list_sessions()
+    sessions = list_sessions(owner_id="u_xxx")
 """
 
 import json
@@ -30,15 +30,14 @@ SESSION_DIR = os.environ.get("HARNESS_SESSION_DIR", DEFAULT_DIR)
 # Session TTL (seconds) — sessions older than this are pruned
 SESSION_TTL = int(os.environ.get("HARNESS_SESSION_TTL", str(7 * 24 * 3600)))  # 7 days
 
-# File lock for thread safety
-_lock = threading.Lock()
+# Reentrant lock — covers all file operations (reads + writes)
+_lock = threading.RLock()
 
 
 # ─── Path helpers ───
 
 def _session_path(session_id: str) -> str:
     """Get filesystem path for a session file."""
-    # Sanitize session_id to prevent directory traversal
     safe_id = session_id.replace("/", "_").replace("\\", "_").replace("..", "_")
     return os.path.join(SESSION_DIR, "%s.json" % safe_id)
 
@@ -51,12 +50,13 @@ def init_store():
     clean_expired()
 
 
-def save_session(session_id: str, messages: list[dict]):
-    """Save a session's messages to disk.
+def save_session(session_id: str, messages: list[dict], owner_id: str = ""):
+    """Save a session's messages to disk (thread-safe, atomic write).
 
     Args:
         session_id: Unique session identifier
         messages: List of message dicts (must include 'ts' timestamp)
+        owner_id: User ID who owns this session (for multi-user isolation)
     """
     if not messages:
         return
@@ -71,7 +71,8 @@ def save_session(session_id: str, messages: list[dict]):
         "created_at": messages[0].get("ts", now) if messages else now,
         "message_count": len(messages),
         "exchanges": len(messages) // 2,
-        "last_preview": messages[-1].get("content", "")[:100],
+        "last_preview": messages[-1].get("content", "")[:120],
+        "owner_id": owner_id,
         "messages": messages,
     }
 
@@ -84,7 +85,10 @@ def save_session(session_id: str, messages: list[dict]):
             os.replace(tmp_path, path)  # Atomic on POSIX, near-atomic on Windows
         except Exception:
             if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             raise
 
 
@@ -95,27 +99,34 @@ def load_session(session_id: str) -> list[dict] | None:
         List of message dicts, or None if session doesn't exist
     """
     path = _session_path(session_id)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data.get("messages", [])
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
+    with _lock:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("messages", [])
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
 
 
-def list_sessions() -> list[dict]:
+def list_sessions(owner_id: str | None = None) -> list[dict]:
     """List all persisted sessions with metadata.
 
+    Args:
+        owner_id: If set, only return sessions owned by this user.
+                  If None, return all sessions (admin view).
+
     Returns:
-        List of session summary dicts (without full messages)
+        List of session summary dicts (without full messages), newest first
     """
-    os.makedirs(SESSION_DIR, exist_ok=True)
+    if not os.path.isdir(SESSION_DIR):
+        return []
+
     now = time.time()
     sessions = []
 
     with _lock:
         for fname in os.listdir(SESSION_DIR):
-            if not fname.endswith(".json") or fname.endswith(".tmp.json"):
+            if not fname.endswith(".json") or fname.endswith(".tmp"):
                 continue
             path = os.path.join(SESSION_DIR, fname)
             try:
@@ -124,7 +135,13 @@ def list_sessions() -> list[dict]:
                 # Skip expired
                 age = now - data.get("updated_at", 0)
                 if age > SESSION_TTL:
-                    os.unlink(path)
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+                    continue
+                # Filter by owner
+                if owner_id is not None and data.get("owner_id", "") != owner_id:
                     continue
                 sessions.append({
                     "id": data.get("session_id", fname[:-5]),
@@ -134,6 +151,7 @@ def list_sessions() -> list[dict]:
                     "updated_at": data.get("updated_at", 0),
                     "last_active": int(age),
                     "preview": data.get("last_preview", ""),
+                    "owner_id": data.get("owner_id", ""),
                 })
             except (json.JSONDecodeError, OSError):
                 continue
@@ -149,15 +167,18 @@ def delete_session(session_id: str) -> bool:
         True if deleted, False if not found
     """
     path = _session_path(session_id)
-    try:
-        os.unlink(path)
-        return True
-    except FileNotFoundError:
-        return False
+    with _lock:
+        try:
+            os.unlink(path)
+            return True
+        except FileNotFoundError:
+            return False
 
 
-def clean_expired():
-    """Remove sessions older than TTL."""
+def clean_expired() -> int:
+    """Remove sessions older than TTL. Returns count of removed sessions."""
+    if not os.path.isdir(SESSION_DIR):
+        return 0
     now = time.time()
     count = 0
     with _lock:
