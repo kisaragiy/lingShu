@@ -657,7 +657,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.16.0</span>
+          <span class="sidebar-version">v0.17.0</span>
         </div>
       </div>
 
@@ -1125,12 +1125,19 @@ async function renderReports() {
     list.innerHTML = data.reports.map(r => {
       const date = new Date(r.created_at*1000).toLocaleString('zh-CN');
       const tags = (r.tags||[]).map(t => '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:var(--accent-light);color:var(--accent);font-size:11px;margin-right:4px">'+escHtml(t)+'</span>').join('');
-      return '<div class="service-card"><div class="service-info"><div class="service-name">'+escHtml(r.title)+'</div><div class="service-detail">'+date+' · '+r.chars+' 字 '+tags+'</div></div><button class="btn btn-secondary btn-sm" onclick="viewReport(\''+r.id+'\')" style="margin-right:4px">查看</button><button class="btn btn-danger btn-sm" onclick="deleteReport(\''+r.id+'\')">删除</button></div>';
+      return '<div class="service-card"><div class="service-info"><div class="service-name">'+escHtml(r.title)+'</div><div class="service-detail">'+date+' · '+r.chars+' 字 '+tags+'</div></div><button class="btn btn-secondary btn-sm" onclick="viewReport(\''+r.id+'\')" style="margin-right:4px">查看</button><button class="btn btn-success btn-sm" onclick="downloadReport(\''+r.id+'\',\''+escHtml(r.title).replace(/'/g,"\\'")+'\')" style="margin-right:4px">⬇</button><button class="btn btn-danger btn-sm" onclick="deleteReport(\''+r.id+'\')">删除</button></div>';
     }).join('');
   } catch(e) {}
 }
 
 async function viewReport(reportId) { window.open('/v1/reports/' + reportId, '_blank'); }
+async function downloadReport(reportId, title) {
+  const a = document.createElement('a');
+  a.href = '/v1/reports/' + reportId;
+  a.download = (title || 'report').replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_') + '.html';
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('下载中...', 'info');
+}
 async function deleteReport(reportId) {
   if (!confirm('删除此报告？')) return;
   try { await fetch('/v1/reports/'+reportId,{method:'DELETE'}); toast('已删除','ok'); renderReports(); }

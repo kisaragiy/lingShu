@@ -614,7 +614,18 @@ async def chat_completions(req: ChatRequest, request: Request):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        response_text = "[HarnessError] %s" % e
+        # User-friendly error in Chinese
+        err_str = str(e)
+        if "semaphore" in err_str.lower():
+            response_text = "[HarnessError] 服务器繁忙，请稍后重试"
+        elif "timeout" in err_str.lower():
+            response_text = "[HarnessError] 请求超时，搜索或 LLM 调用耗时过长，请简化问题后重试"
+        elif "API key" in err_str or "401" in err_str or "Unauthorized" in err_str:
+            response_text = "[HarnessError] LLM API 认证失败，请检查 API Key 配置"
+        elif "rate limit" in err_str.lower() or "429" in err_str:
+            response_text = "[HarnessError] API 调用频率过高，请等待后重试"
+        else:
+            response_text = "[HarnessError] %s" % err_str[:200]
     finally:
         # Release agent semaphore
         if acquired and _agent_semaphore is not None:

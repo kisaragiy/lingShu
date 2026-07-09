@@ -105,6 +105,58 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
             <ol class="sources">%s</ol>
         </div>""" % items
 
+    # ─── Build table of contents ───
+    toc_items = []
+    seen_headers = set()
+    for line in content.split("\n"):
+        line_s = line.strip()
+        if line_s.startswith("## ") or line_s.startswith("### "):
+            h_text = line_s.lstrip("#").strip()
+            if h_text and h_text not in seen_headers:
+                seen_headers.add(h_text)
+                anchor = h_text.lower().replace(" ", "-").replace("（","").replace("）","").replace("，","").replace("、","-")[:40]
+                level = "toc-h3" if line_s.startswith("### ") else "toc-h2"
+                toc_items.append('<li class="%s"><a href="#%s">%s</a></li>' % (level, anchor, h_text))
+
+    toc_html = ""
+    if len(toc_items) > 2:
+        toc_html = """
+        <div class="toc">
+            <h2 class="toc-title">📑 目录</h2>
+            <ol class="toc-list">%s</ol>
+        </div>""" % "\n".join(toc_items)
+
+    # Add anchors to headers in body_html
+    seen_headers = set()
+    def _anchor_header(m):
+        h_text = m.group(2)
+        if h_text in seen_headers:
+            return m.group(0)
+        seen_headers.add(h_text)
+        anchor = h_text.lower().replace(" ", "-").replace("（","").replace("）","").replace("，","").replace("、","-")[:40]
+        return '<%s id="%s">%s</%s>' % (m.group(1), anchor, h_text, m.group(1))
+
+    body_html = re.sub(r'<(h[23])>(.*?)</\1>', _anchor_header, body_html)
+
+    # Word count + reading time
+    word_count = len(content.replace("\n", ""))
+    read_time = max(1, word_count // 300)
+
+    # Build sources section with anchor IDs
+    sources_html = ""
+    if sources:
+        items = ""
+        for i, s in enumerate(sources, 1):
+            title_text = s.get("title", s["url"])
+            items += '<li id="source-%d"><a href="%s" target="_blank" rel="noopener">%s</a></li>' % (
+                i, s["url"], title_text
+            )
+        sources_html = """
+        <div class="section">
+            <h2>📎 参考来源</h2>
+            <ol class="sources">%s</ol>
+        </div>""" % items
+
     html = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -112,61 +164,90 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>%s</title>
 <style>
-  @page { margin: 2cm; size: A4; }
+  @page { margin: 2.2cm 2.5cm; size: A4; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
-    color: #1a1a2e; background: #f8f9fc; line-height: 1.7;
-    padding: 40px; max-width: 900px; margin: 0 auto;
+    color: #1e293b; background: #f1f5f9; line-height: 1.75;
+    padding: 40px 24px; max-width: 960px; margin: 0 auto;
   }
   .report-container {
-    background: #fff; border-radius: 12px; box-shadow: 0 2px 20px rgba(0,0,0,0.08);
+    background: #ffffff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.06);
     padding: 48px 56px; margin-bottom: 24px;
   }
   .report-header {
-    border-bottom: 3px solid #7c5cfc; padding-bottom: 24px; margin-bottom: 32px;
+    border-bottom: 3px solid #1e293b; padding-bottom: 28px; margin-bottom: 36px;
   }
-  .report-header h1 { font-size: 28px; font-weight: 700; color: #1a1a2e; margin-bottom: 8px; }
-  .report-meta { font-size: 13px; color: #888; }
-  .report-meta span { margin-right: 16px; }
-  h2 { font-size: 20px; font-weight: 600; color: #7c5cfc; margin: 32px 0 16px; padding-bottom: 8px; border-bottom: 1px solid #e8e8f0; }
-  h3 { font-size: 16px; font-weight: 600; color: #2d2d44; margin: 24px 0 12px; }
-  p { margin-bottom: 12px; font-size: 14px; color: #333; }
-  table {
-    width: 100%%; border-collapse: collapse; margin: 16px 0; font-size: 13px;
-    border-radius: 8px; overflow: hidden;
+  .report-header h1 {
+    font-size: 30px; font-weight: 700; color: #0f172a; margin-bottom: 12px;
+    line-height: 1.3; letter-spacing: 0.5px;
   }
-  th { background: #7c5cfc; color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; }
-  td { padding: 10px 14px; border-bottom: 1px solid #e8e8f0; }
-  tr:last-child td { border-bottom: none; }
-  tr:nth-child(even) td { background: #f8f6ff; }
-  ul, ol { margin: 8px 0 16px 20px; font-size: 14px; color: #333; }
-  li { margin-bottom: 6px; }
-  strong { color: #1a1a2e; }
-  .highlight { background: #f0ecfe; padding: 16px 20px; border-radius: 8px; border-left: 4px solid #7c5cfc; margin: 16px 0; }
-  .sources { margin: 12px 0; }
-  .sources a { color: #7c5cfc; text-decoration: none; word-break: break-all; font-size: 13px; }
-  .sources a:hover { text-decoration: underline; }
-  .footer { text-align: center; font-size: 12px; color: #aaa; padding: 24px; }
+  .report-meta {
+    font-size: 13px; color: #64748b; display: flex; flex-wrap: wrap; gap: 16px;
+  }
+  .report-meta span { display: inline-flex; align-items: center; gap: 4px; }
   .tag {
-    display: inline-block; padding: 2px 10px; border-radius: 4px;
-    background: #f0ecfe; color: #7c5cfc; font-size: 11px; margin-right: 4px;
+    display: inline-block; padding: 2px 10px; border-radius: 6px;
+    background: #eef2ff; color: #2563eb; font-size: 11px; font-weight: 500;
   }
-  /* Citation superscripts */
-  sup.cite {
-    font-size: 11px; vertical-align: super; line-height: 0;
-    margin: 0 1px;
+  /* ─── TOC ─── */
+  .toc { background: #f8fafc; border-radius: 12px; padding: 24px 28px; margin-bottom: 32px; border: 1px solid #e2e8f0; }
+  .toc-title { font-size: 16px; font-weight: 600; color: #0f172a; margin-bottom: 12px; border: none; padding: 0; }
+  .toc-list { list-style: none; padding: 0; margin: 0; }
+  .toc-list li { margin-bottom: 6px; font-size: 14px; }
+  .toc-list li a { color: #2563eb; text-decoration: none; }
+  .toc-list li a:hover { text-decoration: underline; }
+  .toc-list li.toc-h3 { padding-left: 20px; font-size: 13px; color: #475569; }
+  /* ─── Headings ─── */
+  h2 {
+    font-size: 22px; font-weight: 600; color: #0f172a;
+    margin: 36px 0 16px; padding-bottom: 8px;
+    border-bottom: 2px solid #e2e8f0;
   }
-  sup.cite a {
-    color: #2563eb; text-decoration: none; font-weight: 600;
+  h2:first-of-type { margin-top: 0; }
+  h3 {
+    font-size: 17px; font-weight: 600; color: #1e293b;
+    margin: 24px 0 10px;
   }
-  sup.cite a:hover {
-    text-decoration: underline;
+  /* ─── Body ─── */
+  p { margin-bottom: 14px; font-size: 14.5px; color: #334155; }
+  table {
+    width: 100%%; border-collapse: separate; border-spacing: 0;
+    margin: 20px 0; font-size: 13.5px; border-radius: 10px; overflow: hidden;
+    border: 1px solid #e2e8f0;
   }
+  th {
+    background: #f1f5f9; color: #0f172a; padding: 10px 14px;
+    text-align: left; font-weight: 600; font-size: 13px;
+    border-bottom: 2px solid #e2e8f0;
+  }
+  td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; }
+  tr:last-child td { border-bottom: none; }
+  tr:nth-child(even) td { background: #f8fafc; }
+  ul, ol { margin: 8px 0 16px 20px; font-size: 14.5px; color: #334155; }
+  li { margin-bottom: 6px; }
+  strong { color: #0f172a; }
+  .highlight {
+    background: #f8fafc; padding: 18px 22px; border-radius: 10px;
+    border-left: 4px solid #2563eb; margin: 20px 0;
+    font-size: 14px; color: #1e293b;
+  }
+  /* ─── Sources ─── */
+  .sources { margin: 12px 0; }
+  .sources li { margin-bottom: 8px; }
+  .sources a { color: #2563eb; text-decoration: none; word-break: break-all; font-size: 13px; }
+  .sources a:hover { text-decoration: underline; }
+  sup.cite { font-size: 11px; vertical-align: super; line-height: 0; margin: 0 2px; }
+  sup.cite a { color: #2563eb; text-decoration: none; font-weight: 600; }
+  sup.cite a:hover { text-decoration: underline; }
+  /* ─── Footer ─── */
+  .footer { text-align: center; font-size: 12px; color: #94a3b8; padding: 24px 0; }
   @media print {
     body { background: #fff; padding: 0; }
-    .report-container { box-shadow: none; border-radius: 0; padding: 40px; }
-    .footer { page-break-after: always; }
+    .report-container { box-shadow: none; border-radius: 0; padding: 40px; break-inside: avoid; }
+    .footer { position: running(footer); }
+    h2, h3 { break-after: avoid; }
+    table { break-inside: avoid; }
   }
 </style>
 </head>
@@ -175,16 +256,20 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
   <div class="report-header">
     <h1>%s</h1>
     <div class="report-meta">
-      <span>📅 生成日期：%s</span>
+      <span>📅 %s</span>
+      <span>📄 %s 字 · 约 %s 分钟阅读</span>
       <span>⚡ 灵枢 AI 调研助手</span>
     </div>
   </div>
   %s
   %s
+  %s
+  %s
 </div>
 <div class="footer">由灵枢 (LingShu Agent) 自动生成 · 数据基于公开搜索结果 · 仅供参考</div>
 </body>
-</html>""" % (title, title, now, body_html, sources_html)
+</html>""" % (title, title, now, "%d" % word_count, "%d" % read_time,
+            toc_html, body_html, sources_html, "<div class='tags'>%s</div>" % " ".join('<span class="tag">%s</span>' % t for t in tags) if tags else "")
 
     return html
 
