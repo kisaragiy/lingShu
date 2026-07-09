@@ -1009,15 +1009,21 @@ async def kb_upload_file(request: Request):
             tmp_path = tmp.name
 
         try:
-            count = index_file(tmp_path, collection=collection, filename=filename)
+            result = index_file(tmp_path, collection=collection, filename=filename)
             info = collection_info(collection)
-            return {
+            resp = {
                 "status": "ok",
                 "filename": filename,
                 "collection": collection,
-                "chunks_indexed": count,
+                "chunks_indexed": result.get("chunks_count", 0),
+                "embedding_status": result.get("embedding_status", "unknown"),
+                "fallback": result.get("fallback", "none"),
                 "collection_info": info,
             }
+            # Add warning if Ollama is offline
+            if result.get("embedding_status") == "offline":
+                resp["warning"] = "嵌入服务离线，已使用 BM25 关键词搜索作为降级方案"
+            return resp
         finally:
             os.unlink(tmp_path)
 

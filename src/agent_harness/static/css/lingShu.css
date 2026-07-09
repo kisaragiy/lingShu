@@ -397,6 +397,7 @@ body {
 .toast-ok { border-left: 3px solid var(--green); }
 .toast-err { border-left: 3px solid var(--red); }
 .toast-info { border-left: 3px solid var(--blue); }
+.toast-warn { border-left: 3px solid #f59e0b; }
 
 /* Dropdown */
 .dropdown-item {

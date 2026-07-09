@@ -657,7 +657,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.17.0</span>
+          <span class="sidebar-version">v0.18.0</span>
         </div>
       </div>
 
@@ -1172,13 +1172,16 @@ async function renderCollections() {
       return;
     }
     el.innerHTML = '<h4 style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">已有知识库</h4>' +
-    data.collections.map(c => `<div class="service-card">
-      <div class="service-info">
-        <div class="service-name">${escHtml(c.name)}</div>
-        <div class="service-detail">${c.chunks} 个片段 · ${c.doc_count} 个文件 · ${(c.sources||[]).join(', ')}</div>
-      </div>
-      <button class="btn btn-danger btn-sm" onclick="deleteCollection('${c.name}')">删除</button>
-    </div>`).join('');
+    data.collections.map(c => {
+      const embStatus = c.embedding_available ? '<span class="dot dot-ok" title="向量搜索可用"></span>' : '<span class="dot dot-fail" title="仅关键词搜索"></span>';
+      return `<div class="service-card">
+        <div class="service-info">
+          <div class="service-name">${escHtml(c.name)} ${embStatus}</div>
+          <div class="service-detail">${c.chunks} 个片段 · ${c.doc_count} 个文件 · ${(c.sources||[]).join(', ')}</div>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="deleteCollection('${c.name}')">删除</button>
+      </div>`;
+    }).join('');
   } catch(e) {}
 }
 
@@ -1190,8 +1193,15 @@ async function uploadFile(input) {
   fd.append('file', file);
   fd.append('collection', 'default');
   try {
-    await API.upload('/v1/knowledge/upload', fd);
-    toast('文件已索引 ✓', 'ok');
+    const data = await API.upload('/v1/knowledge/upload', fd);
+    const chunks = data.chunks_indexed || 0;
+    const emb = data.embedding_status || 'unknown';
+    const warn = data.warning || '';
+    let msg = '✅ 已索引 ' + chunks + ' 个片段';
+    if (emb === 'online') msg += '（向量搜索）';
+    else if (emb === 'offline') msg += '（关键词降级）';
+    toast(msg, emb === 'offline' ? 'warn' : 'ok');
+    if (warn) setTimeout(() => toast(warn, 'info'), 1500);
     renderCollections();
   } catch(e) { toast('上传失败: ' + e, 'err'); }
   document.getElementById('upload-progress').classList.add('hidden');
