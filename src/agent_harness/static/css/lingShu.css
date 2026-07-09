@@ -399,6 +399,32 @@ body {
 .toast-info { border-left: 3px solid var(--blue); }
 .toast-warn { border-left: 3px solid #f59e0b; }
 
+/* ─── Skeleton Loading ─── */
+@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.skeleton { background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%); background-size: 800px 100%; animation: shimmer 1.5s infinite; border-radius: 6px; }
+.skeleton-line { height: 14px; margin-bottom: 10px; width: 100%; }
+.skeleton-line:last-child { width: 60%; }
+.skeleton-title { height: 20px; margin-bottom: 16px; width: 40%; }
+.skeleton-card { padding: 20px; border-radius: 12px; background: var(--bg-card); margin-bottom: 12px; }
+
+/* ─── Tab transition ─── */
+.main-content { transition: opacity .15s ease; }
+.main-content.loading { opacity: 0.4; pointer-events: none; }
+
+/* ─── Status bar ─── */
+.status-bar { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--text-tertiary); padding: 4px 12px; border-top: 1px solid var(--border); }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.status-dot.ok { background: #22c55e; }
+.status-dot.warn { background: #f59e0b; }
+.status-dot.fail { background: #ef4444; }
+
+/* ─── Error card ─── */
+.error-card { background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: 20px 24px; margin: 16px 0; text-align: center; }
+.error-card .error-icon { font-size: 32px; margin-bottom: 8px; }
+.error-card .error-msg { font-size: 14px; color: #991b1b; margin-bottom: 12px; }
+.error-card .error-detail { font-size: 12px; color: #b91c1c; margin-bottom: 12px; font-family: monospace; background: #fef2f2; padding: 8px; border-radius: 6px; max-height: 80px; overflow: auto; }
+
+
 /* Dropdown */
 .dropdown-item {
   padding: 9px 14px; font-size: 12px; cursor: pointer;

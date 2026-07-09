@@ -138,12 +138,58 @@ async function authCheck() {
   return 'unauthenticated';
 }
 
-// ─── Toast ───
+// ─── UI utilities ───
+
+// Show skeleton loading in a container
+function showSkeleton(containerId, lines=4) {
+  const el = typeof containerId === 'string' ? document.getElementById(containerId) : containerId;
+  if (!el) return;
+  el.innerHTML = '<div class="skeleton-card">' +
+    '<div class="skeleton skeleton-title"></div>' +
+    Array(lines).fill('<div class="skeleton skeleton-line"></div>').join('') +
+    '</div>';
+}
+
+// Show error card with retry
+function showErrorEl(container, msg, detail, onRetry) {
+  const el = typeof container === 'string' ? document.getElementById(container) : container;
+  if (!el) return;
+  const retryBtn = onRetry ? '<button class="btn btn-primary btn-sm" onclick="(' + onRetry.toString() + ')()">重试</button>' : '';
+  el.innerHTML = '<div class="error-card"><div class="error-icon">⚠️</div><div class="error-msg">' + escHtml(msg) + '</div>' +
+    (detail ? '<div class="error-detail">' + escHtml(detail) + '</div>' : '') + retryBtn + '</div>';
+}
+
+// Safe API call with loading state
+async function apiLoad(container, fetchFn) {
+  showSkeleton(container);
+  try {
+    const result = await fetchFn();
+    return result;
+  } catch(e) {
+    showErrorEl(container, '加载失败', e.message, function(){ apiLoad(container, fetchFn); });
+    return null;
+  }
+}
+
+// ─── Toast upgrade ───
+const TOAST_QUEUE = [];
+let _toastShowing = false;
+
 function toast(msg, type='info') {
+  TOAST_QUEUE.push({msg, type});
+  if (!_toastShowing) _showNextToast();
+}
+function _showNextToast() {
+  if (TOAST_QUEUE.length === 0) { _toastShowing = false; return; }
+  _toastShowing = true;
+  const {msg, type} = TOAST_QUEUE.shift();
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'toast toast-' + type + ' show';
-  setTimeout(() => el.classList.remove('show'), 3000);
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(_showNextToast, 300);
+  }, 3000);
 }
 
 // ─── Router ───
@@ -657,7 +703,11 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.18.0</span>
+          <span class="sidebar-version">v0.19.0</span>
+        </div>
+        <div class="status-bar" id="status-bar">
+          <span class="status-dot" id="health-dot"></span>
+          <span id="health-text">检查中...</span>
         </div>
       </div>
 
@@ -675,6 +725,8 @@ function renderDashboard() {
   switchTab('chat');
   // Load session list
   loadSidebarSessions();
+  // Update health bar
+  updateHealthBar();
 }
 
 function renderTabBar() {
@@ -1041,48 +1093,56 @@ async function formalizeReport(btn, sessionId) {
 }
 
 // ═══════════════════════════════════
-// STATUS TAB
+// STATUS TAB + HEALTH BAR
 // ═══════════════════════════════════
+
+// Update the status bar in sidebar
+async function updateHealthBar() {
+  const dot = document.getElementById('health-dot');
+  const text = document.getElementById('health-text');
+  if (!dot) return;
+  try {
+    const health = await API.get('/health');
+    dot.className = 'status-dot ok';
+    text.textContent = '运行中 · ' + (health.active_sessions || 0) + ' 会话';
+  } catch(e) {
+    dot.className = 'status-dot fail';
+    text.textContent = 'API 离线';
+  }
+}
+
 async function renderDashStatus() {
   const el = document.getElementById('dash-content');
-  el.innerHTML = '<div class="text-center mt-24"><span class="spinner"></span></div>';
-  const env = await API.get('/v1/setup/env-check');
-  const health = await API.get('/health');
+  el.innerHTML = '<div class="skeleton-card"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-line"></div></div>';
 
-  let html = `<div class="flex-between mb-16">
-    <div><span class="card-title" style="font-size:18px;margin:0">📊 服务状态</span></div>
-    <button class="btn btn-secondary btn-sm" onclick="renderDashStatus()">🔄 刷新</button>
-  </div>`;
+  const env = await API.get('/v1/setup/env-check').catch(() => null);
+  const health = await API.get('/health').catch(() => null);
+  if (!env) { showErrorEl(el, '无法获取服务状态', '请检查 API 是否正常运行', renderDashStatus); return; }
+
+  let html = '<div class="flex-between mb-16"><div><span class="card-title" style="font-size:18px;margin:0">📊 服务状态</span></div>' +
+    '<button class="btn btn-secondary btn-sm" onclick="renderDashStatus()">🔄 刷新</button></div>';
 
   html += '<div class="card"><div class="card-title">🤖 推理后端</div><div class="service-grid">';
   for (const [k, v] of Object.entries(env.llm_backends || {})) {
-    html += `<div class="service-card">
-      <span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span>
-      <div class="service-info">
-        <div class="service-name">${v.label}</div>
-        <div class="service-detail">${v.available ? '运行中' : '离线'} ${v.port ? '· port ' + v.port : ''}</div>
-      </div>
-    </div>`;
+    html += '<div class="service-card"><span class="dot ' + (v.available ? 'dot-ok' : 'dot-fail') + '"></span>' +
+      '<div class="service-info"><div class="service-name">' + escHtml(v.label) + '</div>' +
+      '<div class="service-detail">' + (v.available ? '运行中' : '离线') + (v.port ? ' · port ' + v.port : '') + '</div></div></div>';
   }
   html += '</div></div>';
 
   html += '<div class="card"><div class="card-title">🔧 辅助服务</div><div class="service-grid">';
   for (const [k, v] of Object.entries(env.services || {})) {
-    html += `<div class="service-card">
-      <span class="dot ${v.available ? 'dot-ok' : 'dot-fail'}"></span>
-      <div class="service-info">
-        <div class="service-name">${v.label}</div>
-        <div class="service-detail">${v.available ? '运行中' : '离线'} ${v.port ? '· port ' + v.port : ''}</div>
-      </div>
-    </div>`;
+    html += '<div class="service-card"><span class="dot ' + (v.available ? 'dot-ok' : 'dot-fail') + '"></span>' +
+      '<div class="service-info"><div class="service-name">' + escHtml(v.label) + '</div>' +
+      '<div class="service-detail">' + (v.available ? '运行中' : '离线') + (v.port ? ' · port ' + v.port : '') + '</div></div></div>';
   }
   html += '</div></div>';
 
-  html += `<div class="card"><div class="card-title">📊 概览</div>
-    <div class="service-grid">
-      <div class="service-card"><div class="service-info"><div class="service-name">活跃会话</div><div class="service-detail">${health.active_sessions}</div></div></div>
-    </div>
-  </div>`;
+  html += '<div class="card"><div class="card-title">📊 概览</div><div class="service-grid">';
+  const sessions = health ? health.active_sessions : '?';
+  html += '<div class="service-card"><div class="service-info"><div class="service-name">活跃会话</div><div class="service-detail">' + sessions + '</div></div></div>';
+  html += '<div class="service-card"><div class="service-info"><div class="service-name">API 版本</div><div class="service-detail">v0.19.0</div></div></div>';
+  html += '</div></div>';
 
   try {
     const tasksData = await API.get('/v1/tasks');
