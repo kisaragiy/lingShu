@@ -384,6 +384,50 @@ function startSetup() {
   renderStep1();
 }
 
+// ─── Welcome / Onboarding (shown after first setup) ───
+function renderWelcome() {
+  document.title = '灵枢 — 设置完成';
+  document.getElementById('app').innerHTML = `
+    <div class="container" style="max-width:640px;margin-top:60px">
+      <div class="card text-center" style="padding:48px">
+        <div style="font-size:56px;margin-bottom:12px">⚡</div>
+        <h2 style="margin-bottom:8px">欢迎使用灵枢</h2>
+        <p class="text-muted" style="margin-bottom:32px">你的 AI 调研助手已准备就绪</p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:left;margin-bottom:32px">
+          <div class="service-card" style="cursor:pointer" onclick="renderDashboard();switchTab('chat')">
+            <div class="service-info">
+              <div class="service-name">💬 开始对话</div>
+              <div class="service-detail">输入关键词，灵枢自动搜索和分析</div>
+            </div>
+          </div>
+          <div class="service-card" style="cursor:pointer" onclick="renderDashboard();switchTab('knowledge')">
+            <div class="service-info">
+              <div class="service-name">📚 上传知识库</div>
+              <div class="service-detail">PDF/Word/TXT → RAG 检索</div>
+            </div>
+          </div>
+          <div class="service-card" style="cursor:pointer" onclick="renderDashboard();switchTab('status')">
+            <div class="service-info">
+              <div class="service-name">📊 服务状态</div>
+              <div class="service-detail">检查 LLM 和辅助服务运行情况</div>
+            </div>
+          </div>
+          <div class="service-card" style="cursor:pointer" onclick="renderDashboard();switchTab('admin-users')">
+            <div class="service-info">
+              <div class="service-name">👥 管理用户</div>
+              <div class="service-detail">添加用户、分配角色</div>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" onclick="renderDashboard()" style="font-size:16px;padding:14px 36px">
+          进入控制台 →
+        </button>
+      </div>
+    </div>`;
+}
+
 async function quickStart() {
   const el = document.getElementById('setup-content');
   el.classList.remove('hidden');
@@ -402,8 +446,8 @@ async function quickStart() {
         <p class="text-muted" style="margin-bottom:24px">${result.warning || '灵枢已就绪，可进行 AI 调研'}</p>
         <div style="text-align:left">${steps}</div>
         <div class="mt-16">
-          <button class="btn btn-primary" onclick="renderDashboard()" style="font-size:16px; padding:14px 36px">
-            进入控制台 →
+          <button class="btn btn-primary" onclick="renderWelcome()" style="font-size:16px; padding:14px 36px">
+            进入灵枢 →
           </button>
           <button class="btn btn-secondary btn-sm" onclick="startSetup()" style="margin-left:8px">
             手动配置
@@ -704,7 +748,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.25.0</span>
+          <span class="sidebar-version">v0.26.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -1155,7 +1199,29 @@ async function renderDashStatus() {
   html += '<div class="card"><div class="card-title">📊 概览</div><div class="service-grid">';
   const sessions = health ? health.active_sessions : '?';
   html += '<div class="service-card"><div class="service-info"><div class="service-name">活跃会话</div><div class="service-detail">' + sessions + '</div></div></div>';
-  html += '<div class="service-card"><div class="service-info"><div class="service-name">API 版本</div><div class="service-detail">v0.19.0</div></div></div>';
+  html += '<div class="service-card"><div class="service-info"><div class="service-name">API 版本</div><div class="service-detail">v0.25.0</div></div></div>';
+  // Auth status
+  const isAdmin = window.__auth.user && window.__auth.user.role === 'admin';
+  html += '<div class="service-card"><div class="service-info"><div class="service-name">认证方式</div><div class="service-detail">JWT · 当前: ' + (window.__auth.user ? escHtml(window.__auth.user.username) + ' (' + (isAdmin ? '管理员' : '用户') + ')' : 'API Key') + '</div></div></div>';
+
+  // Try to fetch additional status data (silent on failure)
+  Promise.all([
+    API.get('/v1/scheduler/tasks').catch(() => null),
+    API.get('/v1/plugins/loaded').catch(() => null),
+  ]).then(([sched, plugs]) => {
+    const taskCount = sched && sched.tasks ? sched.tasks.length : 0;
+    const pluginCount = plugs && plugs.plugins ? plugs.plugins.length : 0;
+    const pluginOk = plugs && plugs.plugins ? plugs.plugins.filter(p => p.success).length : 0;
+    // Append to existing overview
+    const grid = document.querySelector('.service-grid');
+    if (grid) {
+      grid.insertAdjacentHTML('beforeend',
+        '<div class="service-card"><div class="service-info"><div class="service-name">定时任务</div><div class="service-detail">' + taskCount + ' 个</div></div></div>' +
+        '<div class="service-card"><div class="service-info"><div class="service-name">插件</div><div class="service-detail">' + pluginCount + ' 个（' + pluginOk + ' 正常）</div></div></div>'
+      );
+    }
+  }).catch(() => {});
+
   html += '</div></div>';
 
   try {
