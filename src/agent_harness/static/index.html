@@ -703,7 +703,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.19.0</span>
+          <span class="sidebar-version">v0.19.1</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -1367,48 +1367,142 @@ async function checkUpdate() {
 // ═══════════════════════════════════
 async function renderMCP() {
   const el = document.getElementById('dash-content');
-  el.innerHTML = '<div class="card"><div class="card-title">🔌 MCP 工具列表</div><div class="text-center"><span class="spinner"></span> 加载中...</div></div>';
-  try {
-    const registry = await import('/static/js/registry.js').catch(() => null);
-    if (registry) {
-      html = await registry.renderTools();
-    } else {
-      const r = await fetch('/v1/tools').catch(() => null);
-      if (r) {
-        const data = await r.json();
-        const tools = data.tools || {};
-        el.innerHTML = `<div class="card"><div class="card-title">🔌 MCP 工具列表 (${Object.keys(tools).length})</div>
-          <div class="service-grid">${Object.entries(tools).map(([k,v]) =>
-            `<div class="service-card"><div class="service-info"><div class="service-name">${escHtml(k)}</div><div class="service-detail">${escHtml((v.description||'').slice(0,60))}</div></div></div>`
-          ).join('')}</div></div>`;
-      } else {
-        el.innerHTML = '<div class="card"><div class="card-title">🔌 MCP 工具列表</div><div class="text-center text-muted">MCP API 不可用</div></div>';
-      }
-    }
-  } catch(e) {
-    el.innerHTML = '<div class="card"><div class="card-title">🔌 MCP 工具列表</div><div class="text-center text-muted">加载失败</div></div>';
+  el.innerHTML = '<div class="skeleton-card"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-line"></div></div>';
+  const r = await fetch('/v1/tools').catch(() => null);
+  if (!r) { showErrorEl(el, '无法加载工具列表', 'API 连接失败', renderMCP); return; }
+  const data = await r.json();
+  const tools = data.tools || {};
+  const entries = Object.entries(tools);
+  const enabled = entries.filter(([,v]) => v.enabled !== false);
+  const disabled = entries.filter(([,v]) => v.enabled === false);
+
+  let html = '<div class="flex-between mb-16"><div class="card-title" style="margin:0">🔌 工具列表 (' + entries.length + ')</div><button class="btn btn-secondary btn-sm" onclick="renderMCP()">🔄 刷新</button></div>';
+
+  // Enabled tools
+  html += '<div class="card"><div class="card-title" style="font-size:14px">已启用 (' + enabled.length + ')</div><div class="service-grid">';
+  for (const [k, v] of enabled) {
+    html += '<div class="service-card"><div class="service-info"><div class="service-name">' + escHtml(k) + ' <span class="privilege-badge" style="font-size:10px;padding:1px 6px;border-radius:4px;background:#eef2ff;color:#2563eb">' + escHtml(v.privilege || '') + '</span></div><div class="service-detail">' + escHtml((v.description || '').slice(0, 80)) + '</div></div><button class="btn btn-warning btn-sm" onclick="toggleTool(\'' + k + '\')">禁用</button></div>';
   }
+  html += '</div></div>';
+
+  // Disabled tools
+  if (disabled.length > 0) {
+    html += '<div class="card"><div class="card-title" style="font-size:14px">已禁用 (' + disabled.length + ')</div><div class="service-grid">';
+    for (const [k, v] of disabled) {
+      html += '<div class="service-card" style="opacity:0.5"><div class="service-info"><div class="service-name">' + escHtml(k) + '</div><div class="service-detail">' + escHtml((v.description || '').slice(0, 60)) + '</div></div><button class="btn btn-success btn-sm" onclick="toggleTool(\'' + k + '\')">启用</button></div>';
+    }
+    html += '</div></div>';
+  }
+
+  el.innerHTML = html;
+}
+
+async function toggleTool(name) {
+  const r = await _origFetch('/v1/tools/' + name + '/toggle', {method: 'POST'});
+  const d = await r.json();
+  if (r.status !== 200) throw new Error(d.error || '操作失败');
+  toast(d.enabled ? '✅ ' + name + ' 已启用' : '⏹️ ' + name + ' 已禁用', d.enabled ? 'ok' : 'info');
+  renderMCP();
 }
 
 // ═══════════════════════════════════
-// SKILLS TAB
+// SKILLS TAB — marketplace + installed + toggle
 // ═══════════════════════════════════
 async function renderSkills() {
   const el = document.getElementById('dash-content');
-  el.innerHTML = `<div class="card">
-    <div class="card-title">🧠 技能列表</div>
-    <div class="text-muted text-sm mb-16">灵枢的扩展技能模块，用于特定任务场景</div>
-    <table><tr><th>名称</th><th>描述</th><th>状态</th></tr>
-      <tr><td>agent-orchestration</td><td>LangGraph 多 Agent 编排</td><td><span class="dot dot-ok"></span> 内置</td></tr>
-      <tr><td>knowledge-base</td><td>知识库上传与 RAG 检索</td><td><span class="dot dot-ok"></span> 内置</td></tr>
-      <tr><td>session-persistence</td><td>会话持久化（磁盘存储）</td><td><span class="dot dot-ok"></span> 内置</td></tr>
-      <tr><td>mcp-server</td><td>MCP 协议工具暴露</td><td><span class="dot dot-ok"></span> 内置</td></tr>
-      <tr><td>comic-agent</td><td>AIGC 短视频管线</td><td><span class="dot dot-ok"></span> 内置</td></tr>
-      <tr><td>desktop-automation</td><td>Windows 桌面自动化</td><td><span class="dot dot-ok"></span> 内置</td></tr>
-      <tr><td>stock-analysis</td><td>A 股实时行情与技术指标</td><td><span class="dot dot-ok"></span> 内置</td></tr>
-      <tr><td>comfyui-pipeline</td><td>ComfyUI AI 绘画集成</td><td><span class="dot dot-warn"></span> 需启动 ComfyUI</td></tr>
-    </table>
-  </div>`;
+  el.innerHTML = `<div class="skeleton-card"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-line"></div></div>`;
+
+  const skillsData = await API.get('/v1/skills').catch(() => null);
+  const marketplaceData = await API.get('/v1/skills/marketplace?q=').catch(() => null);
+
+  let html = '<div class="flex-between mb-16"><div class="card-title" style="margin:0">🧠 我的技能</div><button class="btn btn-secondary btn-sm" onclick="renderSkills()">🔄 刷新</button></div>';
+
+  // ── Installed Skills ──
+  html += '<div class="card"><div class="card-title" style="font-size:14px">已安装</div>';
+  const skills = skillsData && skillsData.skills;
+  if (!skills || skills.length === 0) {
+    html += '<div class="text-center text-muted text-sm" style="padding:20px">暂无技能</div>';
+  } else {
+    html += '<table><tr><th>名称</th><th>状态</th><th></th></tr>' +
+      skills.map(s => {
+        const status = s.enabled
+          ? '<span class="dot dot-ok" title="已启用"></span> 启用'
+          : '<span class="dot dot-fail" title="已禁用"></span> 禁用';
+        const btn = s.enabled
+          ? '<button class="btn btn-warning btn-sm" onclick="toggleSkill(\'' + s.name + '\',false)">禁用</button>'
+          : '<button class="btn btn-success btn-sm" onclick="toggleSkill(\'' + s.name + '\',true)">启用</button>';
+        return '<tr><td><code>' + escHtml(s.name) + '</code></td><td>' + status + '</td><td style="text-align:right">' + btn + '</td></tr>';
+      }).join('') + '</table>';
+  }
+  html += '</div>';
+
+  // ── Marketplace ──
+  html += '<div class="card"><div class="card-title" style="font-size:14px">📦 技能市场</div>' +
+    '<div style="display:flex;gap:8px;margin-bottom:12px">' +
+    '<input class="form-input" id="marketplace-search" placeholder="搜索技能..." onkeydown="if(event.key===\'Enter\') searchMarketplace()">' +
+    '<button class="btn btn-primary btn-sm" onclick="searchMarketplace()">搜索</button>' +
+    '</div><div id="marketplace-list">';
+
+  const mk = marketplaceData && marketplaceData.skills;
+  if (mk && mk.length > 0) {
+    html += '<table><tr><th>名称</th><th>描述</th><th></th></tr>' +
+      mk.slice(0, 10).map(s => {
+        const btn = s.installed
+          ? '<span class="text-muted text-sm">已安装</span>'
+          : '<button class="btn btn-primary btn-sm" onclick="installSkill(\'' + s.name + '\')">安装</button>';
+        return '<tr><td><code>' + escHtml(s.name) + '</code></td><td class="text-sm text-muted">' + escHtml(s.desc || '') + '</td><td style="text-align:right">' + btn + '</td></tr>';
+      }).join('') + '</table>';
+  } else {
+    html += '<div class="text-center text-muted text-sm" style="padding:16px">输入关键词搜索技能市场</div>';
+  }
+  html += '</div></div>';
+
+  el.innerHTML = html;
+}
+
+async function toggleSkill(name, enable) {
+  try {
+    const r = await _origFetch('/v1/skills/' + name + '/toggle', {method: 'POST'});
+    const d = await r.json();
+    if (r.status !== 200) throw new Error(d.error || '操作失败');
+    toast(d.enabled ? '✅ ' + name + ' 已启用' : '⏹️ ' + name + ' 已禁用', d.enabled ? 'ok' : 'info');
+    renderSkills();
+  } catch(e) { toast('操作失败: ' + e.message, 'err'); }
+}
+
+async function searchMarketplace() {
+  const q = document.getElementById('marketplace-search').value.trim();
+  const list = document.getElementById('marketplace-list');
+  if (!list) return;
+  list.innerHTML = '<div class="text-center text-sm"><span class="spinner"></span> 搜索中...</div>';
+  try {
+    const data = await API.get('/v1/skills/marketplace?q=' + encodeURIComponent(q || ''));
+    const skills = data.skills || [];
+    if (skills.length === 0) {
+      list.innerHTML = '<div class="text-center text-muted text-sm" style="padding:16px">未找到匹配的技能</div>';
+      return;
+    }
+    list.innerHTML = '<table><tr><th>名称</th><th>描述</th><th></th></tr>' +
+      skills.map(s => {
+        const btn = s.installed
+          ? '<span class="text-muted text-sm">已安装</span>'
+          : '<button class="btn btn-primary btn-sm" onclick="installSkill(\'' + s.name + '\')">安装</button>';
+        return '<tr><td><code>' + escHtml(s.name) + '</code></td><td class="text-sm text-muted">' + escHtml(s.desc || '') + '</td><td style="text-align:right">' + btn + '</td></tr>';
+      }).join('') + '</table>';
+  } catch(e) { list.innerHTML = '<div class="text-center text-muted text-sm" style="padding:16px">搜索失败: ' + e.message + '</div>'; }
+}
+
+async function installSkill(slug) {
+  try {
+    const r = await _origFetch('/v1/skills/marketplace/install', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slug}),
+    });
+    const d = await r.json();
+    if (r.status !== 200) throw new Error(d.error || '安装失败');
+    toast('✅ ' + slug + ' 已安装', 'ok');
+    renderSkills();
+  } catch(e) { toast('安装失败: ' + e.message, 'err'); }
 }
 
 // ─── Auth / Logout ───

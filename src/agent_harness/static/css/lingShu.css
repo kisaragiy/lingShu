@@ -332,6 +332,7 @@ body {
 .btn-secondary { background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border); }
 .btn-secondary:hover { border-color: var(--accent); }
 .btn-success { background: var(--green); color: #fff; }
+.btn-warning { background: #f59e0b; color: #fff; }
 .btn-danger { background: var(--red); color: #fff; }
 .btn-sm { padding: 6px 10px; font-size: 11px; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }

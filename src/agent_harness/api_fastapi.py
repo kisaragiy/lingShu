@@ -45,6 +45,7 @@ from .api_security import (
 )
 from . import auth_db as _auth_db
 from . import auth_jwt as _auth_jwt
+from .tools.tool_config import is_tool_enabled, toggle_tool as _toggle_tool, list_disabled as _list_disabled_tools
 
 HOST = os.environ.get("HARNESS_API_HOST", "127.0.0.1")
 PORT = int(os.environ.get("HARNESS_API_PORT", "8788"))
@@ -721,7 +722,7 @@ async def auto_configure():
 
 @app.get("/v1/tools")
 async def list_tools():
-    """List all registered tools."""
+    """List all registered tools (with enabled/disabled status)."""
     try:
         import agent_harness.tools as _t
         from agent_harness.tools.registry import TOOL_REGISTRY
@@ -730,6 +731,7 @@ async def list_tools():
                 "description": v["schema"].get("description", ""),
                 "privilege": v.get("privilege", "read-only"),
                 "properties": list(v["schema"].get("properties", {}).keys()),
+                "enabled": is_tool_enabled(k),
             }
             for k, v in TOOL_REGISTRY.items()
         }
@@ -1295,6 +1297,157 @@ async def admin_delete_user(user_id: str, request: Request):
     if _auth_db.delete_user(user_id):
         return {"status": "deleted", "user_id": user_id}
     return JSONResponse({"error": "用户不存在"}, status_code=404)
+
+
+# ═══════════════════════════════════════
+# SKILLS MANAGEMENT API
+# ═══════════════════════════════════════
+
+_HERMES_SKILLS_DIR = Path(os.environ.get("HOME", "~")) / "AppData" / "Local" / "hermes" / "skills"
+if not _HERMES_SKILLS_DIR.exists():
+    _HERMES_SKILLS_DIR = Path.home() / "AppData" / "Local" / "hermes" / "skills"
+
+
+def _scan_skills() -> list[dict]:
+    """Scan installed skills (enabled + disabled)."""
+    skills = []
+    if not _HERMES_SKILLS_DIR.exists():
+        return skills
+
+    # Enabled skills (root dir)
+    for d in sorted(_HERMES_SKILLS_DIR.iterdir()):
+        if d.is_dir() and not d.name.startswith("_") and not d.name.startswith("."):
+            skills.append({"name": d.name, "enabled": True, "builtin": False})
+
+    # Disabled skills
+    disabled_dir = _HERMES_SKILLS_DIR / "_disabled"
+    if disabled_dir.exists():
+        for d in sorted(disabled_dir.iterdir()):
+            if d.is_dir() and not d.name.startswith("."):
+                skills.append({"name": d.name, "enabled": False, "builtin": False})
+    return skills
+
+
+@app.get("/v1/skills")
+async def list_skills():
+    """List all installed skills with enabled/disabled status."""
+    return {"skills": _scan_skills(), "count": len(_scan_skills())}
+
+
+@app.post("/v1/skills/{name}/toggle")
+async def toggle_skill(name: str):
+    """Enable or disable a skill by moving it between _disabled/ and root."""
+    enabled_dir = _HERMES_SKILLS_DIR / name
+    disabled_dir = _HERMES_SKILLS_DIR / "_disabled" / name
+
+    if enabled_dir.exists():
+        # Disable: move to _disabled/
+        target = _HERMES_SKILLS_DIR / "_disabled"
+        target.mkdir(exist_ok=True)
+        enabled_dir.rename(disabled_dir)
+        return {"name": name, "enabled": False}
+
+    elif disabled_dir.exists():
+        # Enable: move to root
+        disabled_dir.rename(enabled_dir)
+        return {"name": name, "enabled": True}
+
+    return JSONResponse({"error": "技能不存在: %s" % name}, status_code=404)
+
+
+@app.get("/v1/skills/marketplace")
+async def marketplace_search(q: str = ""):
+    """Search the SkillHub marketplace for available skills."""
+    import subprocess
+    import shutil
+    skillhub = shutil.which("skillhub") or os.path.expanduser("~/.local/bin/skillhub")
+    if not os.path.isfile(skillhub):
+        return {"skills": [], "error": "SkillHub not installed"}
+    try:
+        r = subprocess.run(
+            [skillhub, "search", q] if q else [skillhub, "search", ""],
+            capture_output=True, text=True, timeout=15,
+        )
+        lines = [l.strip() for l in r.stdout.split("\n") if l.strip() and not l.startswith("NAME")]
+        skills = []
+        for line in lines[:50]:
+            parts = line.split(None, 2)
+            if len(parts) >= 2:
+                skills.append({"name": parts[0], "desc": parts[1] if len(parts) > 1 else "", "installed": False})
+        # Mark installed
+        installed = {s["name"] for s in _scan_skills()}
+        for s in skills:
+            if s["name"] in installed:
+                s["installed"] = True
+        return {"skills": skills, "count": len(skills)}
+    except Exception as e:
+        return {"skills": [], "error": str(e)}
+
+
+@app.post("/v1/skills/marketplace/install")
+async def marketplace_install(request: Request):
+    """Install a skill from SkillHub marketplace."""
+    body = await request.json()
+    slug = (body.get("slug", "") or "").strip()
+    if not slug:
+        return JSONResponse({"error": "缺少 slug 参数"}, status_code=400)
+    import subprocess, shutil
+    skillhub = shutil.which("skillhub") or os.path.expanduser("~/.local/bin/skillhub")
+    if not os.path.isfile(skillhub):
+        return JSONResponse({"error": "SkillHub 未安装"}, status_code=400)
+    try:
+        r = subprocess.run([skillhub, "install", slug], capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            return JSONResponse({"error": "安装失败: %s" % (r.stderr or r.stdout)}, status_code=400)
+        return {"status": "installed", "name": slug}
+    except subprocess.TimeoutExpired:
+        return JSONResponse({"error": "安装超时"}, status_code=504)
+
+
+# ═══════════════════════════════════════
+# TOOLS CONFIG API
+# ═══════════════════════════════════════
+
+
+@app.get("/v1/tools/{name}")
+async def get_tool_detail(name: str):
+    """Get a single tool's details + enabled status."""
+    try:
+        from .tools.registry import TOOL_REGISTRY
+        entry = TOOL_REGISTRY.get(name)
+        if not entry:
+            return JSONResponse({"error": "工具不存在"}, status_code=404)
+        return {
+            "name": name,
+            "description": entry["schema"].get("description", ""),
+            "privilege": entry.get("privilege", "read-only"),
+            "properties": list(entry["schema"].get("properties", {}).keys()),
+            "enabled": is_tool_enabled(name),
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/v1/tools/{name}/toggle")
+async def toggle_tool_endpoint(name: str):
+    """Enable or disable a tool."""
+    try:
+        new_state = _toggle_tool(name)
+        return {"name": name, "enabled": new_state}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/v1/plugins")
+async def list_plugins():
+    """Combined view: skills + disabled tools."""
+    skills = _scan_skills()
+    disabled_tools = _list_disabled_tools()
+    return {
+        "skills": skills,
+        "disabled_tools": disabled_tools,
+        "total_skills": len(skills),
+    }
 
 
 # ─── Direct entry point ───
