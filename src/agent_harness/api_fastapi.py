@@ -1450,6 +1450,78 @@ async def list_plugins():
     }
 
 
+# ═══════════════════════════════════════
+# SCHEDULER (CRON) API
+# ═══════════════════════════════════════
+
+from .agent_cron import add_task as _cron_add, update_task as _cron_update, delete_task as _cron_delete, get_task as _cron_get, list_tasks as _cron_list
+
+
+@app.get("/v1/scheduler/tasks")
+async def scheduler_list_tasks():
+    """List all scheduled tasks."""
+    return {"tasks": _cron_list(), "count": len(_cron_list())}
+
+
+@app.post("/v1/scheduler/tasks")
+async def scheduler_create_task(request: Request):
+    """Create a scheduled task."""
+    body = await request.json()
+    task_id = (body.get("id", "") or "").strip()
+    schedule = (body.get("schedule", "") or "").strip()
+    prompt = (body.get("prompt", "") or "").strip()
+    if not task_id or not schedule:
+        return JSONResponse({"error": "缺少 id 或 schedule 参数"}, status_code=400)
+    try:
+        task = _cron_add(task_id, schedule, prompt)
+        return {"status": "created", "task": task}
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.get("/v1/scheduler/tasks/{task_id}")
+async def scheduler_get_task(task_id: str):
+    """Get a specific task."""
+    task = _cron_get(task_id)
+    if task is None:
+        return JSONResponse({"error": "任务不存在"}, status_code=404)
+    return {"task": task}
+
+
+@app.post("/v1/scheduler/tasks/{task_id}")
+async def scheduler_update_task(task_id: str, request: Request):
+    """Update a task (schedule, prompt, enabled)."""
+    body = await request.json()
+    try:
+        task = _cron_update(task_id, **body)
+        if task is None:
+            return JSONResponse({"error": "任务不存在"}, status_code=404)
+        return {"status": "updated", "task": task}
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.delete("/v1/scheduler/tasks/{task_id}")
+async def scheduler_delete_task(task_id: str):
+    """Delete a scheduled task."""
+    if _cron_delete(task_id):
+        return {"status": "deleted"}
+    return JSONResponse({"error": "任务不存在"}, status_code=404)
+
+
+# ═══════════════════════════════════════
+# PLUGINS API
+# ═══════════════════════════════════════
+
+from .plugin_loader import list_plugins as _plugin_list
+
+
+@app.get("/v1/plugins/loaded")
+async def plugin_list():
+    """List loaded external plugins."""
+    return {"plugins": _plugin_list(), "count": len(_plugin_list())}
+
+
 # ─── Direct entry point ───
 
 
@@ -1490,6 +1562,30 @@ def main():
     if count:
         print("  会话: %d 个" % count)
     print("")
+
+    # Start background scheduler
+    _scheduler_count = 0
+    try:
+        from .agent_cron import get_scheduler
+        sched = get_scheduler()
+        sched.start()
+        _scheduler_count = len(sched.list_tasks() if hasattr(sched, 'list_tasks') else [])
+        print("  定时任务: %d 个" % _scheduler_count)
+    except Exception:
+        pass
+
+    # Load plugins
+    _plugin_count = 0
+    try:
+        from .plugin_loader import load_plugins
+        plugins = load_plugins()
+        _plugin_count = len(plugins)
+        print("  插件:     %d 个（%d 成功）" % (
+            _plugin_count,
+            sum(1 for p in plugins if p.get("success"))),
+        )
+    except Exception:
+        pass
 
     # Multi-worker support
     # WARNING: SQLite + multi-process can cause WAL contention.

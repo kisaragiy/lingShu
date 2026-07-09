@@ -630,6 +630,7 @@ const DASH_TABS = [
   { id: 'mcp',     icon: '🔌',  label: '工具' },
   { id: 'sessions', icon: '🗂️', label: '会话管理' },
   { id: 'admin-users', icon: '👥', label: '用户管理', adminOnly: true },
+  { id: 'scheduler', icon: '⏰', label: '定时任务', adminOnly: true },
   { id: 'settings', icon: '⚙️', label: '设置', adminOnly: true },
   { id: 'skills',  icon: '🧠',  label: '技能', adminOnly: true },
 ];
@@ -703,7 +704,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.20.0</span>
+          <span class="sidebar-version">v0.21.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -829,6 +830,7 @@ function switchTab(tab) {
   else if (tab === 'reports') renderReports();
   else if (tab === 'skills') renderSkills();
   else if (tab === 'admin-users') renderAdminUsers();
+  else if (tab === 'scheduler') renderScheduler();
   return false;
 }
 
@@ -1305,6 +1307,94 @@ async function deleteSessionFromList(sessionId) {
   if (!confirm('删除此会话？')) return;
   try { await fetch('/v1/sessions/' + sessionId, { method: 'DELETE' }); toast('已删除', 'ok'); renderDashSessions(); loadSidebarSessions(); }
   catch(e) { toast('删除失败', 'err'); }
+}
+
+// ═══════════════════════════════════
+// SCHEDULER TAB
+// ═══════════════════════════════════
+async function renderScheduler() {
+  const el = document.getElementById('dash-content');
+  el.innerHTML = '<div class="skeleton-card"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-line"></div></div>';
+  const data = await API.get('/v1/scheduler/tasks').catch(() => null);
+
+  let html = '<div class="flex-between mb-16"><div class="card-title" style="margin:0">⏰ 定时任务</div><button class="btn btn-secondary btn-sm" onclick="renderScheduler()">🔄 刷新</button></div>';
+
+  // Task list
+  html += '<div class="card"><div class="card-title" style="font-size:14px">已创建的任务</div><div id="scheduler-list">';
+  const tasks = data && data.tasks;
+  if (!tasks || tasks.length === 0) {
+    html += '<div class="text-center text-muted text-sm" style="padding:20px">暂无定时任务</div>';
+  } else {
+    html += '<table><tr><th>ID</th><th>调度</th><th>Prompt</th><th>状态</th><th>运行次数</th><th></th></tr>' +
+      tasks.map(t => {
+        const enabled = t.enabled !== false;
+        const status = enabled
+          ? '<span class="dot dot-ok"></span> 启用'
+          : '<span class="dot dot-fail"></span> 禁用';
+        const toggleBtn = enabled
+          ? '<button class="btn btn-warning btn-sm" onclick="schedulerToggle(\'' + t.id + '\', false)">禁用</button>'
+          : '<button class="btn btn-success btn-sm" onclick="schedulerToggle(\'' + t.id + '\', true)">启用</button>';
+        return '<tr><td><code>' + escHtml(t.id) + '</code></td>' +
+          '<td class="text-sm">' + escHtml(t.schedule) + '</td>' +
+          '<td class="text-sm text-muted">' + escHtml((t.prompt || '').slice(0, 40)) + '</td>' +
+          '<td>' + status + '</td>' +
+          '<td class="text-sm">' + (t.run_count || 0) + '</td>' +
+          '<td style="text-align:right">' + toggleBtn + ' <button class="btn btn-danger btn-sm" onclick="schedulerDelete(\'' + t.id + '\')">删除</button></td></tr>';
+      }).join('') + '</table>';
+  }
+  html += '</div></div>';
+
+  // Create form
+  html += '<div class="card"><div class="card-title" style="font-size:14px">新建定时任务</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">' +
+    '<div class="form-group" style="flex:1;min-width:100px"><label class="form-label">任务 ID</label><input class="form-input" id="sched-id" placeholder="daily_report"></div>' +
+    '<div class="form-group" style="flex:1;min-width:120px"><label class="form-label">调度表达式</label><input class="form-input" id="sched-schedule" placeholder="0 9 * * * 或 every 30m"></div>' +
+    '<div class="form-group" style="flex:2;min-width:200px"><label class="form-label">Prompt</label><input class="form-input" id="sched-prompt" placeholder="生成昨日行业简报"></div>' +
+    '<button class="btn btn-primary btn-sm" onclick="schedulerCreate()" style="margin-bottom:4px">创建</button></div>' +
+    '<div id="sched-error" class="text-sm" style="color:var(--danger);margin-top:8px;display:none"></div>' +
+    '<div class="text-sm text-muted mt-8">调度表达式示例: <code>0 9 * * *</code> (每天9点), <code>*/15 * * * *</code> (每15分), <code>every 30m</code></div>' +
+    '</div>';
+
+  el.innerHTML = html;
+}
+
+async function schedulerToggle(taskId, enable) {
+  const r = await _origFetch('/v1/scheduler/tasks/' + taskId, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({enabled: enable}),
+  });
+  const d = await r.json();
+  if (r.status !== 200) { toast('操作失败: ' + (d.error || ''), 'err'); return; }
+  toast(enable ? '✅ 任务已启动' : '⏹️ 任务已暂停', enable ? 'ok' : 'info');
+  renderScheduler();
+}
+
+async function schedulerDelete(taskId) {
+  if (!confirm('删除任务「' + taskId + '」？')) return;
+  const r = await _origFetch('/v1/scheduler/tasks/' + taskId, {method: 'DELETE'});
+  if (r.status !== 200) { toast('删除失败', 'err'); return; }
+  toast('已删除', 'ok');
+  renderScheduler();
+}
+
+async function schedulerCreate() {
+  const id = document.getElementById('sched-id').value.trim();
+  const schedule = document.getElementById('sched-schedule').value.trim();
+  const prompt = document.getElementById('sched-prompt').value.trim();
+  const errEl = document.getElementById('sched-error');
+  if (!id || !schedule) { errEl.textContent = '请填写任务 ID 和调度表达式'; errEl.style.display = 'block'; return; }
+  errEl.style.display = 'none';
+  const r = await _origFetch('/v1/scheduler/tasks', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id, schedule, prompt}),
+  });
+  const d = await r.json();
+  if (r.status !== 200) { errEl.textContent = d.error || '创建失败'; errEl.style.display = 'block'; return; }
+  toast('✅ 任务已创建', 'ok');
+  document.getElementById('sched-id').value = '';
+  document.getElementById('sched-schedule').value = '';
+  document.getElementById('sched-prompt').value = '';
+  renderScheduler();
 }
 
 // ═══════════════════════════════════
