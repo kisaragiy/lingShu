@@ -90,15 +90,23 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
     # Format the main content (simple markdown → HTML conversion)
     body_html = _markdown_to_html(linked_content)
 
-    # Build sources section with anchor IDs
+    # Build sources section with anchor IDs + metadata
+    from datetime import datetime as _dt
+    _now_str = _dt.now().strftime("%Y-%m-%d")
     sources_html = ""
     if sources:
         items = ""
         for i, s in enumerate(sources, 1):
-            title_text = s.get("title", s["url"])
-            items += '<li id="source-%d"><a href="%s" target="_blank" rel="noopener">%s</a></li>' % (
-                i, s["url"], title_text
-            )
+            url = s.get("url", "")
+            title_text = s.get("title", url)
+            source_type = s.get("type", "web")
+            type_icon = {"news": "📰", "paper": "📄", "official": "🏛️", "web": "🌐"}.get(source_type, "🌐")
+            access_date = s.get("access_date", _now_str)
+            items += '<li id="source-%d" class="source-item">' % i
+            items += '<span class="source-type">%s</span> ' % type_icon
+            items += '<a href="%s" target="_blank" rel="noopener">%s</a>' % (url, title_text)
+            items += '<span class="source-meta"> · %s · %s</span>' % (source_type, access_date)
+            items += '</li>'
         sources_html = """
         <div class="section">
             <h2>📎 参考来源</h2>
@@ -142,15 +150,23 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
     word_count = len(content.replace("\n", ""))
     read_time = max(1, word_count // 300)
 
-    # Build sources section with anchor IDs
+    # Build sources section with anchor IDs + metadata
+    from datetime import datetime as _dt
+    _now_str = _dt.now().strftime("%Y-%m-%d")
     sources_html = ""
     if sources:
         items = ""
         for i, s in enumerate(sources, 1):
-            title_text = s.get("title", s["url"])
-            items += '<li id="source-%d"><a href="%s" target="_blank" rel="noopener">%s</a></li>' % (
-                i, s["url"], title_text
-            )
+            url = s.get("url", "")
+            title_text = s.get("title", url)
+            source_type = s.get("type", "web")
+            type_icon = {"news": "📰", "paper": "📄", "official": "🏛️", "web": "🌐"}.get(source_type, "🌐")
+            access_date = s.get("access_date", _now_str)
+            items += '<li id="source-%d" class="source-item">' % i
+            items += '<span class="source-type">%s</span> ' % type_icon
+            items += '<a href="%s" target="_blank" rel="noopener">%s</a>' % (url, title_text)
+            items += '<span class="source-meta"> · %s · %s</span>' % (source_type, access_date)
+            items += '</li>'
         sources_html = """
         <div class="section">
             <h2>📎 参考来源</h2>
@@ -234,7 +250,10 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
   }
   /* ─── Sources ─── */
   .sources { margin: 12px 0; }
-  .sources li { margin-bottom: 8px; }
+  .sources li { margin-bottom: 10px; }
+  .source-item { padding: 4px 0; }
+  .source-type { font-size: 14px; margin-right: 4px; }
+  .source-meta { font-size: 11px; color: #94a3b8; }
   .sources a { color: #2563eb; text-decoration: none; word-break: break-all; font-size: 13px; }
   .sources a:hover { text-decoration: underline; }
   sup.cite { font-size: 11px; vertical-align: super; line-height: 0; margin: 0 2px; }
