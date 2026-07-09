@@ -60,21 +60,57 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                 timeout=15,
             )
             if r.status_code == 200:
-                # Parse result links from DuckDuckGo HTML
+                # Parse result links from DuckDuckGo HTML (multi-strategy)
                 html = r.text
-                links = _re.findall(
+                seen_urls = set()
+                parsed = []
+
+                # Strategy 1: modern DDG (result__a + result__snippet)
+                links1 = _re.findall(
                     r'<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([^<]+)</a>',
                     html,
                 )
-                snippets = _re.findall(
+                snippets1 = _re.findall(
                     r'<a class="result__snippet"[^>]*>([^<]+)</a>',
                     html,
                 )
-                for i, (url, title) in enumerate(links[:max_results]):
-                    snippet = snippets[i] if i < len(snippets) else ""
-                    results.append(
-                        f"{title}: {snippet} [{url}]"
+                for i, (url, title) in enumerate(links1[:max_results]):
+                    snippet = snippets1[i] if i < len(snippets1) else ""
+                    if url not in seen_urls:
+                        seen_urls.add(url)
+                        parsed.append("%s: %s [%s]" % (title, snippet, url))
+
+                # Strategy 2: legacy DDG (result-link + snippet-text)
+                if len(parsed) < max_results:
+                    links2 = _re.findall(
+                        r'<a[^>]+class="result-link"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>',
+                        html,
                     )
+                    snippets2 = _re.findall(
+                        r'<span[^>]+class="snippet-text"[^>]*>([^<]+)</span>',
+                        html,
+                    )
+                    for i, (url, title) in enumerate(links2[:max_results]):
+                        if url not in seen_urls:
+                            seen_urls.add(url)
+                            snippet = snippets2[i] if i < len(snippets2) else ""
+                            parsed.append("%s: %s [%s]" % (title, snippet, url))
+
+                # Strategy 3: generic article links (last resort)
+                if len(parsed) == 0:
+                    links3 = _re.findall(
+                        r'<a[^>]+href="(https?://[^"]+)"[^>]*>([^<]+)</a>',
+                        html,
+                    )
+                    for url, title in links3[:max_results * 2]:
+                        if url not in seen_urls and not any(
+                            skip in url for skip in ["duckduckgo.com", "//ads."]
+                        ):
+                            if _re.search(r'/(article|page|post|item|product|news|content|blog)', url):
+                                seen_urls.add(url)
+                                parsed.append("%s: [%s]" % (title, url))
+
+                results = parsed[:max_results]
         except Exception:
             pass
 
