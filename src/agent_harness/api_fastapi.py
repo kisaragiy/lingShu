@@ -55,7 +55,7 @@ _API_TOKEN: str = load_or_generate_token()
 # ─── Auth exempt paths (no authentication required) ───
 _AUTH_EXEMPT_PREFIXES = ("/health",)
 _AUTH_EXEMPT_EXACT = ("/", "/setup", "/dashboard")
-_AUTH_EXEMPT_V1 = ("/v1/auth/login", "/v1/auth/refresh", "/v1/setup/config")  # needs check for first-boot
+_AUTH_EXEMPT_V1 = ("/v1/auth/login", "/v1/auth/refresh", "/v1/auth/setup-admin", "/v1/setup/config")
 
 # ─── Token optimization: conversation window ───
 # 分析结论：80% 请求 ≤2轮，95% ≤4轮，99%+ ≤6轮
@@ -1023,7 +1023,7 @@ async def login(request: Request):
         int(_t.time()) + 8 * 3600,
     )
     _auth_db.save_session(
-        _auth_jwt.verify_token(refresh_token)["jti"],
+        _auth_jwt.verify_token(refresh_token, expected_type="refresh")["jti"],
         user["id"],
         int(_t.time()) + 30 * 86400,
         token_type="refresh",
