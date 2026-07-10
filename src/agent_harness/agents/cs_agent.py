@@ -16,6 +16,10 @@ from .customer_service import (
     cs_create_ticket,
     cs_check_ticket,
     cs_search_faq,
+    cs_query_product,
+    cs_check_promotion,
+    cs_estimate_delivery,
+    cs_modify_address,
     classify_cs_intent,
 )
 
@@ -79,8 +83,10 @@ def _execute_tools(intent: str, message: str) -> dict[str, str]:
             order_id = m.group(0)
         if order_id:
             results["物流查询"] = cs_lookup_order(order_id)
+            results["配送时效"] = cs_estimate_delivery(order_id)
         else:
             results["物流查询"] = cs_lookup_order("ORD20260708001")
+            results["配送时效"] = cs_estimate_delivery()
 
     elif intent == "退换货":
         order_id = None
@@ -93,7 +99,8 @@ def _execute_tools(intent: str, message: str) -> dict[str, str]:
             "退换货政策:\n"
             "• 签收后 7 天内支持无理由退货\n"
             "• 质量问题 30 天内免费换货\n"
-            "• 需保持商品完好、配件齐全"
+            "• 需保持商品完好、配件齐全\n"
+            "• 退款 1-3 个工作日原路返回"
         )
         if order_id:
             results["工单"] = cs_create_ticket(order_id, "退换货", message[:100])
@@ -102,6 +109,10 @@ def _execute_tools(intent: str, message: str) -> dict[str, str]:
         results["投诉受理"] = (
             "投诉已记录，受理编号自动生成，24小时内专人联系。"
         )
+        # Also check if there's a related order
+        m = re.search(r'ORD\d+', message)
+        if m:
+            results["订单信息"] = cs_lookup_order(m.group(0))
 
     elif intent == "FAQ查询":
         faq = cs_search_faq(message)
@@ -109,6 +120,53 @@ def _execute_tools(intent: str, message: str) -> dict[str, str]:
             results["FAQ"] = faq
         else:
             results["FAQ"] = "知识库未匹配到精确结果，提供标准服务政策。"
+
+    elif intent == "售前咨询":
+        # Extract product name or keyword from message
+        keywords = re.sub(r'(推荐|介绍|看看|有什么|怎么样|好不好|适合|对比|区别)', '', message)
+        keywords = keywords.strip().rstrip('?？的')
+        if keywords and len(keywords) > 1:
+            results["商品查询"] = cs_query_product(keywords)
+        else:
+            # Show popular products
+            results["热门推荐"] = (
+                "🔥 **热门推荐**\n"
+                "━━━━━━━━━━━━━━━━━\n"
+                "1. 小米14 Ultra ¥5,999 — 徕卡四摄旗舰\n"
+                "2. 索尼WH-1000XM5 ¥2,499 — 降噪标杆\n"
+                "3. 华硕ROG Ally ¥4,999 — 掌机首选\n"
+                "4. 苹果AirPods Pro 2 ¥1,899 — 真无线王者\n\n"
+                "💡 回复商品名称查看详情，或告诉我您的预算和需求。"
+            )
+        # Also check for available promotions
+        results["优惠信息"] = cs_check_promotion()
+
+    elif intent == "优惠查询":
+        results["优惠信息"] = cs_check_promotion(message)
+        # Check if user's order qualifies
+        m = re.search(r'ORD\d+', message)
+        if m:
+            results["订单信息"] = cs_lookup_order(m.group(0))
+
+    elif intent == "地址修改":
+        order_id = None
+        m = re.search(r'ORD\d+', message)
+        if m:
+            order_id = m.group(0)
+        if order_id:
+            results["订单信息"] = cs_lookup_order(order_id)
+        else:
+            # Show user's pending orders that can be modified
+            orders = cs_lookup_order("kisaragiy")
+            results["当前订单"] = orders + "\n\n💡 请提供想修改的订单号和新地址。"
+        results["地址修改指南"] = (
+            "📋 **地址修改说明**\n"
+            "━━━━━━━━━━━━━━━━━\n"
+            "• 仅「待发货」和「待付款」订单可修改地址\n"
+            "• 已发货订单请联系物流公司改址\n"
+            "• 请提供完整收货地址（省市区+街道+门牌）"
+        )
+
     elif intent == "人工客服":
         results["转人工"] = "排队中，预计等待3-5分钟。备用热线: 400-800-8888"
     else:
@@ -135,7 +193,9 @@ def _call_cs_llm(message: str, intent: str, tool_data: str, context: str) -> str
         "5. 如果用户表达不满，先道歉再解决问题\n"
         "6. 回复用 Markdown 格式，300 字以内\n"
         "7. 不要提及「系统提示」「工具结果」等内部术语\n"
-        "8. 结尾加一句友好的话，如「还有其他需要吗？」"
+        "8. 结尾加一句友好的话，如「还有其他需要吗？」\n\n"
+        "你可以处理的场景：查订单、查物流、退换货、投诉、FAQ解答、\n"
+        "售前咨询（商品推荐/对比/参数）、优惠查询（优惠券/促销活动）、地址修改、转人工。"
     )
 
     user = (
@@ -183,6 +243,15 @@ def _template_fallback(intent: str, message: str, tool_data: str) -> str:
     if intent == "FAQ查询":
         return "为您找到以下相关信息：\n\n" + tool_data + "\n\n💡 如果未解决您的问题，我可以转接人工客服。"
 
+    if intent == "售前咨询":
+        return "为您推荐以下商品：\n\n" + tool_data + "\n\n💡 告诉我您的预算或具体需求，我可以帮您进一步筛选。"
+
+    if intent == "优惠查询":
+        return "为您查询到以下优惠活动：\n\n" + tool_data + "\n\n💡 结账时输入优惠码即可享受折扣。"
+
+    if intent == "地址修改":
+        return "关于地址修改：\n\n" + tool_data + "\n\n💡 请提供订单号和新的收货地址，我会帮您修改。"
+
     if intent == "人工客服":
         return "正在为您转接人工客服，请稍候...\n\n当前排队人数: 2 人\n预计等待: 3-5 分钟\n\n📞 客服热线: 400-800-8888"
 
@@ -191,7 +260,7 @@ def _template_fallback(intent: str, message: str, tool_data: str) -> str:
     if any(k in msg for k in ["你好", "您好", "hi", "hello"]):
         return (
             "你好！欢迎使用灵枢智能客服 🎉\n\n"
-            "我可以帮你：查订单、查物流、退换货、咨询问题。\n"
+            "我可以帮你：查订单、查物流、退换货、售前咨询、查优惠。\n"
             "请告诉我需要什么帮助？"
         )
     if any(k in msg for k in ["谢谢", "感谢"]):
@@ -203,6 +272,8 @@ def _template_fallback(intent: str, message: str, tool_data: str) -> str:
         "📦 「查订单」— 查询订单状态\n"
         "🚚 「查物流」— 追踪配送\n"
         "🔄 「退换货」— 申请售后\n"
+        "🛒 「推荐商品」— 售前咨询\n"
+        "💰 「优惠」— 查看优惠券\n"
         "👤 「转人工」— 联系真人客服"
     )
 
@@ -211,13 +282,16 @@ def _get_quick_replies(intent: str, tool_results: dict) -> list[str]:
     """Generate contextual quick reply suggestions."""
     base = {
         "查订单": ["查物流", "申请退货", "转人工"],
-        "退换货": ["查另一个订单", "转人工"],
-        "物流查询": ["查另一个订单", "投诉", "转人工"],
-        "投诉": ["转人工", "查订单"],
-        "FAQ查询": ["查订单", "转人工", "退换货"],
-        "人工客服": ["查订单", "查物流"],
+        "退换货": ["查另一个订单", "退货退款多久到账", "转人工"],
+        "物流查询": ["查另一个订单", "配送时效", "投诉", "转人工"],
+        "投诉": ["转人工", "查订单", "退货"],
+        "FAQ查询": ["查订单", "转人工", "退换货", "优惠"],
+        "售前咨询": ["什么分期方案", "优惠券", "对比", "查订单"],
+        "优惠查询": ["夏日大促8折", "手机优惠", "查订单", "推荐商品"],
+        "地址修改": ["查订单", "配送时效", "转人工"],
+        "人工客服": ["查订单", "查物流", "优惠"],
     }
-    return base.get(intent, ["查订单", "退换货", "转人工"])
+    return base.get(intent, ["查订单", "退换货", "推荐商品", "转人工"])
 
 
 def _call_cs_llm_stream_tokens(
@@ -241,7 +315,9 @@ def _call_cs_llm_stream_tokens(
         "5. 如果用户表达不满，先道歉再解决问题\n"
         "6. 回复用 Markdown 格式，300 字以内\n"
         "7. 不要提及「系统提示」「工具结果」等内部术语\n"
-        "8. 结尾加一句友好的话，如「还有其他需要吗？」"
+        "8. 结尾加一句友好的话，如「还有其他需要吗？」\n\n"
+        "你可以处理的场景：查订单、查物流、退换货、投诉、FAQ解答、\n"
+        "售前咨询（商品推荐/对比/参数）、优惠查询（优惠券/促销活动）、地址修改、转人工。"
     )
 
     user = (

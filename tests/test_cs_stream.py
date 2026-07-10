@@ -113,6 +113,59 @@ def test_cs_stream_multiple_questions():
     print("✓ 多轮对话测试通过")
 
 
+def test_intent_presales():
+    """验证售前咨询意图识别与商品推荐。"""
+    r = requests.post(
+        f"{BASE}/v1/cs/chat/stream",
+        json={"message": "推荐一款降噪耳机"},
+        stream=True,
+        timeout=15,
+    )
+    full = collect_sse(r)
+    assert any(e["type"] == "done" for e in full)
+    events_by_type = {e["type"]: e for e in full}
+    assert events_by_type.get("intent", {}).get("intent") == "售前咨询", \
+        f"预期售前咨询, 实际: {events_by_type.get('intent', {})}"
+    # Should have tool events
+    tools = [e for e in full if e["type"] == "tool"]
+    assert any("商品" in e.get("name", "") for e in tools), "应有商品查询工具事件"
+    print(f"✓ 售前咨询意图正确, 工具: {[e['name'] for e in tools]}")
+
+
+def test_intent_coupon():
+    """验证优惠查询意图识别。"""
+    r = requests.post(
+        f"{BASE}/v1/cs/chat/stream",
+        json={"message": "有什么优惠活动"},
+        stream=True,
+        timeout=15,
+    )
+    full = collect_sse(r)
+    assert any(e["type"] == "done" for e in full)
+    events_by_type = {e["type"]: e for e in full}
+    assert events_by_type.get("intent", {}).get("intent") == "优惠查询", \
+        f"预期优惠查询, 实际: {events_by_type.get('intent', {})}"
+    tools = [e for e in full if e["type"] == "tool"]
+    assert any("优惠" in e.get("name", "") for e in tools), "应有优惠信息工具事件"
+    print(f"✓ 优惠查询意图正确, 工具: {[e['name'] for e in tools]}")
+
+
+def test_intent_address():
+    """验证地址修改意图识别。"""
+    r = requests.post(
+        f"{BASE}/v1/cs/chat/stream",
+        json={"message": "我想改收货地址"},
+        stream=True,
+        timeout=15,
+    )
+    full = collect_sse(r)
+    assert any(e["type"] == "done" for e in full)
+    events_by_type = {e["type"]: e for e in full}
+    assert events_by_type.get("intent", {}).get("intent") == "地址修改", \
+        f"预期地址修改, 实际: {events_by_type.get('intent', {})}"
+    print(f"✓ 地址修改意图正确")
+
+
 def collect_sse(r):
     """Collect all SSE events from a streaming response."""
     events = []
@@ -142,6 +195,9 @@ if __name__ == "__main__":
         test_health()
         test_cs_stream_sse_structure()
         test_cs_stream_multiple_questions()
+        test_intent_presales()
+        test_intent_coupon()
+        test_intent_address()
         print("\n✅ 全部测试通过!")
     except Exception as e:
         print(f"\n❌ 测试失败: {e}")

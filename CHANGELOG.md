@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.44.0 — 2026-07-11
+
+### Added
+- CS Demo 场景扩充：
+  - 🛒 **售前咨询** — 商品目录查询、对比、分期方案，10 款热销商品（`cs_query_product`）
+  - 💰 **优惠查询** — 优惠券/促销活动查询，5 种可用优惠码（`cs_check_promotion`）
+  - 📍 **地址修改** — 收货地址修改，含验证规则（`cs_modify_address`）
+  - 🚚 **配送时效** — 订单级配送估算与通用时效参考（`cs_estimate_delivery`）
+- Mock 数据大扩充：4→12 条订单（含待付款/已取消/已完成等多状态）、10 条 FAQ、5 条工单、5 种优惠券
+- 前端 3×3 场景卡片（9 张）：新增 售前咨询、查优惠、改地址
+- 意图分类器扩充：识别 售前咨询、优惠查询、地址修改（关键词库翻倍）
+- 快捷回复自适应新场景：上下文感知的建议按钮
+- `tests/test_cs_stream.py` — 新增 3 个测试：test_intent_presales / test_intent_coupon / test_intent_address
+
+### Changed
+- `customer_service.py`：重写为 v2，新增工具函数 + 商品目录 + 优惠券 + FAQ 内建库
+- `cs_agent.py`：`_execute_tools` 新增 3 个意图分支；`_template_fallback` + `_get_quick_replies` + 系统提示词同步更新
+- `api_fastapi.py`：`_get_cs_quick_replies` 同步更新
+- `cs-demo.html`：3×3 场景网格、欢迎词重写、emoji 剥离正则更新
+
 ## v0.43.0 — 2026-07-10
 
 ### Added

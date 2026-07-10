@@ -205,8 +205,11 @@ body {
 .feature-text strong { color: var(--text-primary); font-weight: 600; }
 
 .scenario-grid {
-  display: grid; grid-template-columns: 1fr 1fr;
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
+}
+@media (max-width: 480px) {
+  .scenario-grid { grid-template-columns: 1fr 1fr; }
 }
 .scenario-card {
   padding: 12px; border-radius: var(--radius);
@@ -461,7 +464,7 @@ body {
     <div class="header-left">
       <div class="header-logo">🎧</div>
       <span class="header-title">灵枢智能客服</span>
-      <span class="header-badge">Demo v0.42</span>
+      <span class="header-badge">Demo v0.44</span>
     </div>
     <div class="header-right">
       <button class="btn btn-ghost btn-sm" onclick="resetChat()" title="新对话">🔄 新对话</button>
@@ -489,11 +492,11 @@ body {
         <div class="feature-list">
           <div class="feature-item">
             <span class="feature-icon">🔍</span>
-            <div class="feature-text"><strong>意图识别</strong> — 规则引擎分类用户意图（查订单/物流/退换货/投诉/FAQ），快速响应。</div>
+            <div class="feature-text"><strong>意图识别</strong> — 规则引擎分类用户意图（查订单/物流/退换货/售前咨询/优惠查询/地址修改等），快速响应。</div>
           </div>
           <div class="feature-item">
             <span class="feature-icon">⚡</span>
-            <div class="feature-text"><strong>工具执行</strong> — 根据意图调用查询订单、FAQ、创建工单等工具，获取结构化数据。</div>
+            <div class="feature-text"><strong>工具执行</strong> — 根据意图调用订单查询、商品推荐、优惠券查询、FAQ 等工具，获取结构化数据。</div>
           </div>
           <div class="feature-item">
             <span class="feature-icon">🤖</span>
@@ -519,6 +522,21 @@ body {
             <span class="scenario-icon">🔄</span>
             <div class="scenario-label">退换货</div>
             <div class="scenario-desc">申请售后</div>
+          </div>
+          <div class="scenario-card" onclick="csSend('推荐一款降噪耳机')">
+            <span class="scenario-icon">🛒</span>
+            <div class="scenario-label">售前咨询</div>
+            <div class="scenario-desc">商品推荐对比</div>
+          </div>
+          <div class="scenario-card" onclick="csSend('有什么优惠活动')">
+            <span class="scenario-icon">💰</span>
+            <div class="scenario-label">查优惠</div>
+            <div class="scenario-desc">优惠券促销</div>
+          </div>
+          <div class="scenario-card" onclick="csSend('我要改收货地址')">
+            <span class="scenario-icon">📍</span>
+            <div class="scenario-label">改地址</div>
+            <div class="scenario-desc">收货地址修改</div>
           </div>
           <div class="scenario-card" onclick="csSend('我要投诉物流太慢了')">
             <span class="scenario-icon">⚠️</span>
@@ -638,14 +656,18 @@ function showWelcome() {
   const container = document.getElementById('cs-messages');
   if (container.children.length === 0) {
     addBubble('assistant',
-      '你好！欢迎使用灵枢智能客服 🎉\n\n我可以帮你：\n' +
+      '你好！欢迎使用灵枢智能客服 🎉\n\n' +
+      '我可以帮你：\n' +
       '📦 **查订单** — 输入订单号或手机号\n' +
       '🚚 **查物流** — 查看配送进度\n' +
+      '🛒 **商品咨询** — 推荐、对比、参数\n' +
+      '💰 **查优惠** — 优惠券与促销活动\n' +
+      '📍 **改地址** — 修改收货地址\n' +
       '🔄 **退换货** — 申请退换货\n' +
-      '❓ **常见问题** — 咨询售后政策\n' +
+      '❓ **FAQ** — 售后政策解答\n' +
       '👤 **转人工** — 联系真人客服\n\n' +
-      '请告诉我需要什么帮助？');
-    setQuickReplies(['📦 查订单', '🔄 退换货', '👤 转人工']);
+      '试试点击左侧场景卡片，或直接输入问题！');
+    setQuickReplies(['📦 查订单', '🛒 推荐商品', '💰 有什么优惠', '👤 转人工']);
   }
 }
 showWelcome();
@@ -671,7 +693,7 @@ async function csSend(msg) {
   if (!msg) return;
 
   // Strip quick-reply emoji prefix if present
-  const cleanMsg = msg.replace(/^[📦🚚🔄⚠️❓👤]\s*/, '');
+  const cleanMsg = msg.replace(/^[📦🚚🔄⚠️❓👤🛒💰📍]\s*/, '');
 
   // Add user bubble
   addBubble('user', cleanMsg);
