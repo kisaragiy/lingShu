@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.43.0 — 2026-07-10
+
+### Added
+- CS Demo SSE 流式回复：POST `/v1/cs/chat/stream` 端点
+- 前端逐 token 流式渲染：意图→工具→回复实时展示，打字机光标效果
+- `tests/test_cs_stream.py` — SSE 流测试文件
+
+### Changed
+- `cs_agent.py`: 新增 `_call_cs_llm_stream_tokens()` — 流式调用 LLM，超时缩至 `(5, 60)`s
+- `api_fastapi.py`: 新增 SSE 端点，5 种事件类型（intent/tool/token/done）
+- `cs-demo.html`: `csSend()` 重写为 SSE 消费者，think→stream 过渡动画
+- LLM 不可达时优雅降级到模板回复
+
+## v0.42.0 — 2026-07-10
+
+### Added
+- Splash 屏升级：深蓝渐变背景 `#1a1a2e → #2563eb`，80px 圆角 logo 脉冲 + 光晕动画
+- 首页体验打磨：白色元素、32px spinner、状态栏脉冲动画
+- `window.__VERSION__` 由 Python `__version__` 注入前端，根除硬编码
+
+### Changed
+- `index.html` 移除客服 Demo Tab（已迁移到独立页面 `/cs-demo`）
+- 修复服务页 `v0.25.0`、设置页 `v0.31.0`、检查更新 `'0.28.0'` 三处硬编码版本号
+- 设置页"关于"添加 CS Demo 链接
+
 ## v0.41.0 — 2026-07-10
 
 ### Added

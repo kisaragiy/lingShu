@@ -1776,6 +1776,102 @@ async def cs_chat(request: Request):
     }
 
 
+@app.post("/v1/cs/chat/stream")
+async def cs_chat_stream(request: Request):
+    """Customer Service demo SSE streaming endpoint.
+
+    Body: {"message": "...", "session_id": "..."}
+    Returns SSE events:
+      data: {"type":"intent","intent":"..."}
+      data: {"type":"tool","name":"...","result":"..."}
+      data: {"type":"token","content":"..."}
+      data: {"type":"done","quick_replies":[...],"session_id":"..."}
+    """
+    body = await request.json()
+    message = (body.get("message", "") or "").strip()
+    session_id = body.get("session_id", "") or "cs_" + str(uuid.uuid4())[:8]
+
+    if not message:
+        return JSONResponse({"error": "消息不能为空"}, status_code=400)
+
+    # Build context from session history
+    from .pipeline.session_store import load_session as _load_cs_session
+    history = _load_cs_session(session_id) or []
+    context = ""
+    if history:
+        recent = history[-4:]
+        context = "\n".join(
+            "%s: %s" % (m["role"], m["content"][:100])
+            for m in recent
+        )
+
+    # Run tools synchronously (fast)
+    from .tools.customer_service import classify_cs_intent
+    from .agents.cs_agent import _execute_tools, _call_cs_llm_stream_tokens, _get_quick_replies, _template_fallback
+
+    intent = classify_cs_intent(message)
+    tool_results = _execute_tools(intent, message)
+    tool_summary = "\n".join(tool_results.values()) if tool_results else "无相关数据"
+
+    async def event_generator():
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        # 1. Intent event
+        yield "data: %s\n\n" % json.dumps({"type": "intent", "intent": intent}, ensure_ascii=False)
+
+        # 2. Tool result events
+        for name, result in tool_results.items():
+            yield "data: %s\n\n" % json.dumps({"type": "tool", "name": name, "result": result[:200]}, ensure_ascii=False)
+
+        # 3. Stream LLM tokens (run in thread pool)
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as pool:
+            tokens = await loop.run_in_executor(
+                pool,
+                _call_cs_llm_stream_tokens,
+                message, intent, tool_summary, context,
+            )
+
+        full_reply = "".join(tokens)
+
+        # Fallback if LLM returned nothing
+        if not full_reply or len(full_reply.strip()) < 10:
+            fallback = _template_fallback(intent, message, tool_summary)
+            yield "data: %s\n\n" % json.dumps({"type": "token", "content": fallback}, ensure_ascii=False)
+            full_reply = fallback
+        else:
+            # Yield tokens one by one
+            for t in tokens:
+                yield "data: %s\n\n" % json.dumps({"type": "token", "content": t}, ensure_ascii=False)
+
+        # 4. Done event with quick replies
+        quick_replies = _get_quick_replies(intent, tool_results)
+        yield "data: %s\n\n" % json.dumps({
+            "type": "done",
+            "quick_replies": quick_replies,
+            "session_id": session_id,
+        }, ensure_ascii=False)
+
+        # Save to session
+        session_messages = history + [
+            {"role": "user", "content": message, "ts": time.time()},
+            {"role": "assistant", "content": full_reply, "ts": time.time()},
+        ]
+        from .pipeline.session_store import save_session as _save_cs_session
+        _save_cs_session(session_id, session_messages, owner_id="__cs_demo__")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 def _get_cs_quick_replies(intent: str) -> list[str]:
     """Return contextual quick reply suggestions."""
     replies = {

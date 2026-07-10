@@ -322,6 +322,26 @@ body {
   30% { opacity: 1; transform: translateY(-4px); }
 }
 
+/* ─── Streaming Reply ─── */
+.streaming-reply {
+  line-height: 1.7;
+  font-size: 13px;
+}
+.streaming-reply::after {
+  content: '▊';
+  display: inline;
+  animation: cursorBlink 0.8s step-end infinite;
+  color: var(--accent);
+  margin-left: 1px;
+}
+.streaming-reply.done::after {
+  display: none;
+}
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 /* ─── Quick Replies ─── */
 .quick-replies {
   display: flex; gap: 6px; flex-wrap: wrap;
@@ -663,51 +683,132 @@ async function csSend(msg) {
 
   // Thinking placeholder
   const thinkDiv = addBubble('assistant',
-    '<div class="thinking-steps"><div class="thinking-step active"><span class="thinking-icon">🔍</span><span>分析意图<span class="thinking-typing"><span></span><span></span><span></span></span></span></div></div>',
+    '<div class="thinking-steps" id="thinking-steps">' +
+      '<div class="thinking-step" id="step-intent"><span class="thinking-icon">🔍</span><span>分析意图<span class="thinking-typing"><span></span><span></span><span></span></span></span></div>' +
+      '<div class="thinking-step" id="step-tools" style="display:none"><span class="thinking-icon">📋</span><span>查询数据<span class="thinking-typing"><span></span><span></span><span></span></span></span></div>' +
+      '<div class="thinking-step" id="step-llm" style="display:none"><span class="thinking-icon">🤖</span><span>生成回复<span class="thinking-typing"><span></span><span></span><span></span></span></span></div>' +
+    '</div>',
     true
   );
 
+  const bodyEl = thinkDiv.querySelector('.chat-msg-body');
+  const msgContainer = document.getElementById('cs-messages');
+  const scrollToBottom = () => { msgContainer.scrollTop = msgContainer.scrollHeight; };
+
+  // ── SSE stream ──
   try {
-    const r = await fetch('/v1/cs/chat', {
+    const r = await fetch('/v1/cs/chat/stream', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({message: cleanMsg, session_id: _csSessionId}),
     });
     if (!r.ok) throw new Error('API 错误: ' + r.status);
-    const data = await r.json();
-    const tools = data.tool_results || {};
-    const toolKeys = Object.keys(tools);
 
-    // Build thinking steps
-    let thinkHtml = '<div class="thinking-steps">';
-    thinkHtml += '<div class="thinking-step done"><span class="thinking-icon">🔍</span><span>意图: ' + escHtml(data.intent || '未知') + '</span></div>';
-    if (toolKeys.length > 0) {
-      toolKeys.forEach((k, i) => {
-        const icon = i === toolKeys.length - 1 ? '⚡' : '📋';
-        thinkHtml += '<div class="thinking-step done"><span class="thinking-icon">' + icon + '</span><span>' + escHtml(k) + '</span></div>';
-      });
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let replyText = '';
+    let llmStarted = false;
+
+    // Reference to thinking step elements
+    const stepIntent = document.getElementById('step-intent');
+    const stepTools = document.getElementById('step-tools');
+    const stepLlm = document.getElementById('step-llm');
+
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, {stream: true});
+
+      // Parse SSE data: lines
+      const lines = buffer.split('\n');
+      // Keep the last incomplete line in buffer
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6);
+        let evt;
+        try { evt = JSON.parse(raw); } catch { continue; }
+
+        switch (evt.type) {
+          case 'intent': {
+            // Update step 1: intent identified
+            if (stepIntent) {
+              stepIntent.classList.remove('active');
+              stepIntent.classList.add('done');
+              stepIntent.querySelector('span:last-child').textContent = '意图: ' + escHtml(evt.intent);
+            }
+            // Show step 2
+            if (stepTools) {
+              stepTools.style.display = '';
+              stepTools.classList.add('active');
+            }
+            scrollToBottom();
+            break;
+          }
+
+          case 'tool': {
+            // Update step 2 with tool name
+            if (stepTools) {
+              stepTools.querySelector('span:last-child').textContent = escHtml(evt.name);
+            }
+            scrollToBottom();
+            break;
+          }
+
+          case 'token': {
+            // First token: transition from thinking to streaming
+            if (!llmStarted) {
+              // Mark step 2 done, mark step 3 done
+              if (stepTools) { stepTools.classList.remove('active'); stepTools.classList.add('done'); }
+              if (stepLlm) { stepLlm.style.display = ''; stepLlm.classList.add('active'); }
+              llmStarted = true;
+
+              // Wait 300ms for visual transition, then clear thinking and show reply
+              await new Promise(r => setTimeout(r, 300));
+              // Replace thinking with actual reply container
+              bodyEl.innerHTML =
+                '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;padding:4px 8px;background:var(--bg-secondary);border-radius:6px;display:inline-block">' +
+                '🤖 思考完成 · 正在输入…' +
+                '</div>' +
+                '<div id="streaming-reply" class="streaming-reply"></div>';
+              scrollToBottom();
+            }
+            // Append token to reply
+            replyText += evt.content;
+            const replyEl = document.getElementById('streaming-reply');
+            if (replyEl) {
+              replyEl.innerHTML = mdToHtml(replyText);
+              scrollToBottom();
+            }
+            break;
+          }
+
+          case 'done': {
+            // Finalize — replace reply with final HTML + quick replies
+            if (stepLlm) { stepLlm.classList.remove('active'); stepLlm.classList.add('done'); }
+
+            // Remove transient header, render final reply (with done class to stop cursor)
+            bodyEl.innerHTML =
+              '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">🤖 智能客服</div>' +
+              '<div class="streaming-reply done">' + mdToHtml(replyText) + '</div>';
+            scrollToBottom();
+
+            // Update quick replies
+            const qr = evt.quick_replies || [];
+            if (qr.length > 0) {
+              setQuickReplies(qr);
+            } else {
+              setQuickReplies(['📦 查订单', '🔄 退换货', '👤 转人工']);
+            }
+            break;
+          }
+        }
+      }
     }
-    thinkHtml += '<div class="thinking-step active"><span class="thinking-icon">🤖</span><span>生成回复<span class="thinking-typing"><span></span><span></span><span></span></span></span></div></div>';
-
-    const bodyEl = thinkDiv.querySelector('.chat-msg-body');
-    bodyEl.innerHTML = thinkHtml;
-    document.getElementById('cs-messages').scrollTop = document.getElementById('cs-messages').scrollHeight;
-
-    // Delay then show reply
-    setTimeout(() => {
-      bodyEl.innerHTML = mdToHtml(data.reply || '');
-      bodyEl.closest('.chat-bubble').scrollIntoView({behavior: 'smooth', block: 'end'});
-    }, 500);
-
-    // Update quick replies
-    if (data.quick_replies && data.quick_replies.length > 0) {
-      setQuickReplies(data.quick_replies);
-    } else {
-      setQuickReplies(['📦 查订单', '🔄 退换货', '👤 转人工']);
-    }
-
   } catch (e) {
-    const bodyEl = thinkDiv.querySelector('.chat-msg-body');
     bodyEl.innerHTML = '❌ 请求失败: ' + escHtml(e.message) + '<br><br><span style="font-size:12px;color:var(--text-muted)">请确认后端服务正在运行。</span>';
     toast('请求失败', 'err');
   } finally {

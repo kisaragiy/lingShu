@@ -218,3 +218,71 @@ def _get_quick_replies(intent: str, tool_results: dict) -> list[str]:
         "人工客服": ["查订单", "查物流"],
     }
     return base.get(intent, ["查订单", "退换货", "转人工"])
+
+
+def _call_cs_llm_stream_tokens(
+    message: str, intent: str, tool_data: str, context: str,
+) -> list[str]:
+    """Call LLM with streaming, return list of tokens.
+
+    Uses requests with stream=True. Returns empty list if LLM fails
+    (caller should fall back to template).
+    """
+    import requests as req_lib
+    from ..config import LLAMA_API, MODEL_LLAMA
+
+    system = (
+        "你是灵枢电商平台的智能客服助手。你的风格：专业、耐心、有同理心。\n\n"
+        "回复规则:\n"
+        "1. 先确认用户需求，再给出具体信息\n"
+        "2. 使用自然、友好的语气，像真人客服\n"
+        "3. 引用订单数据时要准确\n"
+        "4. 在回复末尾提供后续操作建议\n"
+        "5. 如果用户表达不满，先道歉再解决问题\n"
+        "6. 回复用 Markdown 格式，300 字以内\n"
+        "7. 不要提及「系统提示」「工具结果」等内部术语\n"
+        "8. 结尾加一句友好的话，如「还有其他需要吗？」"
+    )
+
+    user = (
+        "【用户消息】\n%s\n\n"
+        "【识别意图】\n%s\n\n"
+        "【查询结果】\n%s\n\n"
+        "【对话历史】\n%s\n\n"
+        "请根据以上信息生成客服回复。"
+    ) % (message, intent, tool_data, context or "（无）")
+
+    payload = {
+        "model": MODEL_LLAMA,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": 1024,
+        "temperature": 0.3,
+        "stream": True,
+        "thinking": {"type": "disabled"},
+    }
+
+    tokens: list[str] = []
+    try:
+        resp = req_lib.post(LLAMA_API, json=payload, stream=True, timeout=(5, 60))
+        for line in resp.iter_lines():
+            if line:
+                decoded = line.decode("utf-8")
+                if decoded.startswith("data: "):
+                    data_str = decoded[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        token = delta.get("content", "")
+                        if token:
+                            tokens.append(token)
+                    except json.JSONDecodeError:
+                        pass
+    except Exception:
+        pass
+
+    return tokens
