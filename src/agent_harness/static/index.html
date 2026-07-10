@@ -737,7 +737,6 @@ const DASH_TABS = [
   { id: 'sessions', icon: '🗂️', label: '会话管理' },
   { id: 'admin-users', icon: '👥', label: '用户管理', adminOnly: true },
   { id: 'scheduler', icon: '⏰', label: '定时任务', adminOnly: true },
-  { id: 'cs-demo', icon: '🎧', label: '客服Demo', adminOnly: false },
   { id: 'settings', icon: '⚙️', label: '设置', adminOnly: true },
   { id: 'skills',  icon: '🧠',  label: '技能', adminOnly: true },
 ];
@@ -1027,7 +1026,6 @@ function switchTab(tab) {
   else if (tab === 'skills') renderSkills();
   else if (tab === 'admin-users') renderAdminUsers();
   else if (tab === 'scheduler') renderScheduler();
-  else if (tab === 'cs-demo') renderCsDemo();
   return false;
 }
 
@@ -1392,7 +1390,7 @@ async function renderDashStatus() {
   html += '<div class="card"><div class="card-title">📊 概览</div><div class="service-grid">';
   const sessions = health ? health.active_sessions : '?';
   html += '<div class="service-card"><div class="service-info"><div class="service-name">活跃会话</div><div class="service-detail">' + sessions + '</div></div></div>';
-  html += '<div class="service-card"><div class="service-info"><div class="service-name">API 版本</div><div class="service-detail">v0.25.0</div></div></div>';
+  html += '<div class="service-card"><div class="service-info"><div class="service-name">API 版本</div><div class="service-detail">v' + (window.__VERSION__ || '0.41.0') + '</div></div></div>';
   // Auth status
   const isAdmin = window.__auth.user && window.__auth.user.role === 'admin';
   html += '<div class="service-card"><div class="service-info"><div class="service-name">认证方式</div><div class="service-detail">JWT · 当前: ' + (window.__auth.user ? escHtml(window.__auth.user.username) + ' (' + (isAdmin ? '管理员' : '用户') + ')' : 'API Key') + '</div></div></div>';
@@ -1778,119 +1776,6 @@ async function schedulerCreate() {
 }
 
 // ═══════════════════════════════════
-// CUSTOMER SERVICE DEMO TAB
-// ═══════════════════════════════════
-let _csSessionId = 'cs_demo_' + Date.now();
-let _csHistory = [];
-
-async function renderCsDemo() {
-  _csSessionId = 'cs_demo_' + Date.now();
-  _csHistory = [];
-  const el = document.getElementById('dash-content');
-  el.innerHTML = `
-    <div class="card">
-      <div class="flex-between">
-        <div><span class="card-title" style="margin:0">🎧 智能客服 Demo</span>
-        <div class="text-sm text-muted mt-4">售前咨询 · 订单查询 · 退换货 · 投诉处理 · 转人工</div></div>
-        <button class="btn btn-secondary btn-sm" onclick="renderCsDemo()">🔄 新对话</button>
-      </div>
-    </div>
-    <div class="card" style="margin-top:12px">
-      <div id="cs-messages" class="chat-messages" style="max-height:420px;overflow-y:auto;padding:8px">
-        <div class="chat-bubble assistant">
-          <div class="chat-msg-header"><span class="chat-msg-role">🤖 智能客服</span></div>
-          <div class="chat-msg-body">你好！我是灵枢智能客服助手 🎉
-
-我可以帮你：
-📦 **查订单** — 输入订单号或手机号
-🚚 **查物流** — 查看配送进度
-🔄 **退换货** — 申请退换货
-❓ **常见问题** — 咨询售后政策
-👤 **转人工** — 联系真人客服
-
-请告诉我需要什么帮助？</div>
-        </div>
-      </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid var(--border)" id="cs-quick-replies">
-        <button class="btn btn-secondary btn-sm" onclick="csSendMsg('查一下我的订单')">📦 查订单</button>
-        <button class="btn btn-secondary btn-sm" onclick="csSendMsg('我要退货')">🔄 退换货</button>
-        <button class="btn btn-secondary btn-sm" onclick="csSendMsg('转人工')">👤 转人工</button>
-      </div>
-      <div class="chat-input-bar" style="border-top:1px solid var(--border)">
-        <input id="cs-input" class="form-input" placeholder="输入您的问题..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csSendMsg(this.value)}">
-        <button class="btn btn-primary" onclick="csSendMsg(document.getElementById('cs-input').value)">发送</button>
-      </div>
-    </div>`;
-}
-
-async function csSendMsg(msg) {
-  const input = document.getElementById('cs-input');
-  if (typeof msg === 'string' && msg) {
-    // called from quick reply
-  } else if (input) {
-    msg = input.value.trim();
-    input.value = '';
-  }
-  if (!msg) return;
-
-  // Add user message
-  const container = document.getElementById('cs-messages');
-  const userDiv = document.createElement('div');
-  userDiv.className = 'chat-bubble user';
-  userDiv.innerHTML = '<div class="chat-msg-header"><span class="chat-msg-role">🧑 我</span></div><div class="chat-msg-body">' + escHtml(msg).replace(/\n/g,'<br>') + '</div>';
-  container.appendChild(userDiv);
-  container.scrollTop = container.scrollHeight;
-
-  // Show thinking steps
-  const thinkDiv = document.createElement('div');
-  thinkDiv.className = 'chat-bubble assistant';
-  thinkDiv.innerHTML = '<div class="chat-msg-header"><span class="chat-msg-role">🤖 智能客服</span></div><div class="chat-msg-body"><div class="thinking-steps"><div class="thinking-step active"><span class="thinking-icon">🔍</span><span>分析意图...</span></div></div></div>';
-  container.appendChild(thinkDiv);
-  container.scrollTop = container.scrollHeight;
-
-  try {
-    const r = await _origFetch('/v1/cs/chat', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({message: msg, session_id: _csSessionId}),
-    });
-    const data = await r.json();
-
-    // Build thinking steps from tool results
-    const tools = data.tool_results || {};
-    const toolKeys = Object.keys(tools);
-    let thinkingHtml = '<div class="thinking-steps">';
-    thinkingHtml += '<div class="thinking-step done"><span class="thinking-icon">🔍</span><span>意图: ' + (data.intent || '未知') + '</span></div>';
-    if (toolKeys.length > 0) {
-      toolKeys.forEach((k, i) => {
-        thinkingHtml += '<div class="thinking-step done"><span class="thinking-icon">' + (i === toolKeys.length - 1 ? '⚡' : '📋') + '</span><span>' + escHtml(k) + '</span></div>';
-      });
-    }
-    thinkingHtml += '<div class="thinking-step active"><span class="thinking-icon">🤖</span><span>生成回复...</span></div></div>';
-
-    // Update thinking with steps, then replace with final reply
-    const bodyEl = thinkDiv.querySelector('.chat-msg-body');
-    bodyEl.innerHTML = thinkingHtml;
-    container.scrollTop = container.scrollHeight;
-
-    // Small delay so user can see thinking steps, then show final reply
-    setTimeout(() => {
-      bodyEl.innerHTML = mdToHtml(data.reply || '');
-      container.scrollTop = container.scrollHeight;
-    }, 400);
-
-    // Update quick replies
-    const qr = document.getElementById('cs-quick-replies');
-    if (qr && data.quick_replies) {
-      qr.innerHTML = data.quick_replies.map(r => '<button class="btn btn-secondary btn-sm" onclick="csSendMsg(\'' + r.replace(/'/g,"\\'") + '\')">' + r + '</button>').join('');
-    }
-
-    container.scrollTop = container.scrollHeight;
-  } catch(e) {
-    thinkDiv.querySelector('.chat-msg-body').innerHTML = '❌ 请求失败: ' + e.message;
-  }
-}
-
-// ═══════════════════════════════════
 // SETTINGS TAB
 // ═══════════════════════════════════
 async function renderDashSettings() {
@@ -1914,11 +1799,12 @@ async function renderDashSettings() {
 
   // About section
   html += '<div class="card-title" style="font-size:14px;margin-top:24px">📦 关于灵枢</div>' +
-    '<table><tr><td style="width:100px;padding:6px 0">版本</td><td><code>v0.31.0</code></td></tr>' +
+    '<table><tr><td style="width:100px;padding:6px 0">版本</td><td><code>v' + (window.__VERSION__ || '0.41.0') + '</code></td></tr>' +
     '<tr><td style="padding:6px 0">API 版本</td><td>' + (health ? escHtml(health.version || '1.0.0') : '—') + '</td></tr>' +
     '<tr><td style="padding:6px 0">活跃会话</td><td>' + (health ? health.active_sessions + ' 个' : '—') + '</td></tr>' +
     '<tr><td style="padding:6px 0">数据目录</td><td><code>~/.agent-harness/</code></td></tr>' +
-    '<tr><td style="padding:6px 0">GitHub</td><td><a href="https://github.com/kisaragiy/lingShu" target="_blank" rel="noopener">kisaragiy/lingShu</a></td></tr></table>' +
+    '<tr><td style="padding:6px 0">GitHub</td><td><a href="https://github.com/kisaragiy/lingShu" target="_blank" rel="noopener">kisaragiy/lingShu</a></td></tr>' +
+    '<tr><td style="padding:6px 0">CS Demo</td><td><a href="/cs-demo" target="_blank" rel="noopener">🎧 智能客服 Demo</a></td></tr></table>' +
     '<div class="btn-group mt-16" style="display:flex;gap:8px;flex-wrap:wrap">' +
     '<button class="btn btn-secondary btn-sm" onclick="renderSetup()">🔄 重新配置向导</button>' +
     '<button class="btn btn-secondary btn-sm" onclick="checkUpdate()">📦 检查更新</button>' +
@@ -1958,7 +1844,7 @@ async function checkUpdate() {
     const r = await fetch('https://api.github.com/repos/kisaragiy/lingShu/releases/latest', {signal: AbortSignal.timeout(5000)});
     const data = await r.json();
     const latest = (data.tag_name || '').replace('v', '');
-    const current = '0.28.0';
+    const current = window.__VERSION__ || '0.41.0';
     if (latest && latest !== current) { toast('发现新版本: v' + latest + ' (当前: v' + current + ')', 'info'); }
     else { toast('已是最新版本 v' + current, 'ok'); }
   } catch(e) { toast('检查更新失败: ' + e.message, 'err'); }

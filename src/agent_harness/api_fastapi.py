@@ -45,6 +45,7 @@ from .api_security import (
 )
 from . import auth_db as _auth_db
 from . import auth_jwt as _auth_jwt
+from . import __version__
 from .tools.tool_config import is_tool_enabled, toggle_tool as _toggle_tool, list_disabled as _list_disabled_tools
 
 HOST = os.environ.get("HARNESS_API_HOST", "127.0.0.1")
@@ -449,8 +450,9 @@ async def serve_frontend():
             '<script>'
             'window.__API_TOKEN__="%s";'
             'window.__NEEDS_ADMIN__=%s;'
+            'window.__VERSION__="%s";'
             '</script>'
-        ) % (_API_TOKEN, "true" if needs_admin else "false")
+        ) % (_API_TOKEN, "true" if needs_admin else "false", __version__)
         if "</head>" in html:
             html = html.replace("</head>", token_script + "</head>")
         else:
