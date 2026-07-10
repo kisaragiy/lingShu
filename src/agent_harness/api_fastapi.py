@@ -62,9 +62,9 @@ _AUTH_EXEMPT_V1 = ("/v1/auth/login", "/v1/auth/refresh", "/v1/auth/setup-admin",
 # 分析结论：80% 请求 ≤2轮，95% ≤4轮，99%+ ≤6轮
 # 保留 4 轮（8 条消息）覆盖 95% 场景，平衡质量与成本
 # 可通过环境变量 HARNESS_MAX_HISTORY 运行时调整（例: HARNESS_MAX_HISTORY=8 agent-harness serve）
-MAX_HISTORY_ROUNDS = int(os.environ.get("HARNESS_MAX_HISTORY", "4"))
+MAX_HISTORY_ROUNDS = int(os.environ.get("HARNESS_MAX_HISTORY", "8"))
 MAX_HISTORY_MSGS = MAX_HISTORY_ROUNDS * 2    # 每个 round = user + assistant
-SESSION_TRIM_AT = MAX_HISTORY_ROUNDS * 4     # 持久化保留弹性
+SESSION_TRIM_AT = MAX_HISTORY_ROUNDS * 4     # 持久化保留弹性（4x 保留未修剪的历史）
 
 # ─── Session store (persistent) ───
 from .pipeline.session_store import (
