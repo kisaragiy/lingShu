@@ -182,6 +182,13 @@ def supervisor_finalize(state: SupervisorState) -> dict:
 
     # Use LLM to craft final response
     from .agents.supervisor import _call_llm
+    from .agent_log import log_event
+
+    # Log finalize start
+    log_event(state.get("session_id", "unknown"), "finalize", {
+        "request": state.get("request", "")[:100],
+        "worker_count": len(worker_results),
+    })
     system = (
         "你是专业的调研报告撰写助手。根据所有 Worker 的搜索结果，撰写一份完整、规范的调研报告。\n\n"
         "报告结构（严格遵守）:\n"

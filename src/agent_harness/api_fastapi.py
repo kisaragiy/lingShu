@@ -960,6 +960,36 @@ async def export_single_session(session_id: str):
     )
 
 
+# ═══════════════════════════════════════
+# AGENT LOG API
+# ═══════════════════════════════════════
+
+from .agent_log import get_logs as _get_logs, clear_logs as _clear_logs
+
+
+@app.get("/v1/sessions/{session_id}/logs")
+async def get_session_logs(session_id: str):
+    """Get agent execution logs for a session."""
+    try:
+        _safe_path_param(session_id)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    logs = _get_logs(session_id)
+    return {"logs": logs, "count": len(logs)}
+
+
+@app.delete("/v1/sessions/{session_id}/logs")
+async def clear_session_logs(session_id: str):
+    """Clear agent execution logs for a session."""
+    try:
+        _safe_path_param(session_id)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    if _clear_logs(session_id):
+        return {"status": "cleared"}
+    return {"status": "not_found"}
+
+
 # ─── Task Cancel API ───
 
 

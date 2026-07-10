@@ -771,7 +771,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.34.0</span>
+          <span class="sidebar-version">v0.35.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -1131,7 +1131,8 @@ async function sendChatMessage() {
       btns.style.cssText = 'align-self:flex-start; margin-top:4px; display:flex; gap:4px; max-width:100%; background:none; border:none; padding:0';
       btns.innerHTML = `
         <button class="btn btn-secondary btn-sm" onclick="saveReport(this, '${chatSessionId}')">💾 保存报告</button>
-        <button class="btn btn-primary btn-sm" onclick="formalizeAndOpen(this, '${chatSessionId}')">📄 生成正式报告</button>`;
+        <button class="btn btn-primary btn-sm" onclick="formalizeAndOpen(this, '${chatSessionId}')">📄 生成正式报告</button>
+        <button class="btn btn-secondary btn-sm" onclick="showAgentLog('${chatSessionId}')">🔍 运行详情</button>`;
       document.getElementById('chat-messages').appendChild(btns);
 
       // Auto-save draft (silent, background)
@@ -1379,6 +1380,42 @@ function downloadExport(url, filename) {
   a.click();
   a.remove();
   toast('正在下载 ' + filename + '...', 'info');
+}
+
+// Agent execution log viewer
+async function showAgentLog(sessionId) {
+  const panel = document.getElementById('agent-log-panel');
+  if (panel) { panel.remove(); return; }
+  const div = document.createElement('div');
+  div.id = 'agent-log-panel';
+  div.className = 'agent-log-panel';
+  div.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)"><strong>🔍 运行详情</strong><button class="btn btn-sm" onclick="this.parentElement.parentElement.remove()" style="font-size:16px">✕</button></div><div id="agent-log-content" class="agent-log-content"><div class="text-center text-sm" style="padding:20px"><span class="spinner"></span> 加载中...</div></div>';
+  document.body.appendChild(div);
+  try {
+    const data = await API.get('/v1/sessions/' + sessionId + '/logs');
+    const logs = data.logs || [];
+    const content = document.getElementById('agent-log-content');
+    if (logs.length === 0) {
+      content.innerHTML = '<div class="text-center text-muted text-sm" style="padding:20px">暂无运行记录</div>';
+      return;
+    }
+    content.innerHTML = logs.map(e => {
+      const d = e.data || {};
+      const ts = new Date(e.ts * 1000).toLocaleTimeString('zh-CN');
+      let html = '<div class="log-entry">';
+      html += '<span class="log-ts">' + ts + '</span> ';
+      if (e.type === 'finalize') html += '🤖 生成回复 · ' + (d.worker_count || '?') + ' 个 Worker';
+      else if (e.type === 'search') html += '🔍 搜索: ' + escHtml(d.query || '') + ' → ' + (d.status || '') + ' (' + (d.count || 0) + ' 结果)';
+      else if (e.type === 'llm_call') html += '🧠 LLM 调用 · ' + (d.model || '') + ' · ' + (d.duration || '') + 's';
+      else if (e.type === 'worker_start') html += '⚡ Worker: ' + escHtml(d.worker || '');
+      else if (e.type === 'worker_end') html += '✅ Worker: ' + escHtml(d.worker || '') + ' · ' + (d.duration || '') + 's';
+      else html += escHtml(e.type) + ' · ' + JSON.stringify(d).slice(0, 100);
+      html += '</div>';
+      return html;
+    }).join('');
+  } catch(e) {
+    document.getElementById('agent-log-content').innerHTML = '<div class="text-center text-muted text-sm" style="padding:20px">加载失败: ' + e.message + '</div>';
+  }
 }
 
 async function loadReports(q) {

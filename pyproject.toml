@@ -1,6 +1,6 @@
 [project]
 name = "agent-harness"
-version = "0.34.0"
+version = "0.35.0"
 description = "LangGraph-based multi-agent orchestration framework with MCP tool ecosystem"
 requires-python = ">=3.11"
 license = {text = "MIT"}
