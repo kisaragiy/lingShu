@@ -1710,6 +1710,73 @@ async def plugin_list():
     return {"plugins": _plugin_list(), "count": len(_plugin_list())}
 
 
+# ═══════════════════════════════════════
+# CS DEMO API
+# ═══════════════════════════════════════
+
+
+@app.post("/v1/cs/chat")
+async def cs_chat(request: Request):
+    """Customer Service demo chat endpoint.
+
+    Body: {"message": "customer message", "session_id": "optional"}
+    Returns: {"reply": "...", "intent": "...", "session_id": "..."}
+    """
+    body = await request.json()
+    message = (body.get("message", "") or "").strip()
+    session_id = body.get("session_id", "") or "cs_" + str(uuid.uuid4())[:8]
+
+    if not message:
+        return JSONResponse({"error": "消息不能为空"}, status_code=400)
+
+    # Build context from previous messages in this session
+    from .pipeline.session_store import load_session as _load_cs_session
+    history = _load_cs_session(session_id) or []
+    context = ""
+    if history:
+        recent = history[-4:]  # last 2 exchanges
+        context = "\n".join(
+            "%s: %s" % (m["role"], m["content"][:100])
+            for m in recent
+        )
+
+    # Run CS agent
+    from .agents.cs_agent import run_cs_agent
+    reply = run_cs_agent(message, context=context)
+
+    # Determine intent
+    from .tools.customer_service import classify_cs_intent
+    intent = classify_cs_intent(message)
+
+    # Save to session
+    session_messages = history + [
+        {"role": "user", "content": message, "ts": time.time()},
+        {"role": "assistant", "content": reply, "ts": time.time()},
+    ]
+    from .pipeline.session_store import save_session as _save_cs_session
+    _save_cs_session(session_id, session_messages, owner_id="__cs_demo__")
+
+    return {
+        "reply": reply,
+        "intent": intent,
+        "session_id": session_id,
+        "quick_replies": _get_cs_quick_replies(intent),
+    }
+
+
+def _get_cs_quick_replies(intent: str) -> list[str]:
+    """Return contextual quick reply suggestions."""
+    replies = {
+        "查订单": ["查物流", "申请退货", "转人工"],
+        "退换货": ["查订单", "查物流", "转人工"],
+        "物流查询": ["查另一个订单", "转人工", "投诉"],
+        "投诉": ["转人工", "查订单", "退换货"],
+        "FAQ查询": ["查订单", "转人工", "退换货"],
+        "人工客服": ["查订单", "查物流", "退换货"],
+    }
+    return replies.get(intent, ["查订单", "退换货", "转人工"])
+
+
 # ─── Direct entry point ───
 
 
