@@ -83,6 +83,46 @@ function toggleDarkMode() {
 }
 initDarkMode();
 
+// ─── Keyboard shortcuts ───
+document.addEventListener('keydown', function(e) {
+  // Ctrl+Shift+S: focus search
+  if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+    e.preventDefault();
+    const input = document.getElementById('sidebar-search-input');
+    if (input) { input.focus(); input.select(); }
+  }
+  // ? : show help
+  if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.target.matches('input,textarea')) {
+    e.preventDefault();
+    showHelpModal();
+  }
+  // Ctrl+Shift+F: message search
+  if (e.ctrlKey && e.shiftKey && e.key === 'F') {
+    e.preventDefault();
+    toggleMessageSearch();
+  }
+});
+
+function showHelpModal() {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = '<div class="card" style="max-width:480px;width:90%;padding:32px;max-height:80vh;overflow:auto">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h2 style="margin:0">⌨️ 快捷键</h2><button class="btn btn-sm" onclick="this.closest(\'div[style]\').remove()" style="font-size:18px">✕</button></div>' +
+    '<table style="width:100%"><tr><td style="padding:8px 0"><kbd>Enter</kbd></td><td>发送消息</td></tr>' +
+    '<tr><td style="padding:8px 0"><kbd>Ctrl+Enter</kbd></td><td>换行</td></tr>' +
+    '<tr><td style="padding:8px 0"><kbd>Esc</kbd></td><td>取消/关闭</td></tr>' +
+    '<tr><td style="padding:8px 0"><kbd>Ctrl+Shift+S</kbd></td><td>搜索会话</td></tr>' +
+    '<tr><td style="padding:8px 0"><kbd>Ctrl+Shift+F</kbd></td><td>搜索消息内容</td></tr>' +
+    '<tr><td style="padding:8px 0"><kbd>Ctrl+P</kbd></td><td>打印报告（打开报告时）</td></tr>' +
+    '<tr><td style="padding:8px 0"><kbd>?</kbd></td><td>显示此帮助</td></tr>' +
+    '</table></div>';
+  document.body.appendChild(overlay);
+  // Close on Escape
+  const closeHandler = (ev) => { if (ev.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', closeHandler); } };
+  document.addEventListener('keydown', closeHandler);
+}
+
 // ─── Auto-attach auth header to all /v1/* fetch calls ───
 const _origFetch = window.fetch;
 window.fetch = function(url, opts) {
@@ -772,7 +812,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.36.0</span>
+          <span class="sidebar-version">v0.37.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -1096,7 +1136,7 @@ async function sendChatMessage() {
 
   const thinkingEl = document.getElementById('chat-thinking');
   thinkingEl.classList.remove('hidden');
-  thinkingEl.innerHTML = '<span class="spinner"></span> 分析中...';
+  thinkingEl.innerHTML = '<div class="thinking-steps"><div class="thinking-step active"><span class="thinking-icon">🤔</span><span>分析请求...</span></div></div>';
   let thinkingText = '';
 
   const assistantId = 'assistant-' + Date.now();
@@ -1142,7 +1182,15 @@ async function sendChatMessage() {
                 content.startsWith('✅') || content.startsWith('  ✅') || content.startsWith('  ❌') ||
                 content.startsWith('🧠') || content.startsWith('⚡') || content.startsWith('📚')) {
               currentThinking += content;
-              thinkingEl.innerHTML = currentThinking.replace(/\n/g, '<br>');
+              // Build step display from thinking text
+              const steps = currentThinking.split('\n').filter(s => s.trim()).map(s => {
+                const trimmed = s.trim();
+                const icon = trimmed.match(/^([\u{1F000}-\u{1FFFF}]|[\u2600-\u27BF]|[\u2700-\u27BF]|✅|❌|⚡|▶️)/u);
+                const text = icon ? trimmed.slice(icon[0].length).trim() : trimmed;
+                const isActive = !trimmed.startsWith('✅') && !trimmed.startsWith('❌') && (trimmed === currentThinking.trim().split('\n').filter(x=>x.trim()).pop());
+                return '<div class="thinking-step' + (isActive ? ' active' : ' done') + '"><span class="thinking-icon">' + (icon ? icon[0] : '•') + '</span><span>' + escHtml(text) + '</span></div>';
+              }).join('');
+              thinkingEl.innerHTML = '<div class="thinking-steps">' + steps + '</div>';
               thinkingEl.scrollTop = thinkingEl.scrollHeight;
             } else {
               if (assistantEl) {
