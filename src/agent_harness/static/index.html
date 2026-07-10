@@ -61,6 +61,28 @@ window.__auth = { token: null, user: null };
 const _savedToken = localStorage.getItem('lingShu_jwt');
 if (_savedToken) window.__auth.token = _savedToken;
 
+// ─── Dark mode ───
+function initDarkMode() {
+  const saved = localStorage.getItem('lingShu_dark');
+  if (saved === 'true') {
+    document.body.classList.add('dark-mode');
+  } else if (saved === 'false') {
+    document.body.classList.remove('dark-mode');
+  } else {
+    // Auto-detect system preference
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      document.body.classList.add('dark-mode');
+    }
+  }
+}
+function toggleDarkMode() {
+  document.body.classList.toggle('dark-mode');
+  const isDark = document.body.classList.contains('dark-mode');
+  localStorage.setItem('lingShu_dark', isDark ? 'true' : 'false');
+  toast(isDark ? '🌙 暗色模式' : '☀️ 亮色模式', 'info');
+}
+initDarkMode();
+
 // ─── Auto-attach auth header to all /v1/* fetch calls ───
 const _origFetch = window.fetch;
 window.fetch = function(url, opts) {
@@ -726,6 +748,7 @@ function renderDashboard() {
             ${isAdmin ? '<div class="dropdown-item" onclick="switchTab(\'skills\'); closeSettingsMenu()">🧠 技能</div>' : ''}
             <div class="dropdown-divider"></div>
             <div class="dropdown-item" onclick="checkUpdate(); closeSettingsMenu()">📦 检查更新</div>
+            <div class="dropdown-item" onclick="closeSettingsMenu(); toggleDarkMode()">🌙 暗色模式</div>
             ${isAdmin ? '<div class="dropdown-item" onclick="renderSetup(); closeSettingsMenu()">🔄 重新配置</div>' : ''}
             <div class="dropdown-divider"></div>
             <div class="dropdown-item" onclick="doLogout(); closeSettingsMenu()" style="color:var(--danger)">🚪 退出登录</div>
@@ -748,7 +771,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.30.0</span>
+          <span class="sidebar-version">v0.31.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
