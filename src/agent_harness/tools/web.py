@@ -7,6 +7,24 @@ from ..pipeline.llm import _session, HARNESS_DIR, call_llama
 
 _SEARCH_CACHE: dict[str, tuple[float, list]] = {}  # query_key → (timestamp, results)
 _SEARCH_CACHE_TTL = 300  # 5 分钟
+_SEARCH_DIAG: list[dict] = []  # diagnostic log, last 20 entries
+
+
+def _log_search_diag(query: str, engine: str, status: str, count: int, detail: str = ""):
+    """Log a search diagnostic entry (in-memory, last 20)."""
+    entry = {
+        "ts": time.strftime("%H:%M:%S"),
+        "query": query[:60],
+        "engine": engine,
+        "status": status,
+        "count": count,
+        "detail": detail[:100],
+    }
+    _SEARCH_DIAG.insert(0, entry)
+    if len(_SEARCH_DIAG) > 20:
+        _SEARCH_DIAG.pop()
+    # Also print to stderr for server-side debugging
+    print("[Search] %s → %s (%d 结果) %s" % (engine, status, count, detail[:60]), file=__import__('sys').stderr)
 
 
 def _tool_search(query: str, max_results: int = 5) -> list:
@@ -43,7 +61,11 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                     f"{item.get('title', '')}: {item.get('content', '')} [{item.get('url', '')}]"
                     for item in sr[:max_results]
                 ]
-    except Exception:
+                _log_search_diag(query, "SearXNG", "ok", len(results))
+            else:
+                _log_search_diag(query, "SearXNG", "empty", 0)
+    except Exception as e:
+        _log_search_diag(query, "SearXNG", "error", 0, str(e)[:60])
         pass
 
     # 2. DuckDuckGo HTML 搜索（无需 API Key）
@@ -111,7 +133,9 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                                 parsed.append("%s: [%s]" % (title, url))
 
                 results = parsed[:max_results]
-        except Exception:
+                _log_search_diag(query, "DuckDuckGo", "ok", len(results))
+        except Exception as e:
+            _log_search_diag(query, "DuckDuckGo", "error", 0, str(e)[:60])
             pass
 
     # 3. 降级：search_tool skill
@@ -122,12 +146,17 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                 sys.path.insert(0, skills_dir)
             from search_tool import web_search
             results = web_search(query, max_results)
-        except Exception:
+            _log_search_diag(query, "skill_fallback", "ok", len(results) if results else 0)
+        except Exception as e:
+            _log_search_diag(query, "skill_fallback", "error", 0, str(e)[:60])
             pass
 
     # 兜底
     if not results:
+        _log_search_diag(query, "all", "failed", 0, "所有搜索引擎不可用")
         results = ["[搜索失败] 所有搜索引擎不可用，请检查 SearXNG 或网络连接"]
+    else:
+        _log_search_diag(query, "final", "ok", len(results))
 
     # 写入缓存
     _SEARCH_CACHE[cache_key] = (_time.time(), results)

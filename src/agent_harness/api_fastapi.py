@@ -1494,6 +1494,21 @@ async def list_plugins():
 
 import io
 import zipfile
+
+# ═══════════════════════════════════════
+# DIAGNOSTICS API
+# ═══════════════════════════════════════
+
+
+@app.get("/v1/diag/search")
+async def search_diagnostics():
+    """Get search engine diagnostic log (last 20 queries)."""
+    try:
+        from .tools.web import _SEARCH_DIAG
+        return {"diag": _SEARCH_DIAG, "count": len(_SEARCH_DIAG)}
+    except (ImportError, AttributeError):
+        return {"diag": [], "count": 0}
+
 from pathlib import Path as _P
 
 

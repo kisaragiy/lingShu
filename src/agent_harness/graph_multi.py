@@ -215,8 +215,21 @@ def supervisor_finalize(state: SupervisorState) -> dict:
         system_prompt=system,
         max_tokens=4096,
     )
+    # Empty output handling: try once more with simpler prompt
+    if not final or len(final.strip()) < 20:
+        print("[Supervisor] LLM 返回空结果，尝试降级回复...")
+        final = _call_llm(
+            [{"role": "user", "content": f"用户请求: {state['request']}\n\n请根据以下信息直接回答:\n{combined[:3000]}"}],
+            system_prompt="简洁、直接地回答用户的问题。用中文。",
+            max_tokens=1024,
+        )
+    # Second fallback: just return worker results directly
+    if not final or len(final.strip()) < 20:
+        print("[Supervisor] LLM 再次返回空，直接输出 Worker 结果")
+        final = combined[:2000]
     if not final:
-        final = combined[:1000]
+        final = "[无法生成回复] 搜索到了一些信息但未能整理成回复，请重试。"
+        print("[Supervisor] 最终降级: 搜索链路异常")
 
     # Build summary
     total_elapsed = sum(
