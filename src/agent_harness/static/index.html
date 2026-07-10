@@ -771,7 +771,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.33.0</span>
+          <span class="sidebar-version">v0.34.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -1105,7 +1105,11 @@ async function sendChatMessage() {
               thinkingEl.innerHTML = currentThinking.replace(/\n/g, '<br>');
               thinkingEl.scrollTop = thinkingEl.scrollHeight;
             } else {
-              if (assistantEl) assistantEl.innerHTML = mdToHtml(fullContent);
+              if (assistantEl) {
+                let body = assistantEl.querySelector('.chat-msg-body');
+                if (!body) { body = document.createElement('div'); body.className = 'chat-msg-body'; assistantEl.appendChild(body); }
+                body.innerHTML = mdToHtml(fullContent);
+              }
             }
           }
         } catch(e) {}
@@ -1114,7 +1118,11 @@ async function sendChatMessage() {
 
     chatHistory = messages;
     chatHistory.push({role: 'assistant', content: fullContent});
-    if (assistantEl) assistantEl.innerHTML = mdToHtml(fullContent);
+    if (assistantEl) {
+      let body = assistantEl.querySelector('.chat-msg-body');
+      if (!body) { body = document.createElement('div'); body.className = 'chat-msg-body'; assistantEl.appendChild(body); }
+      body.innerHTML = mdToHtml(fullContent);
+    }
     thinkingEl.classList.add('hidden');
 
     if (fullContent.length > 100) {
@@ -1172,9 +1180,32 @@ function addChatBubble(role, content, id, isSystem) {
   const div = document.createElement('div');
   div.id = id || '';
   div.className = 'chat-bubble ' + (isSystem ? 'system' : role);
-  div.innerHTML = renderChatMessage(role, content);
+
+  // Timestamp
+  const now = new Date();
+  const ts = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+  const icon = role === 'user' ? '🧑' : '🤖';
+
+  // Copy button
+  const copyBtn = isSystem ? '' : '<button class="chat-copy-btn" onclick="copyMsg(this)" title="复制">📋</button>';
+
+  div.innerHTML = '<div class="chat-msg-header"><span class="chat-msg-role">' + icon + ' ' + (role === 'user' ? '你' : '灵枢') + '</span><span class="chat-msg-ts">' + ts + '</span>' + copyBtn + '</div><div class="chat-msg-body">' + renderChatMessage(role, content) + '</div>';
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
+}
+
+function copyMsg(btn) {
+  const body = btn.parentElement.nextElementSibling;
+  const text = body ? body.textContent || body.innerText : '';
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    toast('已复制', 'ok');
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+    toast('已复制', 'ok');
+  });
 }
 
 async function saveReport(btn, sessionId) {
