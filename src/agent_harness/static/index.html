@@ -748,7 +748,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.27.0</span>
+          <span class="sidebar-version">v0.28.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -829,6 +829,34 @@ function escHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+// Simple markdown → HTML for chat messages
+function mdToHtml(text) {
+  if (!text) return '';
+  // Escape HTML first
+  let h = escHtml(text);
+  // Code blocks (```...```) — must be before inline code
+  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code class="lang-$1">$2</code></pre>');
+  // Inline code
+  h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Bold (**text**)
+  h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // Unordered lists (- item)
+  h = h.replace(/^- (.+)$/gm, '<li>$1</li>');
+  h = h.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+  // Headers (## / ###)
+  h = h.replace(/^### (.+)$/gm, '<h4>$1</h4>');
+  h = h.replace(/^## (.+)$/gm, '<h3>$1</h3>');
+  // Newlines → <br>
+  h = h.replace(/\n/g, '<br>');
+  return h;
+}
+
+// Render a chat message (user or assistant)
+function renderChatMessage(role, content) {
+  if (role === 'user') return escHtml(content).replace(/\n/g, '<br>');
+  return mdToHtml(content);
 }
 
 function onSidebarFilterChange() {
@@ -1034,7 +1062,7 @@ async function sendChatMessage() {
               thinkingEl.innerHTML = currentThinking.replace(/\n/g, '<br>');
               thinkingEl.scrollTop = thinkingEl.scrollHeight;
             } else {
-              if (assistantEl) assistantEl.innerHTML = fullContent.replace(/\n/g, '<br>');
+              if (assistantEl) assistantEl.innerHTML = mdToHtml(fullContent);
             }
           }
         } catch(e) {}
@@ -1043,7 +1071,7 @@ async function sendChatMessage() {
 
     chatHistory = messages;
     chatHistory.push({role: 'assistant', content: fullContent});
-    if (assistantEl) assistantEl.innerHTML = fullContent.replace(/\n/g, '<br>');
+    if (assistantEl) assistantEl.innerHTML = mdToHtml(fullContent);
     thinkingEl.classList.add('hidden');
 
     if (fullContent.length > 100) {
@@ -1101,7 +1129,7 @@ function addChatBubble(role, content, id, isSystem) {
   const div = document.createElement('div');
   div.id = id || '';
   div.className = 'chat-bubble ' + (isSystem ? 'system' : role);
-  div.innerHTML = content.replace(/\n/g, '<br>');
+  div.innerHTML = renderChatMessage(role, content);
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
