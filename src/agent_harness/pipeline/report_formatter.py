@@ -90,29 +90,6 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
     # Format the main content (simple markdown → HTML conversion)
     body_html = _markdown_to_html(linked_content)
 
-    # Build sources section with anchor IDs + metadata
-    from datetime import datetime as _dt
-    _now_str = _dt.now().strftime("%Y-%m-%d")
-    sources_html = ""
-    if sources:
-        items = ""
-        for i, s in enumerate(sources, 1):
-            url = s.get("url", "")
-            title_text = s.get("title", url)
-            source_type = s.get("type", "web")
-            type_icon = {"news": "📰", "paper": "📄", "official": "🏛️", "web": "🌐"}.get(source_type, "🌐")
-            access_date = s.get("access_date", _now_str)
-            items += '<li id="source-%d" class="source-item">' % i
-            items += '<span class="source-type">%s</span> ' % type_icon
-            items += '<a href="%s" target="_blank" rel="noopener">%s</a>' % (url, title_text)
-            items += '<span class="source-meta"> · %s · %s</span>' % (source_type, access_date)
-            items += '</li>'
-        sources_html = """
-        <div class="section">
-            <h2>📎 参考来源</h2>
-            <ol class="sources">%s</ol>
-        </div>""" % items
-
     # ─── Build table of contents ───
     toc_items = []
     seen_headers = set()

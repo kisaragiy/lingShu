@@ -56,10 +56,19 @@ def call_tool(name: str, **kwargs) -> dict:
     # 权限检查
     try:
         from .permission import check_permission, log_audit
+        from .tool_config import is_tool_enabled
     except ImportError:
-        # Fallback if permission module not found
         def check_permission(p, source="harness", auto_confirm=True): return True
         def log_audit(n, s, k, result="", duration_ms=0): pass
+        def is_tool_enabled(n): return True
+
+    # 开关检查：禁用的工具直接拒绝
+    if not is_tool_enabled(name):
+        return {
+            "success": False,
+            "error": f"[开关拒绝] 工具 '{name}' 已被禁用，请在前端开启后再调用。",
+            "data": None,
+        }
 
     priv = TOOL_REGISTRY[name].get("privilege", "reversible")
 
