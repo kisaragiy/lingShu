@@ -771,7 +771,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.32.0</span>
+          <span class="sidebar-version">v0.33.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -1394,18 +1394,57 @@ async function deleteReport(reportId) {
 // ═══════════════════════════════════
 async function renderDashKnowledge() {
   const el = document.getElementById('dash-content');
-  el.innerHTML = `<div class="card">
-    <div class="card-title">📚 知识库</div>
-    <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
-      <div class="upload-zone-icon">📄</div>
-      <div>点击上传文件（PDF/TXT/DOCX/MD）</div>
-      <div class="text-sm text-muted">文件将自动分块索引到向量存储</div>
-    </div>
-    <input type="file" id="file-input" hidden accept=".pdf,.txt,.docx,.md" onchange="uploadFile(this)">
-    <div id="upload-progress" class="hidden mt-16 text-center"><span class="spinner"></span> 索引中...</div>
-    <div id="collections-list" class="mt-16"><div class="text-center text-muted"><span class="spinner"></span> 加载中...</div></div>
-  </div>`;
+  el.innerHTML = '<div class="card"><div class="card-title">📚 知识库</div>' +
+    // Upload zone
+    '<div class="upload-zone" id="upload-zone" onclick="document.getElementById(\'file-input\').click()">' +
+    '<div class="upload-zone-icon">📄</div><div>点击上传文件（PDF/TXT/DOCX/MD）</div>' +
+    '<div class="text-sm text-muted">文件将自动分块索引到向量存储</div></div>' +
+    '<input type="file" id="file-input" hidden accept=".pdf,.txt,.docx,.md" onchange="uploadFile(this)">' +
+    '<div id="upload-progress" class="hidden mt-16 text-center"><span class="spinner"></span> 索引中...</div>' +
+    // Search section
+    '<div class="mt-16" style="display:flex;gap:8px">' +
+    '<input class="form-input" id="kb-query" placeholder="搜索知识库内容..." onkeydown="if(event.key===\'Enter\') kbSearch()">' +
+    '<button class="btn btn-primary btn-sm" onclick="kbSearch()">搜索</button>' +
+    '</div><div id="kb-results" class="mt-16"></div>' +
+    // Collections
+    '<div id="collections-list" class="mt-16"><div class="text-center text-muted"><span class="spinner"></span> 加载中...</div></div></div>';
   renderCollections();
+}
+
+async function kbSearch() {
+  const q = document.getElementById('kb-query').value.trim();
+  const resultsEl = document.getElementById('kb-results');
+  if (!q) { resultsEl.innerHTML = ''; return; }
+  resultsEl.innerHTML = '<div class="text-center text-sm"><span class="spinner"></span> 搜索中...</div>';
+  try {
+    const data = await API.get('/v1/knowledge/collections');
+    const cols = data.collections || [];
+    let allResults = [];
+    for (const col of cols) {
+      const r = await fetch('/v1/knowledge/query?q=' + encodeURIComponent(q) + '&collection=' + encodeURIComponent(col.name) + '&top_k=3').catch(() => null);
+      if (r) {
+        const d = await r.json();
+        if (d.results) allResults = allResults.concat(d.results.map(r => ({...r, collection: col.name})));
+      }
+    }
+    if (allResults.length === 0) {
+      resultsEl.innerHTML = '<div class="text-center text-muted text-sm" style="padding:16px">未找到匹配内容</div>';
+      return;
+    }
+    resultsEl.innerHTML = '<div class="card-title" style="font-size:13px;margin-bottom:8px">搜索结果 (' + allResults.length + ')</div>' +
+      allResults.map(r => {
+        const method = r.method === 'vector' ? '🔵 向量' : '🟡 关键词';
+        const source = escHtml(r.source || '');
+        const text = escHtml((r.text || '').slice(0, 300));
+        return '<div class="service-card"><div class="service-info">' +
+          '<div class="service-name">' + method + ' · 评分 ' + (r.score || 0) + ' · ' + source + '</div>' +
+          '<div class="service-detail">' + text + '</div>' +
+          (r.collection ? '<div class="text-sm text-muted">集合: ' + escHtml(r.collection) + '</div>' : '') +
+          '</div></div>';
+      }).join('');
+  } catch(e) {
+    resultsEl.innerHTML = '<div class="text-center text-muted text-sm" style="padding:16px">搜索失败: ' + e.message + '</div>';
+  }
 }
 
 async function renderCollections() {

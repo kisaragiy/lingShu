@@ -1089,6 +1089,22 @@ async def kb_delete_collection(name: str):
     )
 
 
+@app.get("/v1/knowledge/query")
+async def kb_query(q: str = "", collection: str = "default", top_k: int = 5):
+    """Search a knowledge base collection."""
+    try:
+        from .tools.rag_store import query as rag_query
+    except Exception as e:
+        return JSONResponse({"error": "RAG store not available: %s" % e}, status_code=500)
+    if not q:
+        return {"results": []}
+    try:
+        results = rag_query(q, collection=collection, top_k=top_k)
+        return {"results": results, "count": len(results)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 # ═══════════════════════════════════════
 # AUTH API
 # ═══════════════════════════════════════
