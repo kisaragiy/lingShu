@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>灵枢智能客服 — AI Customer Service Demo</title>
+<style>
+/* ═══════════════════════════════════════════
+   灵枢智能客服 Demo — Product Page Styles
+   ═══════════════════════════════════════════ */
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f6f8;
+  --bg-card: #ffffff;
+  --bg-hover: #f0f1f4;
+  --border: #e2e4e9;
+  --border-light: #eef0f3;
+  --text-primary: #1a1a2e;
+  --text-secondary: #6b7280;
+  --text-muted: #9ca3af;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-light: #eef2ff;
+  --accent-ring: rgba(37,99,235,0.2);
+  --green: #22c55e;
+  --red: #ef4444;
+  --yellow: #f59e0b;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-lg: 0 4px 24px rgba(0,0,0,0.1);
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans SC', sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-card: #1e293b;
+    --bg-hover: #334155;
+    --border: #334155;
+    --border-light: #1e293b;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent: #60a5fa;
+    --accent-hover: #3b82f6;
+    --accent-light: #1e3a5f;
+    --accent-ring: rgba(96,165,250,0.2);
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-lg: 0 4px 24px rgba(0,0,0,0.4);
+  }
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Splash Screen ─── */
+#splash {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #1a1a2e 0%, #2563eb 100%);
+  transition: opacity 0.6s ease, visibility 0.6s ease;
+}
+#splash.hidden { opacity: 0; visibility: hidden; }
+.splash-content { text-align: center; }
+.splash-logo {
+  width: 80px; height: 80px; margin: 0 auto 20px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 20px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 40px;
+  animation: splashPulse 1.5s ease-in-out infinite;
+}
+@keyframes splashPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255,255,255,0.2); }
+  50% { transform: scale(1.05); box-shadow: 0 0 24px 8px rgba(255,255,255,0.15); }
+}
+.splash-title {
+  font-size: 32px; font-weight: 700; color: #fff;
+  letter-spacing: 1px;
+}
+.splash-subtitle {
+  font-size: 14px; color: rgba(255,255,255,0.7);
+  margin-top: 8px; font-weight: 400;
+}
+.splash-spinner {
+  width: 32px; height: 32px; margin: 24px auto 12px;
+  border: 3px solid rgba(255,255,255,0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.splash-status {
+  font-size: 13px; color: rgba(255,255,255,0.6);
+  animation: statusPulse 2s ease-in-out infinite;
+}
+@keyframes statusPulse { 0%,100%{opacity:0.6} 50%{opacity:1} }
+
+/* ─── Layout ─── */
+.app-container { display: flex; flex-direction: column; height: 100vh; max-width: 100%; }
+
+/* ─── Header ─── */
+.app-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px; height: 56px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 100;
+}
+.header-left { display: flex; align-items: center; gap: 12px; }
+.header-logo {
+  width: 32px; height: 32px;
+  background: linear-gradient(135deg, #1a1a2e, #2563eb);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; color: #fff; font-weight: 700;
+}
+.header-title { font-size: 16px; font-weight: 600; }
+.header-badge {
+  font-size: 11px; padding: 2px 8px;
+  background: var(--accent-light);
+  color: var(--accent);
+  border-radius: 10px;
+  font-weight: 500;
+}
+.header-right { display: flex; align-items: center; gap: 8px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border: none; border-radius: var(--radius);
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: var(--font);
+  text-decoration: none;
+}
+.btn:active { transform: scale(0.97); }
+.btn-primary {
+  background: var(--accent); color: #fff;
+}
+.btn-primary:hover { background: var(--accent-hover); box-shadow: var(--shadow); }
+.btn-secondary {
+  background: var(--bg-hover); color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover { background: var(--border); }
+.btn-ghost {
+  background: transparent; color: var(--text-secondary);
+  padding: 6px 10px;
+}
+.btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* ─── Main Content ─── */
+.main-content {
+  flex: 1; display: flex; gap: 0;
+  overflow: hidden;
+}
+
+/* ─── Side Intro Panel ─── */
+.intro-panel {
+  width: 320px; flex-shrink: 0;
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  padding: 24px;
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+  gap: 20px;
+}
+.intro-panel h2 {
+  font-size: 18px; font-weight: 600;
+  margin-bottom: 4px;
+}
+.intro-panel p {
+  font-size: 13px; color: var(--text-secondary);
+  line-height: 1.7;
+}
+.intro-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px; font-weight: 500;
+}
+.intro-badge.blue { background: var(--accent-light); color: var(--accent); }
+.intro-badge.green { background: #ecfdf5; color: #059669; }
+.intro-badge.amber { background: #fffbeb; color: #d97706; }
+
+.feature-list { display: flex; flex-direction: column; gap: 12px; }
+.feature-item {
+  display: flex; gap: 12px;
+  padding: 12px; border-radius: var(--radius);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+}
+.feature-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+.feature-text { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.feature-text strong { color: var(--text-primary); font-weight: 600; }
+
+.scenario-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.scenario-card {
+  padding: 12px; border-radius: var(--radius);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+  font-size: 12px;
+}
+.scenario-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+.scenario-icon { font-size: 22px; display: block; margin-bottom: 4px; }
+.scenario-label { font-weight: 500; color: var(--text-primary); }
+.scenario-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* ─── Chat Panel ─── */
+.chat-panel {
+  flex: 1; display: flex; flex-direction: column;
+  background: var(--bg-primary);
+  min-width: 0;
+}
+
+.chat-messages {
+  flex: 1; overflow-y: auto; padding: 16px 20px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.chat-messages:empty::after {
+  content: '输入问题开始对话...';
+  display: block; text-align: center;
+  color: var(--text-muted); font-size: 14px;
+  padding: 60px 20px;
+}
+
+.chat-bubble {
+  max-width: 78%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px; line-height: 1.6;
+  animation: bubbleIn 0.25s ease-out;
+}
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.chat-bubble.user {
+  align-self: flex-end;
+  background: var(--accent); color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.chat-bubble.assistant {
+  align-self: flex-start;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+.chat-msg-header {
+  font-size: 12px; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 6px;
+}
+.chat-bubble.user .chat-msg-header { opacity: 0.8; }
+.chat-msg-role { font-weight: 600; }
+.chat-msg-time { font-size: 10px; opacity: 0.6; margin-left: auto; }
+.chat-msg-body { word-break: break-word; }
+.chat-msg-body p { margin: 4px 0; }
+.chat-msg-body ul, .chat-msg-body ol { margin: 4px 0 8px 20px; }
+.chat-msg-body li { margin-bottom: 2px; }
+.chat-msg-body strong { font-weight: 600; }
+.chat-msg-body code {
+  background: var(--bg-hover); padding: 1px 5px;
+  border-radius: 4px; font-size: 12px;
+}
+.chat-bubble.user .chat-msg-body code {
+  background: rgba(255,255,255,0.15); color: #fff;
+}
+
+/* Thinking steps */
+.thinking-steps { padding: 4px 0; }
+.thinking-step {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-left: 2px solid transparent;
+}
+.thinking-step.active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  font-weight: 600;
+}
+.thinking-step.done {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+.thinking-icon { font-size: 13px; width: 20px; text-align: center; }
+.thinking-typing {
+  display: inline-flex; gap: 3px; align-items: center;
+  margin-left: 4px;
+}
+.thinking-typing span {
+  width: 4px; height: 4px; background: var(--accent);
+  border-radius: 50%;
+  animation: typingDot 1.4s infinite;
+}
+.thinking-typing span:nth-child(2) { animation-delay: 0.2s; }
+.thinking-typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typingDot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-4px); }
+}
+
+/* ─── Quick Replies ─── */
+.quick-replies {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  padding: 12px 20px 0;
+}
+.quick-reply-btn {
+  padding: 6px 14px; border: 1px solid var(--border);
+  border-radius: 16px; background: var(--bg-card);
+  color: var(--text-secondary); font-size: 12px;
+  cursor: pointer; transition: all 0.15s ease;
+  font-family: var(--font);
+}
+.quick-reply-btn:hover {
+  border-color: var(--accent); color: var(--accent);
+  background: var(--accent-light);
+}
+
+/* ─── Input Bar ─── */
+.chat-input-bar {
+  display: flex; gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.chat-input {
+  flex: 1; padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  font-size: 14px; outline: none;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font);
+  transition: border-color 0.15s ease;
+}
+.chat-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.chat-input::placeholder { color: var(--text-muted); }
+.send-btn {
+  width: 42px; height: 42px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  font-size: 18px; cursor: pointer;
+  transition: all 0.15s ease;
+}
+.send-btn:hover { background: var(--accent-hover); transform: scale(1.05); }
+.send-btn:active { transform: scale(0.95); }
+.send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* ─── Footer ─── */
+.app-footer {
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px 24px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* ─── Toast ─── */
+.toast {
+  position: fixed; top: 20px; right: 20px; z-index: 9998;
+  padding: 10px 20px; border-radius: var(--radius);
+  font-size: 13px; font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  transition: all 0.3s ease;
+  opacity: 0; transform: translateY(-10px);
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.info { background: var(--accent-light); color: var(--accent); border: 1px solid var(--accent); }
+.toast.ok { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.toast.err { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+
+/* ─── Responsive ─── */
+@media (max-width: 768px) {
+  .intro-panel { display: none; }
+  .app-header { padding: 0 12px; }
+  .chat-messages { padding: 12px; }
+  .chat-input-bar { padding: 12px; }
+  .chat-bubble { max-width: 92%; font-size: 13px; }
+  .scenario-grid { display: flex; flex-wrap: wrap; justify-content: center; padding: 8px 12px; gap: 6px; }
+  .scenario-grid .scenario-card { flex: 0 0 auto; padding: 8px 14px; min-width: auto; }
+  .scenario-grid .scenario-desc { display: none; }
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<!-- ═══════ SPLASH ═══════ -->
+<div id="splash">
+  <div class="splash-content">
+    <div class="splash-logo">🎧</div>
+    <div class="splash-title">灵枢智能客服</div>
+    <div class="splash-subtitle">LingShu AI Customer Service · LLM + Tool-Calling</div>
+    <div class="splash-spinner"></div>
+    <div class="splash-status" id="splash-status">正在加载...</div>
+  </div>
+</div>
+
+<!-- ═══════ TOAST ═══════ -->
+<div id="toast" class="toast"></div>
+
+<!-- ═══════ APP ═══════ -->
+<div class="app-container">
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="header-logo">🎧</div>
+      <span class="header-title">灵枢智能客服</span>
+      <span class="header-badge">Demo v0.41</span>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-ghost btn-sm" onclick="resetChat()" title="新对话">🔄 新对话</button>
+      <button class="btn btn-ghost btn-sm" onclick="backToApp()" title="返回主页">⌂ 主页</button>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <div class="main-content">
+
+    <!-- Left: Intro Panel -->
+    <aside class="intro-panel">
+      <div>
+        <h2>🎧 智能客服 Demo</h2>
+        <p style="margin-top:4px">基于 LLM + 工具调用的 AI 客服系统，覆盖售前咨询、订单查询、退换货处理等场景。</p>
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+          <span class="intro-badge blue">🤖 LLM 驱动</span>
+          <span class="intro-badge green">🔧 工具调用</span>
+          <span class="intro-badge amber">💬 多轮对话</span>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text-secondary)">架构特点</div>
+        <div class="feature-list">
+          <div class="feature-item">
+            <span class="feature-icon">🔍</span>
+            <div class="feature-text"><strong>意图识别</strong> — 规则引擎分类用户意图（查订单/物流/退换货/投诉/FAQ），快速响应。</div>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">⚡</span>
+            <div class="feature-text"><strong>工具执行</strong> — 根据意图调用查询订单、FAQ、创建工单等工具，获取结构化数据。</div>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">🤖</span>
+            <div class="feature-text"><strong>LLM 生成</strong> — DeepSeek Flash 模型将工具结果转化为自然、有同理心的回复。</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text-secondary)">快速演示场景</div>
+        <div class="scenario-grid" id="scenario-grid">
+          <div class="scenario-card" onclick="csSend('查一下我的订单')">
+            <span class="scenario-icon">📦</span>
+            <div class="scenario-label">查订单</div>
+            <div class="scenario-desc">订单状态查询</div>
+          </div>
+          <div class="scenario-card" onclick="csSend('ORD20260708001到哪了')">
+            <span class="scenario-icon">🚚</span>
+            <div class="scenario-label">查物流</div>
+            <div class="scenario-desc">配送进度追踪</div>
+          </div>
+          <div class="scenario-card" onclick="csSend('我想退货')">
+            <span class="scenario-icon">🔄</span>
+            <div class="scenario-label">退换货</div>
+            <div class="scenario-desc">申请售后</div>
+          </div>
+          <div class="scenario-card" onclick="csSend('我要投诉物流太慢了')">
+            <span class="scenario-icon">⚠️</span>
+            <div class="scenario-label">投诉</div>
+            <div class="scenario-desc">反馈问题</div>
+          </div>
+          <div class="scenario-card" onclick="csSend('你们有保价服务吗')">
+            <span class="scenario-icon">❓</span>
+            <div class="scenario-label">FAQ</div>
+            <div class="scenario-desc">常见问题</div>
+          </div>
+          <div class="scenario-card" onclick="csSend('转人工')">
+            <span class="scenario-icon">👤</span>
+            <div class="scenario-label">转人工</div>
+            <div class="scenario-desc">真人客服</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right: Chat Panel -->
+    <main class="chat-panel">
+
+      <!-- Messages -->
+      <div class="chat-messages" id="cs-messages"></div>
+
+      <!-- Quick Replies (dynamic) -->
+      <div class="quick-replies" id="cs-quick-replies"></div>
+
+      <!-- Input -->
+      <div class="chat-input-bar">
+        <input class="chat-input" id="cs-input" type="text"
+               placeholder="输入您的问题..." autofocus
+               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csSend()}">
+        <button class="send-btn" id="cs-send-btn" onclick="csSend()" title="发送">➤</button>
+      </div>
+    </main>
+  </div>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    灵枢 AI 客服 Demo · 基于 LLM + 工具调用架构 · <a href="https://github.com/kisaragiy/lingShu" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;margin-left:4px">GitHub</a>
+  </footer>
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+// CS Demo — Standalone Product Page
+// ═══════════════════════════════════════════
+
+const CS_SESSION_KEY = 'lingShu_cs_session';
+let _csSessionId = localStorage.getItem(CS_SESSION_KEY) || 'cs_' + Math.random().toString(36).slice(2, 8);
+
+// ─── Splash ───
+function hideSplash() {
+  const el = document.getElementById('splash');
+  el.classList.add('hidden');
+  setTimeout(() => { el.style.display = 'none'; }, 600);
+}
+setTimeout(hideSplash, 1500);
+
+// ─── Toast ───
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast ' + (type || 'info') + ' show';
+  clearTimeout(el._hide);
+  el._hide = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ─── Escape HTML ───
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+// ─── Markdown to HTML ───
+function mdToHtml(md) {
+  if (!md) return '';
+  let s = md
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Inline code
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // Unordered list
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    // Newlines
+    .replace(/\n/g, '<br>');
+  // Wrap consecutive <li> in <ul>
+  s = s.replace(/((?:<li>.*?<br>)+)/g, '<ul>$1</ul>');
+  s = s.replace(/<ul><br>/g, '<ul>').replace(/<br><\/ul>/g, '</ul>');
+  return s;
+}
+
+// ─── Add Bubble ───
+function addBubble(role, content, isThinking) {
+  const container = document.getElementById('cs-messages');
+  const div = document.createElement('div');
+  div.className = 'chat-bubble ' + role;
+
+  const now = new Date();
+  const time = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+  const icon = role === 'user' ? '🧑' : '🤖';
+  const label = role === 'user' ? '我' : '智能客服';
+
+  let bodyHtml = isThinking ? content : mdToHtml(content);
+  div.innerHTML = '<div class="chat-msg-header"><span class="chat-msg-role">' + icon + ' ' + label + '</span><span class="chat-msg-time">' + time + '</span></div><div class="chat-msg-body">' + bodyHtml + '</div>';
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+// ─── Welcome Message ───
+function showWelcome() {
+  const container = document.getElementById('cs-messages');
+  if (container.children.length === 0) {
+    addBubble('assistant',
+      '你好！欢迎使用灵枢智能客服 🎉\n\n我可以帮你：\n' +
+      '📦 **查订单** — 输入订单号或手机号\n' +
+      '🚚 **查物流** — 查看配送进度\n' +
+      '🔄 **退换货** — 申请退换货\n' +
+      '❓ **常见问题** — 咨询售后政策\n' +
+      '👤 **转人工** — 联系真人客服\n\n' +
+      '请告诉我需要什么帮助？');
+    setQuickReplies(['📦 查订单', '🔄 退换货', '👤 转人工']);
+  }
+}
+showWelcome();
+
+// ─── Quick Replies ───
+function setQuickReplies(buttons) {
+  const el = document.getElementById('cs-quick-replies');
+  if (!buttons || buttons.length === 0) {
+    el.innerHTML = ''; return;
+  }
+  el.innerHTML = buttons.map(b =>
+    '<button class="quick-reply-btn" onclick="csSend(\'' + b.replace(/'/g,"\\'") + '\')">' + escHtml(b) + '</button>'
+  ).join('');
+}
+
+// ─── Send ───
+async function csSend(msg) {
+  const input = document.getElementById('cs-input');
+  if (typeof msg !== 'string') {
+    msg = input.value.trim();
+    input.value = '';
+  }
+  if (!msg) return;
+
+  // Strip quick-reply emoji prefix if present
+  const cleanMsg = msg.replace(/^[📦🚚🔄⚠️❓👤]\s*/, '');
+
+  // Add user bubble
+  addBubble('user', cleanMsg);
+
+  // Disable send
+  const sendBtn = document.getElementById('cs-send-btn');
+  sendBtn.disabled = true;
+  input.disabled = true;
+
+  // Thinking placeholder
+  const thinkDiv = addBubble('assistant',
+    '<div class="thinking-steps"><div class="thinking-step active"><span class="thinking-icon">🔍</span><span>分析意图<span class="thinking-typing"><span></span><span></span><span></span></span></span></div></div>',
+    true
+  );
+
+  try {
+    const r = await fetch('/v1/cs/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: cleanMsg, session_id: _csSessionId}),
+    });
+    if (!r.ok) throw new Error('API 错误: ' + r.status);
+    const data = await r.json();
+    const tools = data.tool_results || {};
+    const toolKeys = Object.keys(tools);
+
+    // Build thinking steps
+    let thinkHtml = '<div class="thinking-steps">';
+    thinkHtml += '<div class="thinking-step done"><span class="thinking-icon">🔍</span><span>意图: ' + escHtml(data.intent || '未知') + '</span></div>';
+    if (toolKeys.length > 0) {
+      toolKeys.forEach((k, i) => {
+        const icon = i === toolKeys.length - 1 ? '⚡' : '📋';
+        thinkHtml += '<div class="thinking-step done"><span class="thinking-icon">' + icon + '</span><span>' + escHtml(k) + '</span></div>';
+      });
+    }
+    thinkHtml += '<div class="thinking-step active"><span class="thinking-icon">🤖</span><span>生成回复<span class="thinking-typing"><span></span><span></span><span></span></span></span></div></div>';
+
+    const bodyEl = thinkDiv.querySelector('.chat-msg-body');
+    bodyEl.innerHTML = thinkHtml;
+    document.getElementById('cs-messages').scrollTop = document.getElementById('cs-messages').scrollHeight;
+
+    // Delay then show reply
+    setTimeout(() => {
+      bodyEl.innerHTML = mdToHtml(data.reply || '');
+      bodyEl.closest('.chat-bubble').scrollIntoView({behavior: 'smooth', block: 'end'});
+    }, 500);
+
+    // Update quick replies
+    if (data.quick_replies && data.quick_replies.length > 0) {
+      setQuickReplies(data.quick_replies);
+    } else {
+      setQuickReplies(['📦 查订单', '🔄 退换货', '👤 转人工']);
+    }
+
+  } catch (e) {
+    const bodyEl = thinkDiv.querySelector('.chat-msg-body');
+    bodyEl.innerHTML = '❌ 请求失败: ' + escHtml(e.message) + '<br><br><span style="font-size:12px;color:var(--text-muted)">请确认后端服务正在运行。</span>';
+    toast('请求失败', 'err');
+  } finally {
+    sendBtn.disabled = false;
+    input.disabled = false;
+    input.focus();
+  }
+}
+
+// ─── Reset ───
+function resetChat() {
+  _csSessionId = 'cs_' + Math.random().toString(36).slice(2, 8);
+  localStorage.setItem(CS_SESSION_KEY, _csSessionId);
+  document.getElementById('cs-messages').innerHTML = '';
+  showWelcome();
+  toast('已开启新对话', 'ok');
+}
+
+// ─── Back to App ───
+function backToApp() {
+  window.location.href = '/';
+}
+
+// ─── Focus input on load ───
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    const input = document.getElementById('cs-input');
+    if (input) input.focus();
+  }, 1600);
+});
+</script>
+</body>
+</html>

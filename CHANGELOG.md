@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.41.0 — 2026-07-10
+
+### Added
+- 客服 Demo 产品化包装：独立全屏页面 `/cs-demo`
+- `static/cs-demo.html` — 品牌化 Splash 屏 + 左面板架构介绍 + 场景推荐卡片 + 沉浸式聊天 UI
+- `run_cs_demo.py` — 一键启动脚本（`python run_cs_demo.py` → 自动打开浏览器）
+- 场景推荐卡片：6 种预设场景（查订单/查物流/退换货/投诉/FAQ/转人工），一键演示
+
+### Changed
+- 客服页面不再是主应用 Tab，改为独立产品级页面，适合面试展示
+
+## v0.40.0 — 2026-07-10
+
+### Added
+- CS Agent v2：由 LLM（DeepSeek Flash）生成自然、有同理心的回复
+- 前端显示三步思考过程：🔍 意图分析 → 📋/⚡ 工具执行 → 🤖 LLM 生成回复
+- 回复自动降级：LLM 不可达时回退模板回复
+
+### Changed
+- `agents/cs_agent.py` 重写：新增 `_call_cs_llm` + `_execute_tools` + `_template_fallback`
+- API `/v1/cs/chat` 返回 `tool_results` + `quick_replies` 字段
+
+## v0.39.0 — 2026-07-10
+
+### Added
+- 客服 Demo 初版：🎧 Tab 页 + Mock 订单/工单/FAQ + 意图分类
+- `agents/cs_agent.py` — 规则引擎式客服 Agent（v1）
+- `tools/customer_service.py` — Mock 数据（4 条订单、工单系统、FAQ 知识库）
+- `POST /v1/cs/chat` API + 会话持久化
+
 ## v0.21.0 — 2026-07-09
 
 ### Added

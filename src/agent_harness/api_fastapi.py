@@ -459,6 +459,15 @@ async def serve_frontend():
     return JSONResponse({"message": "灵枢 API 运行中"}, status_code=200)
 
 
+@app.get("/cs-demo", include_in_schema=False)
+async def serve_cs_demo():
+    """Standalone Customer Service Demo page (productized)."""
+    cs = STATIC_DIR / "cs-demo.html"
+    if cs.exists():
+        return HTMLResponse(cs.read_text("utf-8"))
+    return JSONResponse({"error": "cs-demo.html not found"}, status_code=404)
+
+
 class ChatRequest(BaseModel):
     model: str = "agent-harness-multi"
     messages: list[dict] = []
