@@ -813,7 +813,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.39.0</span>
+          <span class="sidebar-version">v0.40.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -1841,10 +1841,10 @@ async function csSendMsg(msg) {
   container.appendChild(userDiv);
   container.scrollTop = container.scrollHeight;
 
-  // Show thinking
+  // Show thinking steps
   const thinkDiv = document.createElement('div');
   thinkDiv.className = 'chat-bubble assistant';
-  thinkDiv.innerHTML = '<div class="chat-msg-header"><span class="chat-msg-role">🤖 智能客服</span></div><div class="chat-msg-body"><span class="spinner"></span> 思考中...</div>';
+  thinkDiv.innerHTML = '<div class="chat-msg-header"><span class="chat-msg-role">🤖 智能客服</span></div><div class="chat-msg-body"><div class="thinking-steps"><div class="thinking-step active"><span class="thinking-icon">🔍</span><span>分析意图...</span></div></div></div>';
   container.appendChild(thinkDiv);
   container.scrollTop = container.scrollHeight;
 
@@ -1855,8 +1855,28 @@ async function csSendMsg(msg) {
     });
     const data = await r.json();
 
-    // Update thinking with reply
-    thinkDiv.querySelector('.chat-msg-body').innerHTML = mdToHtml(data.reply || '');
+    // Build thinking steps from tool results
+    const tools = data.tool_results || {};
+    const toolKeys = Object.keys(tools);
+    let thinkingHtml = '<div class="thinking-steps">';
+    thinkingHtml += '<div class="thinking-step done"><span class="thinking-icon">🔍</span><span>意图: ' + (data.intent || '未知') + '</span></div>';
+    if (toolKeys.length > 0) {
+      toolKeys.forEach((k, i) => {
+        thinkingHtml += '<div class="thinking-step done"><span class="thinking-icon">' + (i === toolKeys.length - 1 ? '⚡' : '📋') + '</span><span>' + escHtml(k) + '</span></div>';
+      });
+    }
+    thinkingHtml += '<div class="thinking-step active"><span class="thinking-icon">🤖</span><span>生成回复...</span></div></div>';
+
+    // Update thinking with steps, then replace with final reply
+    const bodyEl = thinkDiv.querySelector('.chat-msg-body');
+    bodyEl.innerHTML = thinkingHtml;
+    container.scrollTop = container.scrollHeight;
+
+    // Small delay so user can see thinking steps, then show final reply
+    setTimeout(() => {
+      bodyEl.innerHTML = mdToHtml(data.reply || '');
+      container.scrollTop = container.scrollHeight;
+    }, 400);
 
     // Update quick replies
     const qr = document.getElementById('cs-quick-replies');

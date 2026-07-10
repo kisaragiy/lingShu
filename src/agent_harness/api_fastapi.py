@@ -1742,11 +1742,11 @@ async def cs_chat(request: Request):
 
     # Run CS agent
     from .agents.cs_agent import run_cs_agent
-    reply = run_cs_agent(message, context=context)
-
-    # Determine intent
-    from .tools.customer_service import classify_cs_intent
-    intent = classify_cs_intent(message)
+    result = run_cs_agent(message, context=context)
+    reply = result.get("reply", "")
+    intent = result.get("intent", classify_cs_intent(message))
+    tool_results = result.get("tool_results", {})
+    quick_replies = result.get("quick_replies", _get_cs_quick_replies(intent))
 
     # Save to session
     session_messages = history + [
@@ -1760,7 +1760,8 @@ async def cs_chat(request: Request):
         "reply": reply,
         "intent": intent,
         "session_id": session_id,
-        "quick_replies": _get_cs_quick_replies(intent),
+        "quick_replies": quick_replies,
+        "tool_results": tool_results,
     }
 
 
