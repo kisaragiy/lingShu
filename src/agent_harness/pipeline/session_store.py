@@ -229,6 +229,48 @@ def get_session_summary(session_id: str) -> dict | None:
     return None
 
 
+def search_messages(query: str, owner_id: str | None = None, limit: int = 20) -> list[dict]:
+    """Search message content across all sessions.
+
+    Args:
+        query: Text to search for (case-insensitive)
+        owner_id: If set, only search this user's sessions
+        limit: Max results
+
+    Returns:
+        List of {session_id, session_title, role, content_preview, ts, score}
+    """
+    q = query.lower()
+    results = []
+    sessions = list_sessions(owner_id=owner_id)
+
+    for s in sessions:
+        sid = s["id"]
+        msgs = load_session(sid)
+        if not msgs:
+            continue
+        for msg in msgs:
+            content = msg.get("content", "")
+            if q in content.lower():
+                ts = msg.get("ts", 0)
+                preview = content[:200]
+                results.append({
+                    "session_id": sid,
+                    "session_title": s.get("title", "") or s.get("preview", ""),
+                    "role": msg.get("role", ""),
+                    "content_preview": preview,
+                    "ts": ts,
+                    "time": time.strftime("%m-%d %H:%M", time.localtime(ts)) if ts else "",
+                })
+                if len(results) >= limit:
+                    break
+        if len(results) >= limit:
+            break
+
+    results.sort(key=lambda r: r.get("ts", 0), reverse=True)
+    return results[:limit]
+
+
 def update_session_meta(session_id: str, **kwargs) -> dict | None:
     """Update session metadata (title, pinned) without rewriting messages.
 

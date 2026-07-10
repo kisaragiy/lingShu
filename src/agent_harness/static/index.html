@@ -768,10 +768,11 @@ function renderDashboard() {
           <button class="sidebar-new-btn" onclick="switchToNewSession()">
             <span>✕</span> 新会话
           </button>
+          <button class="btn btn-sm" style="padding:4px 8px;font-size:11px" onclick="toggleMessageSearch()" title="搜索消息内容">🔍</button>
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.35.0</span>
+          <span class="sidebar-version">v0.36.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -905,6 +906,45 @@ function renderChatMessage(role, content) {
 function onSidebarFilterChange() {
   sidebarFilter = document.getElementById('sidebar-search-input').value;
   renderSidebarList();
+}
+
+// ─── Message search (cross-session content search) ───
+let _msgSearchVisible = false;
+
+function toggleMessageSearch() {
+  _msgSearchVisible = !_msgSearchVisible;
+  const list = document.getElementById('sidebar-list');
+  if (!_msgSearchVisible) {
+    renderSidebarList();
+    return;
+  }
+  list.innerHTML = '<div style="padding:12px"><div class="form-group"><input class="form-input" id="msg-search-input" placeholder="搜索所有会话的消息内容..." autofocus onkeydown="if(event.key===\'Enter\') doMsgSearch()" style="font-size:12px"></div><div id="msg-search-results"></div></div>';
+  setTimeout(() => document.getElementById('msg-search-input').focus(), 100);
+}
+
+async function doMsgSearch() {
+  const q = document.getElementById('msg-search-input').value.trim();
+  const resultsEl = document.getElementById('msg-search-results');
+  if (!q) { resultsEl.innerHTML = ''; return; }
+  resultsEl.innerHTML = '<div class="text-center text-sm"><span class="spinner"></span> 搜索中...</div>';
+  try {
+    const data = await API.get('/v1/search/messages?q=' + encodeURIComponent(q));
+    const results = data.results || [];
+    if (results.length === 0) {
+      resultsEl.innerHTML = '<div class="text-center text-muted text-sm" style="padding:12px">未找到匹配消息</div>';
+      return;
+    }
+    resultsEl.innerHTML = results.map(r => {
+      const icon = r.role === 'user' ? '🧑' : '🤖';
+      const title = escHtml((r.session_title || '').slice(0, 30));
+      const preview = escHtml((r.content_preview || '').slice(0, 120));
+      return '<div class="session-item" onclick="switchToSession(\'' + r.session_id + '\'); toggleMessageSearch()" style="cursor:pointer">' +
+        '<div class="session-item-title">' + icon + ' ' + title + ' <span class="text-muted" style="font-size:10px">' + r.time + '</span></div>' +
+        '<div class="session-item-preview">' + preview + '</div></div>';
+    }).join('');
+  } catch(e) {
+    resultsEl.innerHTML = '<div class="text-center text-muted text-sm" style="padding:12px">搜索失败</div>';
+  }
 }
 
 async function switchToSession(sessionId) {

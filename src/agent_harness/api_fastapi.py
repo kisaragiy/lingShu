@@ -960,6 +960,19 @@ async def export_single_session(session_id: str):
     )
 
 
+@app.get("/v1/search/messages")
+async def search_messages(request: Request, q: str = ""):
+    """Search message content across all sessions."""
+    user = getattr(request.state, "user", None)
+    is_admin = user and user.get("role") == "admin"
+    owner_filter = None if is_admin else (user.get("id", "") if user else "")
+    if not q:
+        return {"results": [], "count": 0}
+    from .pipeline.session_store import search_messages as _search_msgs
+    results = _search_msgs(q, owner_id=owner_filter, limit=20)
+    return {"results": results, "count": len(results)}
+
+
 # ═══════════════════════════════════════
 # AGENT LOG API
 # ═══════════════════════════════════════
