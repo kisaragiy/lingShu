@@ -748,7 +748,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.29.0</span>
+          <span class="sidebar-version">v0.30.0</span>
         </div>
         <div class="status-bar" id="status-bar">
           <span class="status-dot" id="health-dot"></span>
@@ -807,12 +807,15 @@ function renderSidebarList() {
   }
   list.innerHTML = filtered.map(s => {
     const isActive = s.id === chatSessionId;
-    const preview = (s.preview || '新会话').slice(0, 35);
+    const displayName = (s.title || s.preview || '新会话').slice(0, 35);
+    const pinIcon = s.pinned ? '📌 ' : '';
     const time = formatSidebarTime(s.last_active);
     return `<div class="session-item ${isActive ? 'active' : ''}" onclick="switchToSession('${s.id}')" data-sid="${s.id}">
-      <div class="session-item-title">${escHtml(preview)}</div>
-      <div class="session-item-preview">${s.exchanges || 0} 条消息</div>
-      <div class="session-item-time">${time}</div>
+      <div class="session-item-title">${pinIcon}${escHtml(displayName)}</div>
+      <div class="session-item-preview">${s.exchanges || 0} 条消息 · ${time}</div>
+      <button class="btn btn-sm" style="padding:1px 6px;font-size:10px;margin-right:2px" onclick="event.stopPropagation();renameSession('${s.id}')">✏️</button>
+      <button class="btn btn-sm" style="padding:1px 6px;font-size:10px;margin-right:2px" onclick="event.stopPropagation();togglePinSession('${s.id}',${!s.pinned})">${s.pinned ? '📌' : '📍'}</button>
+      <button class="btn btn-sm" style="padding:1px 6px;font-size:10px" onclick="event.stopPropagation();downloadExport('/v1/sessions/${s.id}/export','session_${s.id}.json')">⬇</button>
     </div>`;
   }).join('');
 }
@@ -823,6 +826,23 @@ function formatSidebarTime(seconds) {
   if (seconds < 3600) return Math.floor(seconds/60) + '分前';
   if (seconds < 86400) return Math.floor(seconds/3600) + '时前';
   return Math.floor(seconds/86400) + '天前';
+}
+
+// ─── Session actions ───
+function renameSession(sessionId) {
+  const newTitle = prompt('输入新的会话名称:', '');
+  if (!newTitle || newTitle.trim() === '') return;
+  _origFetch('/v1/sessions/' + sessionId + '/meta', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({title: newTitle.trim()}),
+  }).then(() => { loadSidebarSessions(); }).catch(() => {});
+}
+
+function togglePinSession(sessionId, pin) {
+  _origFetch('/v1/sessions/' + sessionId + '/meta', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({pinned: pin}),
+  }).then(() => { loadSidebarSessions(); }).catch(() => {});
 }
 
 function escHtml(s) {

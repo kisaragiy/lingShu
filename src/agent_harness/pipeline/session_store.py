@@ -64,9 +64,19 @@ def save_session(session_id: str, messages: list[dict], owner_id: str = ""):
     path = _session_path(session_id)
     now = time.time()
 
+    # Load existing session data to preserve title/pinned
+    existing = {}
+    try:
+        with _lock, open(path, "r", encoding="utf-8") as f:
+            existing = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
     # Build session record
     session = {
         "session_id": session_id,
+        "title": existing.get("title", ""),
+        "pinned": existing.get("pinned", False),
         "updated_at": now,
         "created_at": messages[0].get("ts", now) if messages else now,
         "message_count": len(messages),
@@ -145,6 +155,8 @@ def list_sessions(owner_id: str | None = None) -> list[dict]:
                     continue
                 sessions.append({
                     "id": data.get("session_id", fname[:-5]),
+                    "title": data.get("title", ""),
+                    "pinned": data.get("pinned", False),
                     "exchanges": data.get("exchanges", 0),
                     "message_count": data.get("message_count", 0),
                     "created_at": data.get("created_at", 0),
@@ -156,7 +168,7 @@ def list_sessions(owner_id: str | None = None) -> list[dict]:
             except (json.JSONDecodeError, OSError):
                 continue
 
-    sessions.sort(key=lambda s: s.get("updated_at", 0), reverse=True)
+    sessions.sort(key=lambda s: (not s.get("pinned", False), -s.get("updated_at", 0)))
     return sessions
 
 
@@ -215,3 +227,33 @@ def get_session_summary(session_id: str) -> dict | None:
         if s["id"] == session_id:
             return s
     return None
+
+
+def update_session_meta(session_id: str, **kwargs) -> dict | None:
+    """Update session metadata (title, pinned) without rewriting messages.
+
+    Args:
+        session_id: Session ID
+        **kwargs: Fields to update (title, pinned)
+
+    Returns:
+        Updated session metadata, or None if session not found
+    """
+    path = _session_path(session_id)
+    with _lock:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+        for k in ("title", "pinned"):
+            if k in kwargs:
+                data[k] = kwargs[k]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    return {
+        "id": data.get("session_id", session_id),
+        "title": data.get("title", ""),
+        "pinned": data.get("pinned", False),
+        "exchanges": data.get("exchanges", 0),
+    }

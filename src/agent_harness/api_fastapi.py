@@ -922,6 +922,44 @@ async def get_session_messages(session_id: str):
     return {"messages": msgs, "count": len(msgs)}
 
 
+@app.post("/v1/sessions/{session_id}/meta")
+async def update_session_meta_endpoint(session_id: str, request: Request):
+    """Update session metadata (title, pinned)."""
+    try:
+        _safe_path_param(session_id)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    body = await request.json()
+    kwargs = {}
+    if "title" in body:
+        kwargs["title"] = str(body["title"])[:100]
+    if "pinned" in body:
+        kwargs["pinned"] = bool(body["pinned"])
+    if not kwargs:
+        return JSONResponse({"error": "没有可更新的字段"}, status_code=400)
+    from .pipeline.session_store import update_session_meta
+    result = update_session_meta(session_id, **kwargs)
+    if result is None:
+        return JSONResponse({"error": "会话不存在"}, status_code=404)
+    return {"status": "updated", "session": result}
+
+
+@app.get("/v1/sessions/{session_id}/export")
+async def export_single_session(session_id: str):
+    """Export a single session as JSON download."""
+    try:
+        _safe_path_param(session_id)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    msgs = _load_session(session_id) or []
+    data = {"session_id": session_id, "messages": msgs, "exported_at": int(time.time())}
+    return StreamingResponse(
+        iter([json.dumps(data, ensure_ascii=False, indent=2)]),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=session_%s.json" % session_id[:12]},
+    )
+
+
 # ─── Task Cancel API ───
 
 
