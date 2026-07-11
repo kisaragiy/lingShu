@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.50.0 — 2026-07-11
+
+### Added — 前端拆模块
+- 📦 **5 个 JS 模块** — `index.html` 从 2175 行（全部内联 JS）拆为 35 行骨架 + 5 个独立文件：
+  - `static/js/api.js` — API 封装、Auth、fetch 拦截器、UI 工具（182 行）
+  - `static/js/ui.js` — Dark mode、快捷键、Toast、Router、设置面板（222 行）
+  - `static/js/chat.js` — mdToHtml、SSE 流式渲染、消息发送/取消（336 行）
+  - `static/js/sidebar.js` — 侧边栏、会话列表、搜索建议（167 行）
+  - `static/js/tabs.js` — 7 个 Tab 渲染函数（status/knowledge/sessions/skills/settings/MCP/reports）（352 行）
+- 所有全局函数保持兼容，零功能变更
+
+### Added — Docker 部署
+- 🐳 **Dockerfile** — 多阶段构建（build → slim runtime），HEALTHCHECK + curl
+- 🐳 **docker-compose.yml** — LingShu + SearXNG 一键启动，环境变量透传
+- 📋 **`.dockerignore`**
+- ⚠️ 国内网络下 `docker compose build` 需配置 Docker Hub 镜像
+
 ## v0.49.0 — 2026-07-11
 
 ### Added — 产品保护（防白嫖）
