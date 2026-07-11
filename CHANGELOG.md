@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.62.0 — 2026-07-12
+
+### Added
+- 🖼️ **README 截图** — CS Demo/主应用/知识库问答 截图替换 SVG 占位
+- 📋 **Demo 脚本** — `docs/demo-guide.md` 面试 5 分钟演示流程
+- ⚡ **压测工具** — `locustfile.py` + `docs/load-test-report.md`
+- 📊 压测覆盖：health/CS Chat/CS Stream/知识库问答
+
 ## v0.61.0 — 2026-07-11
 
 ### Added
