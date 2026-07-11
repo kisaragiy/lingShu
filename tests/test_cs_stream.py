@@ -18,9 +18,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import requests
 
+import pytest
+
 BASE = "http://127.0.0.1:8788"
 
 
+@pytest.mark.integration
 def test_health():
     """验证服务器运行中。"""
     r = requests.get(f"{BASE}/health", timeout=5)
@@ -28,6 +31,7 @@ def test_health():
     print("✓ 服务器健康检查通过")
 
 
+@pytest.mark.integration
 def test_cs_stream_sse_structure():
     """验证 SSE 事件结构和顺序。"""
     r = requests.post(
@@ -79,6 +83,7 @@ def test_cs_stream_sse_structure():
     print("✓ SSE 流结构验证通过")
 
 
+@pytest.mark.integration
 def test_cs_stream_multiple_questions():
     """验证多轮对话的上下文保持。"""
     s = requests.Session()
@@ -113,6 +118,7 @@ def test_cs_stream_multiple_questions():
     print("✓ 多轮对话测试通过")
 
 
+@pytest.mark.integration
 def test_intent_presales():
     """验证售前咨询意图识别与商品推荐。"""
     r = requests.post(
@@ -132,6 +138,7 @@ def test_intent_presales():
     print(f"✓ 售前咨询意图正确, 工具: {[e['name'] for e in tools]}")
 
 
+@pytest.mark.integration
 def test_intent_coupon():
     """验证优惠查询意图识别。"""
     r = requests.post(
@@ -150,6 +157,7 @@ def test_intent_coupon():
     print(f"✓ 优惠查询意图正确, 工具: {[e['name'] for e in tools]}")
 
 
+@pytest.mark.integration
 def test_intent_address():
     """验证地址修改意图识别。"""
     r = requests.post(

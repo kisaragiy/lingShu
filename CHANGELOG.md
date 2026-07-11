@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.47.0 — 2026-07-11
+
+### Added — 测试体系
+- 🧪 **测试文件**（56 个单元测试 + 6 个集成测试 = 62 个）：
+  - `tests/test_search_chain.py` — 搜索链单元测试（mock HTTP，5 场景：3 DDG 策略 + 全失败 + SearXNG 优先）
+  - `tests/test_llm_cache.py` — LLM 缓存测试（key 一致性、TTL、淘汰、高 temp 跳过、HTTP 错误）
+  - `tests/test_api.py` — API 认证测试（JWT 创建/验证/过期/篡改/刷新）
+  - `tests/test_cs_intents.py` — CS 意图分类测试（9 种意图 × 多变体 + 边缘情况）
+  - `tests/test_report_citations.py` — 报告引用测试（[url]→[N]、去重、来源提取、URL 验证）
+- ⚙️ **pytest.ini** — 超时 30s、`integration` 和 `slow` 标记、CI 排除集成测试
+- 🔄 **CI workflow** 更新 — `-m "not integration"` 排除需服务器的测试
+
 ## v0.46.0 — 2026-07-11
 
 ### Added — 主应用体验打磨
