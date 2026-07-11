@@ -1,3 +1,3 @@
 """Agent Harness — LangGraph multi-agent orchestration framework."""
 
-__version__ = "0.44.0"
+__version__ = "0.45.0"

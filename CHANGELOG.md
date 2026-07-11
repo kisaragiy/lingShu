@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.45.0 — 2026-07-11
+
+### Added
+- 📖 **README 重写** — 面试官友好架构图、CS Demo 场景表、快速开始/Tech Stack/项目结构
+- 🏷️ **GitHub 仓库产品化** — Topics（8 个）、CI workflow（`.github/workflows/ci.yml`）
+- 🎧 **CS Demo 独立 exe** — PyInstaller 打包，19MB（原 881MB 的 1/46），双击运行
+  - 精简 `cs_demo/server.py` — 仅 CS 路由，无 torch/transformers 依赖
+  - 自动找可用端口、自动开浏览器、SSE 流式 + 模板回复
+- 📦 **构建脚本** — `scripts/cs_demo.spec` + `scripts/build_cs_demo_exe.py` + `scripts/cs_demo_launcher.py`
+
+### Changed
+- README.md 完全重写（约 10KB），含 3 张截图占位 + ASCII 架构图
+- 项目结构加入 `scripts/cs_demo/` 子包（server + 启动器）
+
 ## v0.44.0 — 2026-07-11
 
 ### Added

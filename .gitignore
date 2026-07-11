@@ -18,3 +18,4 @@ eval_report.json
 comic_output/
 *.json
 uv.lock
+*.spec
