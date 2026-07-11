@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://your-org.github.io/agent-harness/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+    <url>
+         <loc>https://your-org.github.io/agent-harness/api/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+    <url>
+         <loc>https://your-org.github.io/agent-harness/architecture/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+    <url>
+         <loc>https://your-org.github.io/agent-harness/configuration/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+    <url>
+         <loc>https://your-org.github.io/agent-harness/cs-demo/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+    <url>
+         <loc>https://your-org.github.io/agent-harness/quickstart/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+</urlset>

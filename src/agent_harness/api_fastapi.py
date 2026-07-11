@@ -31,6 +31,7 @@ from pathlib import Path
 
 # STARTUP GUARD: require config before any module-level code runs
 from .config import require_config
+
 require_config()
 
 from fastapi import FastAPI, Request
@@ -212,7 +213,7 @@ def _execute_multi(prompt: str, history_context: str, session_id: str = "") -> d
                 if _progress_queue:
                     _progress_queue.put({
                         "type": "progress",
-                        "content": "📚 从知识库中找到 %d 条相关信息\n" % len(kb_results)
+                        "content": f"📚 从知识库中找到 {len(kb_results)} 条相关信息\\n"
                     })
     except Exception:
         pass
@@ -285,11 +286,10 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
             errors = result.get("errors", [])
 
             if workers:
-                status_line = "✅ %d 个 Worker 完成 (%d 轮): %s\n" % (
-                    len(workers), rounds, ", ".join(workers))
+                status_line = f"✅ {len(workers)} 个 Worker 完成 ({rounds} 轮): {', '.join(workers)}\\n"
                 q.put({"type": "status", "content": status_line})
             if errors:
-                q.put({"type": "status", "content": "⚠️ %d 个错误\n" % len(errors)})
+                q.put({"type": "status", "content": f"⚠️ {len(errors)} 个错误\\n"})
 
             final = result.get("final_output", "")
             if final:
@@ -371,9 +371,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://127.0.0.1:%d" % PORT,
-        "http://localhost:%d" % PORT,
-        "http://%s:%d" % (HOST, PORT),
+        f"http://127.0.0.1:{PORT}",
+        f"http://localhost:{PORT}",
+        f"http://{HOST}:{PORT}",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -402,7 +402,7 @@ async def _api_auth_middleware(request: Request, call_next):
     client_ip = request.client.host if request.client else "127.0.0.1"
     if not _check_rate_limit(client_ip):
         return JSONResponse(
-            {"error": "请求过于频繁，请稍后重试。当前限制: %d 请求/分钟" % _RATE_LIMIT_MAX},
+            {"error": f"请求过于频繁，请稍后重试。当前限制: {_RATE_LIMIT_MAX} 请求/分钟"},
             status_code=429,
             headers={"Retry-After": str(_RATE_LIMIT_WINDOW)},
         )
@@ -609,9 +609,7 @@ async def chat_completions(req: ChatRequest, request: Request):
     history_context = _build_history_context(history_messages)
 
     print(
-        "[Harness] [%s] model=%s stream=%s msg=%s... history=%d" % (
-            session_id[:8], req.model, req.stream,
-            last_user_msg[:60], len(history_messages))
+        f"[Harness] [{session_id[:8]}] model={req.model} stream={req.stream} msg={last_user_msg[:60]}... history={len(history_messages)}"
     )
 
     # ── Streaming ──
@@ -636,7 +634,7 @@ async def chat_completions(req: ChatRequest, request: Request):
             acquired = _agent_semaphore.acquire(timeout=300)  # 5min max wait
             if not acquired:
                 return JSONResponse(
-                    {"error": "服务器繁忙，当前有 %d 个任务在执行中，请稍后重试" % _MAX_CONCURRENT_AGENTS},
+                    {"error": f"服务器繁忙，当前有 {_MAX_CONCURRENT_AGENTS} 个任务在执行中，请稍后重试"},
                     status_code=503,
                 )
 
@@ -670,8 +668,7 @@ async def chat_completions(req: ChatRequest, request: Request):
         _save_session(session_id, session, owner_id=owner_id)
 
         print(
-            "[Harness] [%s] ✅ (%d chars, %d 轮, workers: %s)" % (
-                session_id[:8], len(response_text), rounds, workers)
+            f"[Harness] [{session_id[:8]}] ✅ ({len(response_text)} chars, {rounds} 轮, workers: {workers})"
         )
 
     except Exception as e:
@@ -700,7 +697,7 @@ async def chat_completions(req: ChatRequest, request: Request):
         clear_cancel_event()
 
     return {
-        "id": "chatcmpl-%d" % int(time.time()),
+        "id": f"chatcmpl-{int(time.time())}",
         "object": "chat.completion",
         "created": int(time.time()),
         "model": req.model,
@@ -1698,7 +1695,7 @@ async def export_backup():
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="application/zip",
-        headers={"Content-Disposition": "attachment; filename=lingShu_backup_%d.zip" % int(time.time())},
+        headers={"Content-Disposition": f"attachment; filename=lingShu_backup_{int(time.time())}.zip"},
     )
 
 
@@ -1964,14 +1961,14 @@ def main():
     print("")
     print("  ⚡ 灵枢 — LingShu Agent")
     print("  " + ("-" * 40))
-    print("  API:       http://%s:%d/v1" % (HOST, PORT))
-    print("  Frontend:  http://%s:%d" % (HOST, PORT))
+    print(f"  API:       http://{HOST}:{PORT}/v1")
+    print(f"  Frontend:  http://{HOST}:{PORT}")
     if admin_needed:
         print("  ⚠️  首次启动 — 需创建管理员账号")
     else:
-        print("  用户:     %d 人" % user_count)
+        print(f"  用户:     {user_count} 人")
     if _MAX_CONCURRENT_AGENTS > 0:
-        print("  并发:     %d 个 Agent 同时执行" % _MAX_CONCURRENT_AGENTS)
+        print(f"  并发:     {_MAX_CONCURRENT_AGENTS} 个 Agent 同时执行")
     print(f"  Token:     {_API_TOKEN[:8]}...{_API_TOKEN[-4:]}")
     print("  " + ("-" * 40))
     print("")
@@ -1987,7 +1984,7 @@ def main():
     except ImportError:
         pass
     if count:
-        print("  会话: %d 个" % count)
+        print(f"  会话: {count} 个")
     print("")
 
     # Start background scheduler

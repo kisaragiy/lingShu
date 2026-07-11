@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.51.0 — 2026-07-11
+
+### Added — 文档站
+- 📚 **mkdocs-material 文档站** — 6 页专业文档（首页/快速开始/架构/API参考/CS Demo/配置）
+- 🚀 **GitHub Pages 自动部署** — `.github/workflows/docs.yml`
+- 面试官直接访问 `https://kisaragiy.github.io/lingShu` 查看
+
+### Added — 代码质量收尾
+- 🧹 **Ruff 修复** — UP031 从 38→27 个（手动修复 11 个复杂 `%`→f-string 转换）
+- 📖 **AGENTS.md 更新** — 从 v0.28.0 → v0.50.0，新增 12 行功能记录
+
 ## v0.50.0 — 2026-07-11
 
 ### Added — 前端拆模块
