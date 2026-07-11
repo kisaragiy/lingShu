@@ -31,8 +31,10 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = WebViewClient()
 
         // Load the CS Demo
-        // Change this URL to your server address
-        webView.loadUrl("http://10.0.2.2:8788/cs-demo")
+        // 默认连接同一局域网的服务器，如需修改请改此行
+        // 模拟器使用 10.0.2.2 访问宿主机，真机请填电脑局域网 IP
+        val serverUrl = "http://192.168.31.182:8788/cs-demo"
+        webView.loadUrl(serverUrl)
     }
 
     override fun onBackPressed() {
