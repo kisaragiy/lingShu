@@ -1,20 +1,24 @@
 """Configuration — LLM endpoints, thresholds, paths.
 
 Security: DO NOT hardcode credentials here. All secrets must come from
-environment variables. The CLOUD_API_KEY default "sk-local" is a placeholder
-that triggers a startup warning — real deployments must set HARNESS_CLOUD_KEY.
-"""
+environment variables or .env file. See .env.example for required vars.
 
+IMPORTANT: The startup script WILL EXIT with an error if critical config
+is missing. This is intentional — it prevents casual copiers from running
+the app without understanding what they're doing.
+"""
 import os
 import sys
 from pathlib import Path
 
 # ─── LLM API endpoints ───
-LLAMA_API = os.environ.get("HARNESS_LLAMA_API", "http://127.0.0.1:8081/v1/chat/completions")
-OLLAMA_API = os.environ.get("HARNESS_OLLAMA_API", "http://172.18.9.126:11434/api/generate")
-DEEPSEEK_API = os.environ.get("HARNESS_DEEPSEEK_API", "http://127.0.0.1:9000/v1/chat/completions")
-CLOUD_API_DIRECT = os.environ.get("HARNESS_CLOUD_API", "http://127.0.0.1:9099/v1/chat/completions")
-CLOUD_API_KEY = os.environ.get("HARNESS_CLOUD_KEY", "sk-local")  # placeholder, see check_config()
+# Must be configured via env vars or .env. No magic defaults — if unset,
+# the startup guard will print instructions and exit.
+LLAMA_API = os.environ.get("HARNESS_LLAMA_API", "")
+OLLAMA_API = os.environ.get("HARNESS_OLLAMA_API", "")
+DEEPSEEK_API = os.environ.get("HARNESS_DEEPSEEK_API", "")
+CLOUD_API_DIRECT = os.environ.get("HARNESS_CLOUD_API", "")
+CLOUD_API_KEY = os.environ.get("HARNESS_CLOUD_KEY", "")
 
 # ─── Model names ───
 MODEL_LLAMA = os.environ.get("HARNESS_MODEL_LLAMA", "deepseek-v4")
@@ -36,40 +40,60 @@ MAX_NO_PROGRESS = int(os.environ.get("HARNESS_MAX_NO_PROGRESS", "5"))
 MAX_WORKER_CONCURRENCY = int(os.environ.get("HARNESS_MAX_WORKERS", "3"))
 SUPERVISOR_MAX_ROUNDS = int(os.environ.get("HARNESS_SUPERVISOR_ROUNDS", "3"))
 
+# ─── Auth bypass (opt-in, not default) ───
+# Set HARNESS_DISABLE_AUTH=1 to allow unauthenticated local-only API access.
+# By default, all /v1/* endpoints require JWT or X-API-Key.
+DISABLE_AUTH = os.environ.get("HARNESS_DISABLE_AUTH", "").lower() in ("1", "true", "yes")
 
-# ─── Config validation — called once at startup ───
 
-_CONFIG_WARNINGS: list[str] = []
+# ═══════════════════════════════════════════
+# STARTUP GUARD — fatal if config incomplete
+# ═══════════════════════════════════════════
 
+def require_config() -> None:
+    """Check critical config at startup. Exits with error + instructions if missing.
 
-def check_config() -> list[str]:
-    """Check config for security issues. Returns warning list (not fatal)."""
-    global _CONFIG_WARNINGS
-    warnings = []
+    This is the first line of defense against casual copiers: without reading
+    the docs and setting up at least one LLM backend, the app won't start.
+    """
+    errors: list[str] = []
 
-    # Check cloud API key placeholder
-    raw_key = os.environ.get("HARNESS_CLOUD_KEY", "")
-    if not raw_key or raw_key == "sk-local":
-        warnings.append(
-            "HARNESS_CLOUD_KEY 使用默认占位符 'sk-local'。DeepSeek API 调用将失败。"
-            "设置: export HARNESS_CLOUD_KEY=sk-xxx"
+    # At least one LLM backend must be configured
+    backends = [
+        ("HARNESS_LLAMA_API (本地 llama.cpp)", LLAMA_API),
+        ("HARNESS_DEEPSEEK_API (云端)", DEEPSEEK_API),
+        ("HARNESS_CLOUD_API (API 聚合)", CLOUD_API_DIRECT),
+    ]
+    configured = [name for name, val in backends if val]
+    if not configured:
+        errors.append(
+            "未配置任何 LLM 后端！\n"
+            "请至少设置一个后端地址：\n"
+            "  export HARNESS_LLAMA_API=http://127.0.0.1:8081/v1/chat/completions\n"
+            "  export HARNESS_DEEPSEEK_API=https://api.deepseek.com/v1/chat/completions\n"
+            "或复制 .env.example 为 .env 并编辑：\n"
+            "  cp .env.example .env\n"
         )
 
-    # Check if API is exposed to network
-    api_host = os.environ.get("HARNESS_API_HOST", "127.0.0.1")
-    if api_host == "0.0.0.0":
-        warnings.append(
-            "HARNESS_API_HOST=0.0.0.0 — API 暴露到局域网。"
-            "建议配合 API token 使用或设为 127.0.0.1"
+    # Cloud API key: warn if using DeepSeek/cloud without a key
+    if DEEPSEEK_API and not CLOUD_API_KEY:
+        errors.append(
+            "设置了 HARNESS_DEEPSEEK_API 但未设置 HARNESS_CLOUD_KEY。\n"
+            "   export HARNESS_CLOUD_KEY=sk-xxx\n"
         )
 
-    _CONFIG_WARNINGS = warnings
-    return warnings
+    if not errors:
+        return
 
-
-def print_config_warnings():
-    """Print config warnings to stderr at startup."""
-    if not _CONFIG_WARNINGS:
-        check_config()
-    for w in _CONFIG_WARNINGS:
-        print(f"[config] ⚠️  {w}", file=sys.stderr)
+    # ─── Fatal: print error + setup guide ───
+    border = "=" * 60
+    print(f"\n{border}", file=sys.stderr)
+    print("  ❌ 灵枢 (LingShu Agent) — 配置不完整", file=sys.stderr)
+    print(f"  {border}", file=sys.stderr)
+    for e in errors:
+        for line in e.strip().split("\n"):
+            print(f"  {line}", file=sys.stderr)
+    print(f"  {border}", file=sys.stderr)
+    print("  配置完成后重新启动。", file=sys.stderr)
+    print(f"  {border}\n", file=sys.stderr)
+    sys.exit(1)

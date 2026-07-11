@@ -29,6 +29,10 @@ import time
 import uuid
 from pathlib import Path
 
+# STARTUP GUARD: require config before any module-level code runs
+from .config import require_config
+require_config()
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -55,7 +59,31 @@ PORT = int(os.environ.get("HARNESS_API_PORT", "8788"))
 # ─── API Key (CLI / Open WebUI fallback) ───
 _API_TOKEN: str = load_or_generate_token()
 
-# ─── Auth exempt paths (no authentication required) ───
+# ─── Rate limiter (default: 100 req/min per IP, opt-out via HARNESS_DISABLE_RATE_LIMIT=1) ───
+_RATE_LIMIT_WINDOW = 60  # seconds
+_RATE_LIMIT_MAX = int(os.environ.get("HARNESS_RATE_LIMIT", "100"))
+_RATE_LIMIT_ENABLED = os.environ.get("HARNESS_DISABLE_RATE_LIMIT", "").lower() not in ("1", "true", "yes")
+_rate_limit_store: dict[str, list[float]] = {}  # ip → [timestamps]
+
+def _check_rate_limit(ip: str) -> bool:
+    """Check if request is within rate limit. Returns True if allowed."""
+    if not _RATE_LIMIT_ENABLED:
+        return True
+    now = time.time()
+    window_start = now - _RATE_LIMIT_WINDOW
+    timestamps = _rate_limit_store.get(ip, [])
+    timestamps = [t for t in timestamps if t > window_start]
+    if len(timestamps) >= _RATE_LIMIT_MAX:
+        return False
+    timestamps.append(now)
+    _rate_limit_store[ip] = timestamps[-_RATE_LIMIT_MAX:]
+    # Housekeeping: trim old entries
+    if len(_rate_limit_store) > 10000:
+        for k in list(_rate_limit_store.keys()):
+            _rate_limit_store[k] = [t for t in _rate_limit_store[k] if t > window_start]
+            if not _rate_limit_store[k]:
+                del _rate_limit_store[k]
+    return True
 _AUTH_EXEMPT_PREFIXES = ("/health",)
 _AUTH_EXEMPT_EXACT = ("/", "/setup", "/dashboard")
 _AUTH_EXEMPT_V1 = ("/v1/auth/login", "/v1/auth/refresh", "/v1/auth/setup-admin", "/v1/setup/config")
@@ -365,6 +393,20 @@ async def _api_auth_middleware(request: Request, call_next):
 
     Sets request.state.user with user dict if authenticated via JWT.
     """
+    # Allow auth bypass via env var (opt-in, not default)
+    from .config import DISABLE_AUTH
+    if DISABLE_AUTH:
+        return await call_next(request)
+
+    # Rate limit check
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    if not _check_rate_limit(client_ip):
+        return JSONResponse(
+            {"error": "请求过于频繁，请稍后重试。当前限制: %d 请求/分钟" % _RATE_LIMIT_MAX},
+            status_code=429,
+            headers={"Retry-After": str(_RATE_LIMIT_WINDOW)},
+        )
+
     path = request.url.path
 
     # Exempt non-API paths
@@ -1933,6 +1975,10 @@ def main():
     print(f"  Token:     {_API_TOKEN[:8]}...{_API_TOKEN[-4:]}")
     print("  " + ("-" * 40))
     print("")
+
+    # Guard: require at least one LLM backend configured
+    from .config import require_config
+    require_config()
 
     # Print config warnings
     try:

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.49.0 — 2026-07-11
+
+### Added — 产品保护（防白嫖）
+- 🔒 **启动守卫** — `config.require_config()` 启动时检查 LLM 后端配置，缺失则红色错误退出
+- 🔑 **API 认证默认开启** — `/v1/*` 全部要求 JWT 或 X-API-Key，`HARNESS_DISABLE_AUTH=1` 绕过
+- 🚦 **速率限制** — 默认 100 请求/分钟/IP，429 响应含 `Retry-After` 头，`HARNESS_DISABLE_RATE_LIMIT=1` 绕过
+- 📋 **`.env.example`** — 配置模板文件
+- 🧹 **移除魔法默认值** — `CLOUD_API_KEY` 不再默认 `sk-local`、`DEEPSEEK_API` 不再默认 `127.0.0.1:9000`
+
 ## v0.48.0 — 2026-07-11
 
 ### Added — 代码质量
