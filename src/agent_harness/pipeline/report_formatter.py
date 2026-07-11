@@ -69,7 +69,7 @@ def _format_citations(text: str) -> tuple[str, dict[int, str]]:
             num = counter[0]
             seen_urls[url] = num
             url_order.append(url)
-        return "[%d]" % num
+        return f"[{num}]"
 
     # Match [http...] or [https...] forms
     result = re.sub(r'\[(https?://[^\]]+)\]', _replace, text)
@@ -130,7 +130,7 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
         url = source_map[num]
         # Try to derive a title from the URL
         title = url.rsplit("/", 1)[-1][:50] if "/" in url else url
-        ref_lines.append("[来源 %d] %s - %s" % (num, title, url))
+        ref_lines.append(f"[来源 {num}] {title} - {url}")
     if ref_lines:
         formatted_content += "\n\n## 参考来源\n\n" + "\n".join(ref_lines)
 
@@ -193,7 +193,7 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
             source_type = s.get("type", "web")
             type_icon = {"news": "📰", "paper": "📄", "official": "🏛️", "web": "🌐"}.get(source_type, "🌐")
             access_date = s.get("access_date", _now_str)
-            items += '<li id="source-%d" class="source-item">' % i
+            items += f'<li id="source-{i}" class="source-item">'
             items += f'<span class="source-type">{type_icon}</span> '
             items += f'<a href="{url}" target="_blank" rel="noopener">{title_text}</a>'
             items += f'<span class="source-meta"> · {source_type} · {access_date}</span>'
@@ -327,7 +327,7 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
 <div class="footer">由灵枢 (LingShu Agent) 自动生成 · 数据基于公开搜索结果 · 仅供参考</div>
 <script>document.addEventListener('keydown',function(e){{if(e.key==='p'&&(e.ctrlKey||e.metaKey))window.print()}});</script>
 </body>
-</html>""".format(title, title, now, "%d" % word_count, "%d" % read_time,
+</html>""".format(title, title, now, f"{word_count}", f"{read_time}",
             toc_html, body_html, sources_html, "<div class='tags'>{}</div>".format(" ".join(f'<span class="tag">{t}</span>' for t in tags)) if tags else "")
 
     return html
@@ -337,7 +337,7 @@ def save_formal_report(title: str, html: str, tags: list[str] = None, source_ses
     """Save a formal report as HTML file and return metadata."""
     _ensure()
     timestamp = int(time.time())
-    report_id = "formal_%d_%s" % (timestamp, _slugify(title)[:20])
+    report_id = f"formal_{timestamp}_{_slugify(title)[:20]}"
     filename = f"{report_id}.html"
     filepath = REPORTS_DIR / filename
 

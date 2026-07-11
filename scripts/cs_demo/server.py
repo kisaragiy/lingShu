@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-app = FastAPI(title="灵枢智能客服 Demo", version="0.46.0")
+app = FastAPI(title="灵枢智能客服 Demo", version="0.52.0")
 
 app.add_middleware(
     CORSMiddleware,

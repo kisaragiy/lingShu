@@ -58,7 +58,7 @@ def save_report(title: str, content: str, tags: list[str] = None,
     """
     _ensure()
     timestamp = int(time.time())
-    report_id = "rpt_%d_%s" % (timestamp, _slugify(title)[:20])
+    report_id = f"rpt_{timestamp}_{_slugify(title)[:20]}"
     filename = f"{report_id}.md"
     filepath = REPORTS_DIR / filename
 
@@ -67,7 +67,7 @@ def save_report(title: str, content: str, tags: list[str] = None,
     with _lock, open(filepath, "w", encoding="utf-8") as f:
         f.write("---\n")
         f.write(f"title: {title}\n")
-        f.write("created: %d\n" % timestamp)
+        f.write(f"created: {timestamp}\n")
         f.write(f"tags: {json.dumps(tags or [], ensure_ascii=False)}\n")
         f.write(f"owner_id: {owner_id}\n")
         f.write("---\n\n")

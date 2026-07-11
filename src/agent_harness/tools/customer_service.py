@@ -261,9 +261,9 @@ def cs_lookup_order(query: str) -> str:
             "━━━━━━━━━━━━━━━━━",
             "**订单号**: {}".format(order["order_id"]),
             "**商品**: {}".format(order["product"]),
-            "**金额**: ¥%d" % order["price"],
+            f"**金额**: ¥{order['price']}",
             "**状态**: {}".format(order["status"]),
-            "**物流**: %s" % (order["logistics"] or "待发货"),
+            f"**物流**: {order['logistics'] or '待发货'}",
             "**预计送达**: {}".format(order["estimated_delivery"]),
         ]
         if order.get("notes"):
@@ -272,16 +272,16 @@ def cs_lookup_order(query: str) -> str:
 
     orders = _find_orders_by_phone(query)
     if orders:
-        result = "📋 **找到 %d 个订单**:\n\n" % len(orders)
+        result = f"📋 **找到 {len(orders)} 个订单**:\n\n"
         for o in orders:
-            result += "• `%s` — %s — **%s** — ¥%d\n" % (o["order_id"], o["product"], o["status"], o["price"])
+            result += f"• `{o['order_id']}` — {o['product']} — **{o['status']}** — ¥{o['price']}\n"
         return result
 
     orders = _find_orders_by_name(query)
     if orders:
-        result = "📋 **找到 %d 个订单**:\n\n" % len(orders)
+        result = f"📋 **找到 {len(orders)} 个订单**:\n\n"
         for o in orders:
-            result += "• `%s` — %s — **%s** — ¥%d\n" % (o["order_id"], o["product"], o["status"], o["price"])
+            result += f"• `{o['order_id']}` — {o['product']} — **{o['status']}** — ¥{o['price']}\n"
         return result
 
     return "❌ 未找到匹配的订单。请提供订单号、手机号或姓名。"
@@ -302,7 +302,7 @@ def cs_query_product(query: str) -> str:
             lines = [
                 "🛒 **{}**".format(p["name"]),
                 "━━━━━━━━━━━━━━━━━",
-                "**价格**: ¥%d" % p["price"],
+                f"**价格**: ¥{p['price']}",
                 f"**库存**: {stock_icon}",
                 "**分类**: {}".format(p["category"]),
                 "**简介**: {}".format(p["desc"]),
@@ -323,10 +323,10 @@ def cs_query_product(query: str) -> str:
                 results.append(p)
 
     if results:
-        result = "🔍 **找到 %d 件相关商品**:\n\n" % len(results)
+        result = f"🔍 **找到 {len(results)} 件相关商品**:\n\n"
         for p in results:
             stock = "✅" if p["stock"] else "❌"
-            result += "• `%s` — ¥%d %s\n   %s\n" % (p["name"], p["price"], stock, p["desc"][:60] + "...")
+            result += f"• `{p['name']}` — ¥{p['price']} {stock}\n   {p['desc'][:60]}...\n"
         return result
 
     return f"❌ 未找到相关商品 `{query}`。试试其他关键词。"
@@ -461,7 +461,7 @@ def cs_search_faq(query: str, top_k: int = 3) -> str:
 
 def cs_create_ticket(order_id: str, issue_type: str, description: str) -> str:
     """Create a customer service ticket."""
-    ticket_id = "TK%s%03d" % (time.strftime("%Y%m%d"), random.randint(1, 999))
+    ticket_id = f"TK{time.strftime('%Y%m%d')}{random.randint(1, 999):03d}"
     ticket = {
         "ticket_id": ticket_id,
         "order_id": order_id,

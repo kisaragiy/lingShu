@@ -1994,7 +1994,7 @@ def main():
         sched = get_scheduler()
         sched.start()
         _scheduler_count = len(sched.list_tasks() if hasattr(sched, 'list_tasks') else [])
-        print("  定时任务: %d 个" % _scheduler_count)
+        print(f"  定时任务: {_scheduler_count} 个")
     except Exception:
         pass
 
@@ -2004,10 +2004,7 @@ def main():
         from .plugin_loader import load_plugins
         plugins = load_plugins()
         _plugin_count = len(plugins)
-        print("  插件:     %d 个（%d 成功）" % (
-            _plugin_count,
-            sum(1 for p in plugins if p.get("success"))),
-        )
+        print(f"  插件:     {_plugin_count} 个（{sum(1 for p in plugins if p.get('success'))} 成功）")
     except Exception:
         pass
 

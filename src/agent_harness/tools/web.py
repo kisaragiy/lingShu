@@ -78,8 +78,7 @@ def _log_search_diag(
     # Also print to stderr for server-side debugging
     strategy_tag = f" [{strategy}]" if strategy else ""
     print(
-        "[Search] %s%s → %s (%d 结果) %s"
-        % (engine, strategy_tag, status, count, detail[:60]),
+        f"[Search] {engine}{strategy_tag} → {status} ({count} 结果) {detail[:60]}",
         file=__import__("sys").stderr,
     )
 
@@ -279,7 +278,7 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                 results = parsed[:max_results]
                 # Build detailed diagnostic with per-strategy counts
                 strat_detail = "; ".join(
-                    "%s=%d" % (k, v) for k, v in strategy_counts.items() if v > 0
+                    f"{k}={v}" for k, v in strategy_counts.items() if v > 0
                 )
                 _log_search_diag(
                     query, "DuckDuckGo", "ok", len(results),
