@@ -291,6 +291,19 @@ a:hover { text-decoration: underline; }
 .rating-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .rating-btn.active { color: var(--yellow); }
 
+/* TTS button */
+.tts-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 12px; padding: 2px 6px; border-radius: 4px;
+  color: var(--text-muted); transition: all .15s;
+}
+.tts-btn:hover { background: var(--bg-hover); color: var(--accent); }
+.tts-btn.speaking { color: var(--accent); animation: ttsPulse 1s ease-in-out infinite; }
+@keyframes ttsPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 /* ─── Thinking steps ─── */
 .thinking-steps { padding: 4px 0; }
 .thinking-step {
@@ -586,7 +599,7 @@ a:hover { text-decoration: underline; }
 // CS Demo — Standalone Product Page v0.55
 // ═══════════════════════════════════════════
 
-// ─── PWA: Register service worker ───
+// ─── PWA: Register service worker (PWA 注册) ───
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/static/sw.js');
 }
@@ -762,8 +775,9 @@ function addBubble(role, content, isThinking) {
 
   const now = new Date();
   const time = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+  const t = LANG[_lang] || LANG.zh;
   const icon = role === 'user' ? '🧑' : '🤖';
-  const label = role === 'user' ? '我' : '智能客服';
+  const label = role === 'user' ? t.userLabel : t.agentLabel;
 
   let bodyHtml = isThinking ? content : mdToHtml(content);
 
@@ -794,7 +808,8 @@ function rateMsg(btn, idx, val) {
   const ratings = JSON.parse(localStorage.getItem('lingShu_cs_ratings') || '{}');
   ratings[_csSessionId + '_' + idx] = val;
   localStorage.setItem('lingShu_cs_ratings', JSON.stringify(ratings));
-  toast(val > 0 ? '感谢反馈 👍' : '感谢反馈，我们会改进', 'ok');
+  const t = LANG[_lang] || LANG.zh;
+  toast(val > 0 ? t.ratingOk : t.ratingBad, 'ok');
 }
 
 // ─── Copy Message ───
@@ -802,8 +817,66 @@ function copyMsg(btn) {
   const body = btn.closest('.chat-bubble').querySelector('.chat-msg-body');
   const text = body ? body.textContent || body.innerText : '';
   if (!text) return;
-  navigator.clipboard.writeText(text).then(() => toast('已复制', 'ok'))
-    .catch(() => { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('已复制', 'ok'); });
+  const t = LANG[_lang] || LANG.zh;
+  navigator.clipboard.writeText(text).then(() => toast(t.copied, 'ok'))
+    .catch(() => { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast(t.copied, 'ok'); });
+}
+
+// ─── Text-to-Speech ───
+let _currentTts = null; // Current utterance for cancellation
+
+function speakReply(btn, idx) {
+  if (!window.speechSynthesis) {
+    toast('朗读不可用：浏览器不支持', 'err');
+    return;
+  }
+
+  // If already speaking this message, toggle off
+  if (btn.classList.contains('speaking')) {
+    window.speechSynthesis.cancel();
+    btn.classList.remove('speaking');
+    _currentTts = null;
+    return;
+  }
+
+  // Cancel any previous speech
+  window.speechSynthesis.cancel();
+  document.querySelectorAll('.tts-btn.speaking').forEach(b => b.classList.remove('speaking'));
+
+  // Get the message text
+  const bubble = btn.closest('.chat-bubble');
+  const body = bubble.querySelector('.chat-msg-body');
+  const text = body ? body.textContent || body.innerText : '';
+  if (!text) return;
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'zh-CN';
+  utterance.rate = 1.0;
+  utterance.pitch = 1.0;
+  utterance.volume = 1.0;
+
+  utterance.onstart = () => {
+    btn.classList.add('speaking');
+    _currentTts = utterance;
+  };
+  utterance.onend = () => {
+    btn.classList.remove('speaking');
+    _currentTts = null;
+  };
+  utterance.onerror = (e) => {
+    btn.classList.remove('speaking');
+    _currentTts = null;
+    if (e.error !== 'canceled') {
+      toast('朗读出错: ' + e.error, 'err');
+    }
+  };
+
+  // Select a Chinese voice if available
+  const voices = window.speechSynthesis.getVoices();
+  const zhVoice = voices.find(v => v.lang.startsWith('zh'));
+  if (zhVoice) utterance.voice = zhVoice;
+
+  window.speechSynthesis.speak(utterance);
 }
 
 // ─── Quick Replies ───
@@ -888,14 +961,16 @@ function renderHistory() {
   const list = document.getElementById('cs-history-list');
   if (!list) return;
   if (_csHistory.length === 0) {
-    list.innerHTML = '<div style="padding:20px;text-align:center;font-size:12px;color:var(--text-muted)">暂无对话记录</div>';
+  const t = LANG[_lang] || LANG.zh;
+  list.innerHTML = '<div style="padding:20px;text-align:center;font-size:12px;color:var(--text-muted)">' + t.noHistory + '</div>';
     return;
   }
   list.innerHTML = _csHistory.map(h => {
     const active = h.id === _csSessionId ? ' active' : '';
     const time = h.updated ? new Date(h.updated).toLocaleString('zh-CN', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
+    const t2 = LANG[_lang] || LANG.zh;
     return '<div class="history-item' + active + '" onclick="switchConversation(\'' + h.id + '\')">' +
-      '<div class="history-item-title">' + escHtml(h.title || '新对话') + '</div>' +
+      '<div class="history-item-title">' + escHtml(h.title || t2.newConv) + '</div>' +
       '<div class="history-item-meta">' +
         '<span>' + time + ' · ' + (h.count || 0) + ' 条</span>' +
         '<div class="history-item-actions"><button onclick="deleteConversation(\'' + h.id + '\', event)" title="删除">🗑️</button></div>' +
@@ -938,18 +1013,12 @@ function renderMessages() {
 function showWelcome() {
   const container = document.getElementById('cs-messages');
   if (container.children.length > 0) return;
-  addBubble('assistant',
-    '你好！欢迎使用灵枢智能客服 🎉\n\n' +
-    '我可以帮你：\n' +
-    '📦 **查订单** — 输入订单号或手机号\n' +
-    '🚚 **查物流** — 查看配送进度\n' +
-    '🛒 **商品咨询** — 推荐、对比、参数\n' +
-    '💰 **查优惠** — 优惠券与促销活动\n' +
-    '📍 **改地址** — 修改收货地址\n' +
-    '🔄 **退换货** — 申请退换货\n' +
-    '❓ **FAQ** — 售后政策解答\n' +
-    '👤 **转人工** — 联系真人客服');
-  setQuickReplies(['📦 查订单', '🛒 推荐商品', '💰 有什么优惠', '👤 转人工']);
+  const t = LANG[_lang] || LANG.zh;
+  addBubble('assistant', t.welcome);
+  const qr = _lang === 'en'
+    ? ['📦 Track Order', '🛒 Recommend', '💰 Best Deals', '👤 Agent']
+    : ['📦 查订单', '🛒 推荐商品', '💰 有什么优惠', '👤 转人工'];
+  setQuickReplies(qr);
 }
 
 // ─── Voice Input ───
@@ -1071,7 +1140,7 @@ async function csSend(msg) {
               await new Promise(r => setTimeout(r, 300));
               bodyEl.innerHTML =
                 '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;padding:4px 8px;background:var(--bg-secondary);border-radius:6px;display:inline-block">' +
-                '🤖 思考完成 · 正在输入…' +
+                (LANG[_lang] || LANG.zh).thinkingDone +
                 '</div>' +
                 '<div id="streaming-reply" class="streaming-reply streaming-cursor"></div>';
               scrollToBottom();
@@ -1095,7 +1164,8 @@ async function csSend(msg) {
             footer.innerHTML =
               '<button class="rating-btn" onclick="rateMsg(this, ' + msgIdx + ', 1)" title="有帮助">👍</button>' +
               '<button class="rating-btn" onclick="rateMsg(this, ' + msgIdx + ', -1)" title="没帮助">👎</button>' +
-              '<button class="rating-btn" onclick="copyMsg(this)" title="复制" style="margin-left:auto">📋</button>';
+              '<button class="tts-btn" onclick="speakReply(this, ' + msgIdx + ')" title="朗读" style="margin-left:auto">🔊</button>' +
+              '<button class="rating-btn" onclick="copyMsg(this)" title="复制">📋</button>';
             bodyEl.appendChild(footer);
 
             // Save to messages
@@ -1130,7 +1200,7 @@ function resetChat() {
   document.getElementById('cs-messages').innerHTML = '';
   showWelcome();
   renderHistory();
-  toast('已开启新对话', 'ok');
+  toast((LANG[_lang] || LANG.zh).resetToast, 'ok');
 }
 
 // ─── Back to App ───
@@ -1139,6 +1209,7 @@ function backToApp() { window.location.href = '/'; }
 // ═══════ INIT ═══════
 loadHistory();
 initCsDarkMode();
+applyLang();
 
 // Load saved conversation if exists
 _csMessages = loadConversation(_csSessionId);
@@ -1154,6 +1225,10 @@ window.addEventListener('load', () => {
     const input = document.getElementById('cs-input');
     if (input) input.focus();
   }, 1600);
+  // Pre-load speech synthesis voices (some browsers load async)
+  if (window.speechSynthesis) {
+    window.speechSynthesis.getVoices();
+  }
 });
 </script>
 </body>

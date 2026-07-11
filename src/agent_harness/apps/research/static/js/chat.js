@@ -1,6 +1,18 @@
 // chat.js — Chat messages, SSE streaming, markdown rendering
 
 // Simple markdown → HTML for chat messages
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+function escAttr(s) {
+  return (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function mdToHtml(text) {
   if (!text) return '';
   // Escape HTML first
@@ -204,6 +216,7 @@ async function sendChatMessage() {
       let body = assistantEl.querySelector('.chat-msg-body');
       if (!body) { body = document.createElement('div'); body.className = 'chat-msg-body'; assistantEl.appendChild(body); }
       body.innerHTML = mdToHtml(fullContent);
+      postProcessResults(body);
     }
     thinkingEl.classList.add('hidden');
 
@@ -213,7 +226,7 @@ async function sendChatMessage() {
       btns.style.cssText = 'align-self:flex-start; margin-top:4px; display:flex; gap:4px; max-width:100%; background:none; border:none; padding:0';
       btns.innerHTML = `
         <button class="btn btn-secondary btn-sm" onclick="saveReport(this, '${chatSessionId}')">💾 保存报告</button>
-        <button class="btn btn-primary btn-sm" onclick="formalizeAndOpen(this, '${chatSessionId}')">📄 生成正式报告</button>
+        <button class="btn btn-primary btn-sm report-btn" onclick="formalizeAndOpen(this, '${chatSessionId}')">📄 生成正式报告</button>
         <button class="btn btn-secondary btn-sm" onclick="showAgentLog('${chatSessionId}')">🔍 运行详情</button>`;
       document.getElementById('chat-messages').appendChild(btns);
 
@@ -249,6 +262,55 @@ async function sendChatMessage() {
 
   const msgContainer = document.getElementById('chat-messages');
   if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
+}
+
+// Post-process rendered content to detect search result patterns and wrap in styled cards
+function postProcessResults(container) {
+  if (!container) return;
+  // Find text nodes containing URL patterns like: text [url] or [text](url)
+  // Walk through child nodes looking for link-like patterns
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, false);
+  const matches = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const text = node.textContent;
+    // Pattern: any text followed by [url] style or just a bare URL
+    const urlRegex = /(.+?)\s*\[(https?:\/\/[^\]]+)\]/g;
+    let m;
+    while ((m = urlRegex.exec(text)) !== null) {
+      matches.push({
+        title: m[1].trim().replace(/^[\s•\-—:：]+/, ''),
+        url: m[2].trim(),
+        node: node,
+      });
+    }
+  }
+  if (matches.length === 0) return;
+
+  // Replace each match with a styled card — work backwards to avoid offset issues
+  for (const match of matches) {
+    const card = document.createElement('div');
+    card.className = 'search-result-card';
+    try {
+      const domain = new URL(match.url).hostname.replace(/^www\./, '');
+      card.innerHTML =
+        '<a class="result-title" href="' + escAttr(match.url) + '" target="_blank" rel="noopener">' + escHtml(match.title) + '</a>' +
+        '<span class="result-domain">🔗 ' + escHtml(domain) + '</span>';
+    } catch (e) {
+      card.innerHTML = '<a class="result-title" href="' + escAttr(match.url) + '" target="_blank" rel="noopener">' + escHtml(match.title) + '</a>';
+    }
+    // Replace the text containing the match with the card
+    const parent = match.node.parentNode;
+    if (parent) {
+      // Only replace if the parent is a suitable container (not already inside a card)
+      if (!parent.closest('.search-result-card') && !parent.closest('a')) {
+        parent.innerHTML = parent.innerHTML.replace(
+          new RegExp(escapeRegex(match.title + ' [' + match.url + ']'), 'g'),
+          card.outerHTML
+        );
+      }
+    }
+  }
 }
 
 function cancelChatMessage() {
