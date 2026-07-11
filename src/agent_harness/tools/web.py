@@ -9,8 +9,57 @@ _SEARCH_CACHE: dict[str, tuple[float, list]] = {}  # query_key → (timestamp, r
 _SEARCH_CACHE_TTL = 300  # 5 分钟
 _SEARCH_DIAG: list[dict] = []  # diagnostic log, last 20 entries
 
+# Rotating User-Agent list to avoid DDG rate limiting
+_USER_AGENTS = [
+    # Chrome 120 Windows (primary)
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    # Firefox 120 Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) "
+    "Gecko/20100101 Firefox/120.0",
+    # Safari 17.2 macOS
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    # Edge 120 Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+]
+_UA_INDEX = 0
 
-def _log_search_diag(query: str, engine: str, status: str, count: int, detail: str = ""):
+
+def _pick_user_agent() -> str:
+    """Rotate through available User-Agent strings."""
+    global _UA_INDEX
+    ua = _USER_AGENTS[_UA_INDEX % len(_USER_AGENTS)]
+    _UA_INDEX += 1
+    return ua
+
+
+def _normalize_url(url: str) -> str:
+    """Normalize URL for dedup: strip trailing slash, www. prefix, and UTM params."""
+    import re as _re
+    url = url.rstrip("/")
+    url = _re.sub(r"://www\.", "://", url)
+    # Strip common tracking query params
+    url = _re.sub(
+        r'[?&](utm_source|utm_medium|utm_campaign|utm_term|utm_content|fbclid|gclid|ref)=[^&]+',
+        "",
+        url,
+    )
+    # Clean up leftover ?& or trailing &
+    url = _re.sub(r"\?&", "?", url)
+    url = _re.sub(r"[&?]$", "", url)
+    return url
+
+
+def _log_search_diag(
+    query: str,
+    engine: str,
+    status: str,
+    count: int,
+    detail: str = "",
+    strategy: str = "",
+):
     """Log a search diagnostic entry (in-memory, last 20)."""
     entry = {
         "ts": time.strftime("%H:%M:%S"),
@@ -20,11 +69,18 @@ def _log_search_diag(query: str, engine: str, status: str, count: int, detail: s
         "count": count,
         "detail": detail[:100],
     }
+    if strategy:
+        entry["strategy"] = strategy
     _SEARCH_DIAG.insert(0, entry)
     if len(_SEARCH_DIAG) > 20:
         _SEARCH_DIAG.pop()
     # Also print to stderr for server-side debugging
-    print("[Search] %s → %s (%d 结果) %s" % (engine, status, count, detail[:60]), file=__import__('sys').stderr)
+    strategy_tag = " [%s]" % strategy if strategy else ""
+    print(
+        "[Search] %s%s → %s (%d 结果) %s"
+        % (engine, strategy_tag, status, count, detail[:60]),
+        file=__import__("sys").stderr,
+    )
 
 
 def _tool_search(query: str, max_results: int = 5) -> list:
@@ -72,8 +128,7 @@ def _tool_search(query: str, max_results: int = 5) -> list:
     if not results:
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                "User-Agent": _pick_user_agent(),
             }
             r = _session.get(
                 "https://html.duckduckgo.com/html/",
@@ -84,8 +139,9 @@ def _tool_search(query: str, max_results: int = 5) -> list:
             if r.status_code == 200:
                 # Parse result links from DuckDuckGo HTML (multi-strategy)
                 html = r.text
-                seen_urls = set()
+                seen_urls: set[str] = set()
                 parsed = []
+                strategy_counts: dict[str, int] = {}
 
                 # Strategy 1: modern DDG (result__a + result__snippet)
                 links1 = _re.findall(
@@ -96,11 +152,15 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                     r'<a class="result__snippet"[^>]*>([^<]+)</a>',
                     html,
                 )
+                s1_count = 0
                 for i, (url, title) in enumerate(links1[:max_results]):
                     snippet = snippets1[i] if i < len(snippets1) else ""
-                    if url not in seen_urls:
-                        seen_urls.add(url)
+                    nu = _normalize_url(url)
+                    if nu not in seen_urls:
+                        seen_urls.add(nu)
                         parsed.append("%s: %s [%s]" % (title, snippet, url))
+                        s1_count += 1
+                strategy_counts["s1_result__a"] = s1_count
 
                 # Strategy 2: legacy DDG (result-link + snippet-text)
                 if len(parsed) < max_results:
@@ -112,28 +172,84 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                         r'<span[^>]+class="snippet-text"[^>]*>([^<]+)</span>',
                         html,
                     )
+                    s2_count = 0
                     for i, (url, title) in enumerate(links2[:max_results]):
-                        if url not in seen_urls:
-                            seen_urls.add(url)
+                        nu = _normalize_url(url)
+                        if nu not in seen_urls:
+                            seen_urls.add(nu)
                             snippet = snippets2[i] if i < len(snippets2) else ""
                             parsed.append("%s: %s [%s]" % (title, snippet, url))
+                            s2_count += 1
+                    strategy_counts["s2_result-link"] = s2_count
 
-                # Strategy 3: generic article links (last resort)
-                if len(parsed) == 0:
+                # Strategy 3: generic article links (backfill when short)
+                if len(parsed) < max_results:
                     links3 = _re.findall(
                         r'<a[^>]+href="(https?://[^"]+)"[^>]*>([^<]+)</a>',
                         html,
                     )
+                    s3_count = 0
                     for url, title in links3[:max_results * 2]:
-                        if url not in seen_urls and not any(
+                        nu = _normalize_url(url)
+                        if nu not in seen_urls and not any(
                             skip in url for skip in ["duckduckgo.com", "//ads."]
                         ):
                             if _re.search(r'/(article|page|post|item|product|news|content|blog)', url):
-                                seen_urls.add(url)
+                                seen_urls.add(nu)
                                 parsed.append("%s: [%s]" % (title, url))
+                                s3_count += 1
+                    strategy_counts["s3_generic_article"] = s3_count
+
+                # Strategy 4: h2.result__title containers and generic result containers
+                if len(parsed) < max_results:
+                    # 4a: <h2 class="result__title"><a href="...">...</a></h2>
+                    links4a = _re.findall(
+                        r'<h2[^>]+class="result__title"[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>([^<]+)</a>.*?</h2>',
+                        html,
+                    )
+                    s4a_count = 0
+                    for url, title in links4a[:max_results]:
+                        nu = _normalize_url(url)
+                        if nu not in seen_urls:
+                            seen_urls.add(nu)
+                            parsed.append("%s: [%s]" % (title.strip(), url))
+                            s4a_count += 1
+
+                    # 4b: any <a href="http..."> inside a result-like container div
+                    if len(parsed) < max_results:
+                        result_containers = _re.findall(
+                            r'<div[^>]*class="[^"]*result[^"]*"[^>]*>.*?</div>',
+                            html,
+                        )
+                        s4b_count = 0
+                        for container in result_containers:
+                            inner_links = _re.findall(
+                                r'<a[^>]+href="(https?://[^"]+)"[^>]*>([^<]+)</a>',
+                                container,
+                            )
+                            for url, title in inner_links:
+                                nu = _normalize_url(url)
+                                if nu not in seen_urls and not any(
+                                    skip in url for skip in ["duckduckgo.com", "//ads."]
+                                ):
+                                    seen_urls.add(nu)
+                                    parsed.append("%s: [%s]" % (title.strip(), url))
+                                    s4b_count += 1
+                                    if len(parsed) >= max_results:
+                                        break
+                            if len(parsed) >= max_results:
+                                break
+                    strategy_counts["s4_title_containers"] = s4a_count + s4b_count
 
                 results = parsed[:max_results]
-                _log_search_diag(query, "DuckDuckGo", "ok", len(results))
+                # Build detailed diagnostic with per-strategy counts
+                strat_detail = "; ".join(
+                    "%s=%d" % (k, v) for k, v in strategy_counts.items() if v > 0
+                )
+                _log_search_diag(
+                    query, "DuckDuckGo", "ok", len(results),
+                    detail=strat_detail, strategy="multi",
+                )
         except Exception as e:
             _log_search_diag(query, "DuckDuckGo", "error", 0, str(e)[:60])
             pass
@@ -153,8 +269,8 @@ def _tool_search(query: str, max_results: int = 5) -> list:
 
     # 兜底
     if not results:
-        _log_search_diag(query, "all", "failed", 0, "所有搜索引擎不可用")
-        results = ["[搜索失败] 所有搜索引擎不可用，请检查 SearXNG 或网络连接"]
+        _log_search_diag(query, "all", "failed", 0, "全部引擎+SearXNG+skill均不可用或返回空")
+        results = ["[搜索失败] 所有搜索引擎不可用。SearXNG未运行？DDG屏蔽？请检查网络或稍后重试。"]
     else:
         _log_search_diag(query, "final", "ok", len(results))
 

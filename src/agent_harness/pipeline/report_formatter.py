@@ -44,6 +44,45 @@ def _extract_sources_from_text(text: str) -> list[dict]:
     return sources
 
 
+def _format_citations(text: str) -> tuple[str, dict[int, str]]:
+    """Convert [url] patterns in text to numbered [N] citations.
+
+    Detects URLs wrapped in square brackets (e.g. "snippet [https://example.com]")
+    produced by the search tool, replaces each with [N], and builds a source
+    mapping: {N: url}. Deduplicates identical URLs.
+
+    Returns:
+        (modified_text, source_map) where source_map maps N → url
+    """
+    seen_urls: dict[str, int] = {}
+    url_order: list[str] = []
+    counter = [0]
+
+    def _replace(m):
+        raw = m.group(1) or m.group(2)
+        if not raw:
+            return m.group(0)
+        url = raw.rstrip(".,;:!?)")
+        if url in seen_urls:
+            num = seen_urls[url]
+        else:
+            counter[0] += 1
+            num = counter[0]
+            seen_urls[url] = num
+            url_order.append(url)
+        return "[%d]" % num
+
+    # Match [http...] or [https...] forms
+    result = re.sub(r'\[(https?://[^\]]+)\]', _replace, text)
+
+    # Build source map maintaining insertion order
+    source_map: dict[int, str] = {}
+    for url in url_order:
+        source_map[seen_urls[url]] = url
+
+    return result, source_map
+
+
 def _is_valid_url(url: str) -> bool:
     """Basic URL validity check."""
     return url.startswith("http") and len(url) > 15
@@ -66,26 +105,42 @@ def _link_sources(text: str, sources: list[dict]) -> str:
     return text
 
 
-def generate_report_html(title: str, content: str, sources: list[dict] = None) -> str:
+def generate_report_html(title: str, content: str, sources: list[dict] = None, tags: list[str] = None) -> str:
     """Generate a professional HTML report with embedded CSS and source citations.
 
     Args:
         title: Report title
         content: Markdown-ish content from the agent (may contain [来源 N] markers)
         sources: Optional list of {url, title} for citations
+        tags: Optional list of tag strings for the report
 
     Returns:
         Complete HTML string ready to view/print
     """
     now = datetime.now().strftime("%Y年%m月%d日")
     sources = sources or []
+    tags = tags or []
 
-    # Auto-detect and extract URLs from content if no explicit sources provided
+    # Step 1: Convert [url] patterns to [N] numbered citations
+    # Also builds a source_map and a "## 参考来源" section to append
+    formatted_content, source_map = _format_citations(content)
+
+    # Step 2: Build reference section from source_map (from [url] → [N] conversion)
+    ref_lines = []
+    for num in sorted(source_map.keys()):
+        url = source_map[num]
+        # Try to derive a title from the URL
+        title = url.rsplit("/", 1)[-1][:50] if "/" in url else url
+        ref_lines.append("[来源 %d] %s - %s" % (num, title, url))
+    if ref_lines:
+        formatted_content += "\n\n## 参考来源\n\n" + "\n".join(ref_lines)
+
+    # Step 3: Auto-detect and extract URLs from content if no explicit sources provided
     if not sources:
-        sources = _extract_sources_from_text(content)
+        sources = _extract_sources_from_text(formatted_content)
 
     # Link source markers in text
-    linked_content = _link_sources(content, sources)
+    linked_content = _link_sources(formatted_content, sources)
 
     # Format the main content (simple markdown → HTML conversion)
     body_html = _markdown_to_html(linked_content)
@@ -264,7 +319,6 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None) -
       <span>⚡ 灵枢 AI 调研助手</span>
     </div>
   </div>
-  %s
   %s
   %s
   %s

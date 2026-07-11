@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.46.0 — 2026-07-11
+
+### Added — 主应用体验打磨
+- ⌨️ **快捷键**：`Ctrl+K` 聚焦会话搜索、`Ctrl+Shift+N` 新建对话（快捷键面板同步更新）
+- 🏷️ **代码块语言标签**：代码块左上角显示语言名称（python/json/html 等），带圆角边框
+- 🕐 **搜索建议**：输入框获取焦点时显示历史搜索词下拉（localStorage 持久化，最近 10 条）
+- 📋 复制按钮 + 代码块已有实现，CSS 优化
+
+### Added — Agent 核心增强
+- 🔄 **LLM 响应缓存**：`call_llama` 和 `_post_cloud` 基于 (model, messages, temperature) 的 MD5 缓存，TTL 60s，上限 500 条，自动淘汰最旧
+- 🔗 **报告引用格式**：`report_formatter._format_citations()` 将 `[url]` 转换为编号 `[N]`，自动去重，追加 `## 参考来源` 章节
+- 🔍 **搜索链加固**：`web.py` 新增 DDG 第 4/5 解析策略、User-Agent 轮换（3 种）、URL 归一化去重（去尾部斜杠/www/UTM）、策略级诊断日志
+
 ## v0.45.0 — 2026-07-11
 
 ### Added

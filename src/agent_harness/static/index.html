@@ -101,6 +101,19 @@ document.addEventListener('keydown', function(e) {
     e.preventDefault();
     toggleMessageSearch();
   }
+  // Ctrl+K: focus sidebar search
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    const input = document.getElementById('sidebar-search-input');
+    if (input) { input.focus(); input.select(); }
+  }
+  // Ctrl+Shift+N: new session
+  if (e.ctrlKey && e.shiftKey && e.key === 'N') {
+    e.preventDefault();
+    switchToNewSession();
+    const tab = document.querySelector('.main-tab[data-tab="chat"]');
+    if (tab) switchTab('chat');
+  }
 });
 
 function showHelpModal() {
@@ -114,6 +127,8 @@ function showHelpModal() {
     '<tr><td style="padding:8px 0"><kbd>Esc</kbd></td><td>取消/关闭</td></tr>' +
     '<tr><td style="padding:8px 0"><kbd>Ctrl+Shift+S</kbd></td><td>搜索会话</td></tr>' +
     '<tr><td style="padding:8px 0"><kbd>Ctrl+Shift+F</kbd></td><td>搜索消息内容</td></tr>' +
+    '<tr><td style="padding:8px 0"><kbd>Ctrl+K</kbd></td><td>聚焦会话搜索</td></tr>' +
+    '<tr><td style="padding:8px 0"><kbd>Ctrl+Shift+N</kbd></td><td>新建对话</td></tr>' +
     '<tr><td style="padding:8px 0"><kbd>Ctrl+P</kbd></td><td>打印报告（打开报告时）</td></tr>' +
     '<tr><td style="padding:8px 0"><kbd>?</kbd></td><td>显示此帮助</td></tr>' +
     '</table></div>';
@@ -802,7 +817,10 @@ function renderDashboard() {
       <!-- Sidebar -->
       <div class="app-sidebar" id="sidebar">
         <div class="sidebar-search">
-          <input id="sidebar-search-input" type="text" placeholder="搜索会话..." oninput="onSidebarFilterChange()" autocomplete="off">
+          <input id="sidebar-search-input" type="text" placeholder="搜索会话..."
+            oninput="onSidebarFilterChange()" onfocus="showSearchSuggestions()"
+            onblur="setTimeout(hideSearchSuggestions,200)" autocomplete="off">
+          <div id="sidebar-search-suggestions" class="search-suggestions hidden"></div>
         </div>
         <div class="sidebar-actions">
           <button class="sidebar-new-btn" onclick="switchToNewSession()">
@@ -921,7 +939,10 @@ function mdToHtml(text) {
   // Escape HTML first
   let h = escHtml(text);
   // Code blocks (```...```) — must be before inline code
-  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code class="lang-$1">$2</code></pre>');
+  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, function(m, lang, code) {
+    const label = lang ? '<div class="code-lang-label">' + escHtml(lang) + '</div>' : '';
+    return '<div class="code-block-wrapper">' + label + '<pre><code class="lang-' + escHtml(lang) + '">' + code.trim() + '</code></pre></div>';
+  });
   // Inline code
   h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
   // Bold (**text**)
@@ -946,6 +967,38 @@ function renderChatMessage(role, content) {
 function onSidebarFilterChange() {
   sidebarFilter = document.getElementById('sidebar-search-input').value;
   renderSidebarList();
+  // Save to search history
+  saveSearchHistory(sidebarFilter);
+}
+
+// ─── Search history suggestions ───
+function getSearchHistory() {
+  try { return JSON.parse(localStorage.getItem('lingShu_search_history') || '[]'); } catch(e) { return []; }
+}
+function saveSearchHistory(q) {
+  if (!q || q.length < 2) return;
+  let history = getSearchHistory();
+  history = history.filter(h => h !== q);
+  history.unshift(q);
+  if (history.length > 10) history = history.slice(0, 10);
+  localStorage.setItem('lingShu_search_history', JSON.stringify(history));
+}
+function showSearchSuggestions() {
+  const el = document.getElementById('sidebar-search-suggestions');
+  const input = document.getElementById('sidebar-search-input');
+  if (!el || !input) return;
+  const history = getSearchHistory().filter(h => h !== input.value);
+  if (history.length === 0) { el.classList.add('hidden'); return; }
+  el.innerHTML = history.map(h =>
+    '<div class="search-suggestion-item" onmousedown="event.preventDefault(); document.getElementById(\'sidebar-search-input\').value=\'' +
+    escHtml(h.replace(/'/g, "\\'")) + '\'; onSidebarFilterChange(); hideSearchSuggestions()">' +
+    '<span class="search-suggestion-icon">🕐</span>' + escHtml(h) + '</div>'
+  ).join('');
+  el.classList.remove('hidden');
+}
+function hideSearchSuggestions() {
+  const el = document.getElementById('sidebar-search-suggestions');
+  if (el) el.classList.add('hidden');
 }
 
 // ─── Message search (cross-session content search) ───

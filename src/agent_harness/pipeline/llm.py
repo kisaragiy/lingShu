@@ -23,12 +23,46 @@ WORKSPACE_DIR = os.path.normpath(os.path.join(str(HARNESS_DIR), ".."))
 _session = req_lib.Session()
 _session.headers.update({"User-Agent": "agent-harness/0.2.0"})
 
+# LLM response cache — in-memory, TTL-based
+_LLM_CACHE: dict[str, tuple[float, str, int]] = {}  # key → (timestamp, content, tokens)
+_LLM_CACHE_TTL = 60  # seconds
+
+def _llm_cache_key(model: str, messages: list[dict], system_prompt: str, temperature: float) -> str:
+    """Generate cache key from deterministic parameters."""
+    import hashlib
+    raw = json.dumps([model, messages, system_prompt, round(temperature, 2)], sort_keys=True, ensure_ascii=False)
+    return hashlib.md5(raw.encode()).hexdigest()
+
+def _llm_cache_get(key: str) -> tuple[str, int] | None:
+    """Get cached result if not expired."""
+    import time
+    entry = _LLM_CACHE.get(key)
+    if entry and time.time() - entry[0] < _LLM_CACHE_TTL:
+        return entry[1], entry[2]
+    if entry:
+        del _LLM_CACHE[key]
+    return None
+
+def _llm_cache_set(key: str, content: str, tokens: int):
+    """Set cache entry."""
+    import time
+    if len(_LLM_CACHE) > 500:  # evict oldest if full
+        oldest = min(_LLM_CACHE.keys(), key=lambda k: _LLM_CACHE[k][0])
+        del _LLM_CACHE[oldest]
+    _LLM_CACHE[key] = (time.time(), content, tokens)
+
 CENSORED_SYSTEM_PROMPT = "你是一个内容安全助手。对于色情、暴力、违法内容，回复'我无法处理该请求'。"
 
 
 def call_llama(messages: list[dict], system_prompt: str = "",
                max_tokens: int = 2048, temperature: float = 0.3) -> tuple[str, int]:
     """Call local LLaMA model. Returns (text, tokens_used)."""
+    # Check cache
+    cache_key = _llm_cache_key(MODEL_LLAMA, [{"role": "system", "content": system_prompt}] + messages, system_prompt, temperature) if temperature <= 0.5 else None
+    if cache_key:
+        cached = _llm_cache_get(cache_key)
+        if cached:
+            return cached
     payload = {
         "model": MODEL_LLAMA,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
@@ -48,6 +82,8 @@ def call_llama(messages: list[dict], system_prompt: str = "",
                 # If content is empty, the model might still be generating
                 content = msg.get("reasoning_content", "")[-200:] or "(empty)"
             tokens = data.get("usage", {}).get("total_tokens", 0)
+            if cache_key and content:
+                _llm_cache_set(cache_key, content, tokens)
             return content, tokens
     except Exception:
         pass
@@ -82,6 +118,11 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
         "temperature": 0.7,
         "stream": False,
     }
+    # Check cache for cloud calls
+    cache_key = _llm_cache_key(MODEL_DEEPSEEK, payload["messages"], system_prompt, 0.7)
+    cached = _llm_cache_get(cache_key)
+    if cached:
+        return cached
     try:
         resp = _session.post(
             DEEPSEEK_API,
@@ -93,6 +134,8 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
             tokens = data.get("usage", {}).get("total_tokens", 0)
+            if content:
+                _llm_cache_set(cache_key, content, tokens)
             return content, tokens
     except Exception:
         pass
