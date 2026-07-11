@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.59.0 — 2026-07-11
+
+### Added — README 截图 + 第二垂直场景
+- 🖼️ **README 截图** — 3 张 SVG 占位图（CS Demo 对话/流式/主应用 Dashboard）
+- 🧩 **knowledge-qa 场景** — 通过 `create-app.py` 脚手架生成的知识库问答助手
+  - 注册到 main.py，访问 `/knowledge-qa`
+  - 骨架代码，可直接扩展为完整 RAG 问答 Demo
+
 ## v0.58.0 — 2026-07-11
 
 ### Added — 调研助手大升级（14 版本首次）
