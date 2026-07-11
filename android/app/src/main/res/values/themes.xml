@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.LingShu" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">#2563eb</item>
+        <item name="colorPrimaryDark">#1d4ed8</item>
+        <item name="colorAccent">#2563eb</item>
+        <item name="android:statusBarColor">#1a1a2e</item>
+    </style>
+</resources>

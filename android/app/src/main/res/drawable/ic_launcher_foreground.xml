@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="22"
+        android:translateY="22">
+        <!-- Background circle -->
+        <path
+            android:fillColor="#2563eb"
+            android:pathData="M32,0C49.67,0 64,14.33 64,32C64,49.67 49.67,64 32,64C14.33,64 0,49.67 0,32C0,14.33 14.33,0 32,0Z" />
+        <!-- Headband -->
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="3"
+            android:fillColor="#00000000"
+            android:pathData="M16,28A16,8 0,1,1 48,28" />
+        <!-- Left earcup -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M12,32L20,32L20,44L12,44Z" />
+        <path
+            android:fillColor="#2563eb"
+            android:pathData="M12,38L20,38L20,42L12,42Z" />
+        <!-- Right earcup -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M44,32L52,32L52,44L44,44Z" />
+        <path
+            android:fillColor="#2563eb"
+            android:pathData="M44,38L52,38L52,42L44,42Z" />
+    </group>
+</vector>

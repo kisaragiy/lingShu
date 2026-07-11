@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.56.0 — 2026-07-11
+
+### Added — Android APK 项目
+- 📱 **完整 Android 项目** — `android/` 目录，Java 21 + Gradle + Kotlin
+  - WebView 包装器，打开 CS Demo 页面
+  - Adaptive 图标（🎧 耳机图标）
+  - 沉浸式全屏 / 返回键导航
+- 🤖 **GitHub Actions 编译 APK** — `.github/workflows/android-apk.yml`
+  - 手动触发或推送自动编译
+  - 产物：`app-debug.apk` 直接下载安装
+
 ## v0.55.0 — 2026-07-11
 
 ### Added — PWA 安卓应用
