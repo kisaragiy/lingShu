@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.55.0 — 2026-07-11
+
+### Added — PWA 安卓应用
+- 📱 **PWA 支持** — CS Demo 页面可「添加到主屏幕」成为独立 App
+  - `manifest.json` — 应用名/图标/主题色/standalone 模式
+  - 192x192 + 512x512 图标（🎧 耳机图标）
+  - Service Worker — 离线缓存 + 快速加载
+- 🌙 **PWA 全屏适配** — `safe-area-inset` 适配刘海屏
+- 🔗 灵枢主应用同步添加 PWA 支持
+
 ## v0.54.0 — 2026-07-11
 
 ### Changed — 代码分层（Phase 1）

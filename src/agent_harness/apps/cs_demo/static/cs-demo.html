@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>灵枢智能客服 — AI Customer Service Demo</title>
+<link rel="manifest" href="/static/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#2563eb">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
 /* ═══════════════════════════════════════════
    灵枢智能客服 Demo — Product Page Styles
@@ -409,6 +414,11 @@ a:hover { text-decoration: underline; }
 @media (max-width: 768px) {
   .intro-panel, .history-panel { display: none; }
 }
+/* PWA fullscreen on mobile */
+@media (display-mode: standalone) {
+  .app-header { padding-top: env(safe-area-inset-top); }
+  .app-footer { padding-bottom: env(safe-area-inset-bottom); }
+}
 
 /* ─── Scrollbar ─── */
 ::-webkit-scrollbar { width: 6px; }
@@ -553,8 +563,13 @@ a:hover { text-decoration: underline; }
 
 <script>
 // ═══════════════════════════════════════════
-// CS Demo — Standalone Product Page v0.52
+// CS Demo — Standalone Product Page v0.55
 // ═══════════════════════════════════════════
+
+// ─── PWA: Register service worker ───
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js');
+}
 
 const CS_SESSION_KEY = 'lingShu_cs_session';
 const CS_HISTORY_KEY = 'lingShu_cs_history';
