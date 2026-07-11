@@ -135,7 +135,8 @@ def _tool_wechat_send(contact: str = "", message: str = "", screenshot_first: bo
             if w.isMinimized:
                 w.restore()
             else:
-                with contextlib.suppress(BaseException): w.activate()
+                with contextlib.suppress(BaseException):
+                    w.activate()
             _t.sleep(1)
             rect = w.left, w.top, w.width, w.height
             log.append(f"[步骤1] 微信窗口已激活(pygetwindow): {w.title} ({w.width}x{w.height})")
@@ -303,7 +304,8 @@ def _tool_qq_send(contact: str = "", message: str = "", screenshot_first: bool =
         if w.isMinimized:
             w.restore()
         else:
-            with contextlib.suppress(BaseException): w.activate()
+            with contextlib.suppress(BaseException):
+                w.activate()
         _t.sleep(1)
         rect = w.left, w.top, w.width, w.height
         log.append(f"[步骤1] QQ/TIM 窗口已激活: {w.title} ({w.width}x{w.height})")
@@ -634,15 +636,18 @@ def _tool_desktop_gui(action: str = "screenshot", x: int = -1, y: int = -1,
             from rapidocr_onnxruntime import RapidOCR
             ocr = RapidOCR()
             result, _ = ocr(path)
-            if not result: return f"[OCR截屏] {path}\n无文字"
+            if not result:
+                return f"[OCR截屏] {path}\n无文字"
             lines = [f"[OCR截屏] {path}"]
             for item in result:
                 pts, txt = item[0], item[1]
-                xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
                 cx, cy = (int(min(xs))+int(max(xs)))//2, (int(min(ys))+int(max(ys)))//2
                 lines.append(f"  {txt} (click={cx},{cy})")
             return "\n".join(lines)[:4000]
-        except Exception as e: return f"[OCR截屏] FAIL: {e}"
+        except Exception as e:
+            return f"[OCR截屏] FAIL: {e}"
     if action == "ocr_region":
         parts = region.split(",") if region else []
         rw = int(parts[0]) if len(parts) > 0 else 400
@@ -654,15 +659,18 @@ def _tool_desktop_gui(action: str = "screenshot", x: int = -1, y: int = -1,
             from rapidocr_onnxruntime import RapidOCR
             ocr = RapidOCR()
             result, _ = ocr(path)
-            if not result: return f"[OCR区域] ({rx},{ry},{rw},{rh})\n无文字"
+            if not result:
+                return f"[OCR区域] ({rx},{ry},{rw},{rh})\n无文字"
             lines = [f"[OCR区域] ({rx},{ry},{rw},{rh})"]
             for item in result:
                 pts, txt = item[0], item[1]
-                xs = [p[0]+rx for p in pts]; ys = [p[1]+ry for p in pts]
+                xs = [p[0]+rx for p in pts]
+                ys = [p[1]+ry for p in pts]
                 cx, cy = (int(min(xs))+int(max(xs)))//2, (int(min(ys))+int(max(ys)))//2
                 lines.append(f"  {txt} (click={cx},{cy})")
             return "\n".join(lines)[:4000]
-        except Exception as e: return f"[OCR区域] FAIL: {e}"
+        except Exception as e:
+            return f"[OCR区域] FAIL: {e}"
     if action == "click":
         _gui.click(x if x>=0 else None, y if y>=0 else None, button=button, clicks=clicks)
         return f"[点击] ({x},{y})\n{_verify()}"
@@ -673,7 +681,8 @@ def _tool_desktop_gui(action: str = "screenshot", x: int = -1, y: int = -1,
         _gui.rightClick(x if x>=0 else None, y if y>=0 else None)
         return f"[右键] ({x},{y})\n{_verify()}"
     if action == "move":
-        _gui.moveTo(x, y); return f"[移动鼠标] -> ({x},{y})"
+        _gui.moveTo(x, y)
+        return f"[移动鼠标] -> ({x},{y})"
     if action == "type":
         _gui.typewrite(text, interval=0.03)
         return f"[输入] {text[:30]}\n{_verify()}"
@@ -681,22 +690,26 @@ def _tool_desktop_gui(action: str = "screenshot", x: int = -1, y: int = -1,
         if modifiers:
             mod_list = [m.strip() for m in modifiers.replace("[","").replace("]","").replace('"','').split(",")]
             _gui.hotkey(*mod_list, key or "enter")
-        else: _gui.press(key or "enter")
+        else:
+            _gui.press(key or "enter")
         return f"[按键] {key}\n{_verify()}"
     if action == "hotkey":
         if modifiers:
             mod_list = [m.strip() for m in modifiers.replace("[","").replace("]","").replace('"','').split(",")]
             _gui.hotkey(*mod_list)
-        else: _gui.hotkey(*text.split("+"))
+        else:
+            _gui.hotkey(*text.split("+"))
         return f"[组合键] {text}\n{_verify()}"
     if action == "scroll":
-        _gui.scroll(clicks); return f"[滚动] {clicks}\n{_verify()}"
+        _gui.scroll(clicks)
+        return f"[滚动] {clicks}\n{_verify()}"
     if action == "drag":
         try:
             tx, ty = text.split(",")
             _gui.drag(int(tx), int(ty), duration=0.5)
             return f"[拖拽]\n{_verify()}"
-        except Exception as e: return f"[拖拽失败] {e}"
+        except Exception as e:
+            return f"[拖拽失败] {e}"
     if action == "locate_win":
         try:
             import pygetwindow as _gw
@@ -712,8 +725,10 @@ def _tool_desktop_gui(action: str = "screenshot", x: int = -1, y: int = -1,
             if w.isMinimized:
                 w.restore()
             else:
-                with contextlib.suppress(BaseException): w.activate()
-            import time as _t; _t.sleep(0.8)
+                with contextlib.suppress(BaseException):
+                    w.activate()
+            import time as _t
+            _t.sleep(0.8)
             return f"[窗口] {w.title}\n{_verify()}"
         except ImportError:
             return "[locate_win] pygetwindow 未安装"

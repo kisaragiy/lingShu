@@ -20,7 +20,7 @@ def _tool_comfyui_text2img(prompt: str, workflow: str = "", retries: int = 2, lo
         import contextlib
         if lora:
             with contextlib.suppress(ImportError):
-                from comfyui_lora_tools import lora_inject_lora_into_workflow as _lora_inject
+                pass
         try:
             from comfyui_tools import _ensure_comfyui_running, text_to_image
             _ensure_comfyui_running()
@@ -137,7 +137,8 @@ def _tool_comfyui_optimize_comic(raw_prompt: str, style_ref: str = "Production I
             "严禁输出图片。只输出纯文本提示词。格式: [模型: ComfyUI/SDXL] 优化后提示词: ..."
         )
         import requests
-        s = requests.Session(); s.trust_env = False
+        s = requests.Session()
+        s.trust_env = False
         r = _post_cloud({
             "model": "deepseek-v4",
             "messages": [

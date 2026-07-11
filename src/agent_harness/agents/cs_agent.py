@@ -302,7 +302,6 @@ def _call_cs_llm_stream_tokens(
     Uses requests with stream=True. Returns empty list if LLM fails
     (caller should fall back to template).
     """
-    import json
 
     import requests as req_lib
 
