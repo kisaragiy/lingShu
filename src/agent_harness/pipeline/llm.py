@@ -7,6 +7,7 @@ the same interface using the new agent_harness package.
 
 import json
 import os
+import sys
 
 import requests as req_lib
 
@@ -20,7 +21,7 @@ from ..config import (
 )
 
 # Re-export for tools/ compatibility
-WORKSPACE_DIR = os.path.normpath(os.path.join(str(HARNESS_DIR), ".."))
+WORKSPACE_DIR = os.path.normpath(os.path.join(str(HARNESS_DIR), "..", ".."))
 
 # Shared HTTP session
 _session = req_lib.Session()
@@ -88,8 +89,10 @@ def call_llama(messages: list[dict], system_prompt: str = "",
             if cache_key and content:
                 _llm_cache_set(cache_key, content, tokens)
             return content, tokens
-    except Exception:
+    except Exception as e:
+        print(f"[LLM] call_llama: 请求异常 — {e}", file=sys.stderr)
         pass
+    print("[LLM] call_llama: LLM 后端不可达，返回空结果", file=sys.stderr)
     return "", 0
 
 
@@ -140,9 +143,11 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
             if content:
                 _llm_cache_set(cache_key, content, tokens)
             return content, tokens
-    except Exception:
+    except Exception as e:
+        print(f"[LLM] _post_cloud: 云 API 请求异常 — {e}", file=sys.stderr)
         pass
     # Fallback to local
+    print("[LLM] _post_cloud: 云 API 不可达，降级到本地 LLM", file=sys.stderr)
     return call_llama(messages, system_prompt=system_prompt, max_tokens=max_tokens)
 
 

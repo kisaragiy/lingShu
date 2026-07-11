@@ -52,11 +52,34 @@ def _is_simple_task(task: str) -> bool:
     return bool(len(t) < 50 and not any(kw in t for kw in ['搜索', '查找', '分析', '代码', 'python', '文件', '执行', '运行']))
 
 
+# ─── Fallback result (LLM unreachable) ───
+
+def _fallback_worker_result(worker_type: str, query: str) -> str:
+    """Return a template response without LLM when backend is unreachable."""
+    fallbacks = {
+        "search": (
+            f"[搜索] 由于 LLM 后端不可用，搜索结果不可用。\n"
+            f"请配置 HARNESS_DEEPSEEK_API 或 HARNESS_LLAMA_API。\n"
+            f"原始查询: {query[:200]}"
+        ),
+        "analyze": (
+            f"[分析] LLM 后端不可用，无法生成分析。\n"
+            f"原始任务: {query[:200]}"
+        ),
+        "execute": (
+            f"[执行] LLM 后端不可用，无法执行。\n"
+            f"原始任务: {query[:200]}"
+        ),
+    }
+    return fallbacks.get(worker_type,
+                         f"[{worker_type}] LLM 后端不可用，无法完成任务。原始任务: {query[:200]}")
+
+
 # ─── LLM call for workers ───
 
 # Local model endpoint for simple tasks (token optimization strategy #4)
 LOCAL_LLM_API = "http://127.0.0.1:8081/v1/chat/completions"
-LOCAL_LLM_MODEL = "qwen3:14b"
+LOCAL_LLM_MODEL = MODEL_LLAMA
 
 
 def _call_llm(messages: list[dict], system_prompt: str = "",
@@ -347,7 +370,7 @@ def _worker_synthesize(state: WorkerState) -> dict:
             system_prompt=f"你是 {state['worker_name']} Worker。直接回答这个问题，给出具体内容。用中文。",
             max_tokens=1024,
         )
-        output = direct or f"[{state['worker_name']}] 任务完成: {state['task'][:200]}"
+        output = direct or _fallback_worker_result(state['worker_name'], state['task'])
 
     return {"final_output": output}
 
@@ -442,6 +465,7 @@ def run_worker(worker_name: str, task: str, max_retries: int = 3) -> WorkerResul
                 continue  # retry with backoff
             # After all retries exhausted, return as failed
             result["success"] = False
+            result["output"] = _fallback_worker_result(worker_name, task)
             result["errors"] = result.get("errors", []) + [last_error]
             return result
 
@@ -452,7 +476,7 @@ def run_worker(worker_name: str, task: str, max_retries: int = 3) -> WorkerResul
                 return WorkerResult(
                     worker_name=worker_name,
                     success=False,
-                    output="",
+                    output=_fallback_worker_result(worker_name, task),
                     data=None,
                     trace_steps=[],
                     errors=[str(e)],
@@ -463,7 +487,7 @@ def run_worker(worker_name: str, task: str, max_retries: int = 3) -> WorkerResul
     return WorkerResult(
         worker_name=worker_name,
         success=False,
-        output="",
+        output=_fallback_worker_result(worker_name, task),
         data=None,
         trace_steps=[],
         errors=[last_error],

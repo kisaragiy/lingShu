@@ -135,6 +135,15 @@ _agent_semaphore = _threading.Semaphore(_MAX_CONCURRENT_AGENTS) if _MAX_CONCURRE
 # Thread pool for async file I/O (sessions, reports)
 _io_executor = None
 
+# ─── LLM unreachable fallback message ───
+_LLM_UNREACHABLE_REPLY = (
+    "⚠️ LLM 后端不可用，无法生成回复。\n\n"
+    "请检查配置：\n"
+    "- HARNESS_DEEPSEEK_API / HARNESS_CLOUD_KEY\n"
+    "- 或 HARNESS_LLAMA_API（本地模型）\n\n"
+    "详细配置说明：https://github.com/kisaragiy/lingShu"
+)
+
 
 def _build_history_context(messages: list[dict]) -> str:
     """Build context string from recent conversation history (capped to save tokens)."""
@@ -295,7 +304,7 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
             if final:
                 q.put({"type": "result", "content": final})
             else:
-                q.put({"type": "result", "content": "[Harness] 处理完成（无输出）"})
+                q.put({"type": "result", "content": final or _LLM_UNREACHABLE_REPLY})
 
         q.put({"type": "done"})
 
@@ -655,9 +664,13 @@ async def chat_completions(req: ChatRequest, request: Request):
             result = await asyncio.get_event_loop().run_in_executor(
                 None, _execute_multi, last_user_msg, history_context
             )
-            response_text = result.get("final_output", "") or "[Harness] 处理完成"
+            response_text = result.get("final_output", "") or _LLM_UNREACHABLE_REPLY
             rounds = result.get("rounds", 1)
             workers = list(result.get("worker_results", {}).keys())
+
+        # Fallback: if response is still empty, use unreachable message
+        if not response_text or response_text.startswith("[Harness]") or response_text.startswith("[HarnessError]"):
+            response_text = _LLM_UNREACHABLE_REPLY
 
         # Save session (capped to MAX_HISTORY_ROUNDS)
         session = _load_session(session_id) or []

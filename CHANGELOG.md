@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.53.0 — 2026-07-11
+
+### Fixed — 核心 Agent 管线降级（14 版本首次修复）
+- 🔴 **LLM 全线降级** — `call_llama()` / `_post_cloud()` 不可达时写 stderr 日志 + 返回空
+- 🔴 **Supervisor 降级** — `_fallback_plan()` 关键词规则拆解任务（不走 LLM）
+- 🔴 **Worker 降级** — 三 Worker 各自有模板回复（通知用户 LLM 不可用）
+- 🔴 **API 输出降级** — 多 Agent 返回空时给友好提示 + 配置指引
+- 🐛 **修复 `WORKSPACE_DIR`** — 从 `src/` 修正为项目根目录
+
 ## v0.52.0 — 2026-07-11
 
 ### Added — CS Demo 大升级

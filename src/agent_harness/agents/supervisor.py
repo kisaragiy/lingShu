@@ -59,6 +59,60 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
         return ""
 
 
+# ─── Fallback plan (LLM unreachable) ───
+
+def _fallback_plan(user_request: str) -> dict:
+    """Create a basic task plan without LLM when backend is unreachable."""
+    request_lower = user_request.lower()
+
+    # Keyword matching to classify intent
+    search_keywords = ["搜索", "查", "查找", "找", "搜", "查询", "search", "find",
+                       "最新", "新闻", "价格", "对比", "哪个好", "评测", "评价"]
+    analyze_keywords = ["分析", "总结", "翻译", "总结", "计算", "代码", "python",
+                        "写", "生成", "创建", "解释", "分析预测"]
+    execute_keywords = ["打开", "启动", "截图", "点击", "桌面", "浏览器",
+                        "图片", "图像", "绘画", "画图", "生成图片"]
+
+    workers = []
+    worker_tasks = {}
+
+    for kw in search_keywords:
+        if kw in request_lower:
+            workers.append("search")
+            worker_tasks["search"] = f"搜索相关信息: {user_request}"
+            break
+
+    for kw in analyze_keywords:
+        if kw in request_lower:
+            workers.append("analyze")
+            worker_tasks["analyze"] = f"分析处理: {user_request}"
+            break
+
+    for kw in execute_keywords:
+        if kw in request_lower:
+            workers.append("execute")
+            worker_tasks["execute"] = f"执行操作: {user_request}"
+            break
+
+    if not workers:
+        workers = ["search", "analyze"]
+        worker_tasks = {
+            "search": f"搜索相关信息: {user_request}",
+            "analyze": f"分析并回复: {user_request}",
+        }
+
+    return {
+        "task_type": "mixed" if len(workers) > 1 else workers[0],
+        "workers_assigned": workers,
+        "worker_tasks": worker_tasks,
+        "worker_results": {},
+        "worker_errors": {},
+        "round": 1,
+        "all_done": False,
+        "trace_steps": [{"step": "supervisor_analyze_fallback", "assigned": workers}],
+    }
+
+
 # ─── Supervisor nodes ───
 
 def supervisor_analyze(state: SupervisorState) -> dict:
@@ -103,6 +157,14 @@ def supervisor_analyze(state: SupervisorState) -> dict:
         [{"role": "user", "content": request}],
         system_prompt=system,
     )
+
+    if not result or not result.strip():
+        print("[Supervisor] LLM 返回空，使用 fallback 规划", file=sys.stderr)
+        fallback = _fallback_plan(request)
+        return {
+            **fallback,
+            "round": state.get("round", 0) + 1,
+        }
 
     try:
         parsed = json.loads(result.strip().strip("`").replace("json", ""))
