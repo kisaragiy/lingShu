@@ -4,6 +4,7 @@ const CACHE_NAME = 'lingShu-cs-v1';
 
 const PRECACHE_URLS = [
   '/cs-demo',
+  '/static/manifest.json',
   '/static/css/lingShu.css',
   '/static/icons/icon-192.png',
   '/static/icons/icon-512.png',

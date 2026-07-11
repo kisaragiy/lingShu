@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.57.0 — 2026-07-11
+
+### Added — 垂直场景平台化
+- 🏗️ **`apps/template/`** — 垂直场景脚手架，包含 api/agents/tools/static/tests 目录结构
+- 🛠️ **`scripts/create-app.py`** — 自动生成新场景：`python scripts/create-app.py my_app`
+- 📋 生成后自动替换占位名，输出注册指引
+
+### Added — CS Demo 升级
+- 🎤 **语音输入** — 麦克风按钮调用 Web Speech API，自动发送
+- 🌐 **多语言支持** — 中/EN 切换，关键 UI 字符串全部双语
+- 📦 **Service Worker 缓存** — 扩展预缓存列表，离线更快加载
+
 ## v0.56.0 — 2026-07-11
 
 ### Added — Android APK 项目

@@ -377,6 +377,24 @@ a:hover { text-decoration: underline; }
 .send-btn:hover { background: var(--accent-hover); }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* ─── Mic Button ─── */
+.mic-btn {
+  width: 40px; height: 40px;
+  background: var(--bg-secondary); color: var(--accent);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  font-size: 18px; cursor: pointer;
+  transition: all .15s; flex-shrink: 0;
+}
+.mic-btn:hover { background: var(--accent-light); border-color: var(--accent); }
+.mic-btn.recording {
+  background: #fef2f2; border-color: #ef4444; color: #ef4444;
+  animation: micPulse 1s ease-in-out infinite;
+}
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+}
+
 /* ─── Footer ─── */
 .app-footer {
   display: flex; align-items: center; justify-content: center;
@@ -455,6 +473,7 @@ a:hover { text-decoration: underline; }
     </div>
     <div class="header-right">
       <button class="btn btn-ghost btn-sm" onclick="toggleCsDarkMode()" id="cs-dark-btn" title="切换深色模式">🌙</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleLang()" id="cs-lang-btn" title="切换语言">中/EN</button>
       <button class="btn btn-ghost btn-sm" onclick="resetChat()" title="新对话">🔄 新对话</button>
       <button class="btn btn-ghost btn-sm" onclick="backToApp()" title="返回主页">⌂ 主页</button>
     </div>
@@ -550,6 +569,7 @@ a:hover { text-decoration: underline; }
         <input class="chat-input" id="cs-input" type="text"
                placeholder="输入您的问题..." autofocus
                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csSend()}">
+        <button class="mic-btn" id="cs-mic-btn" onclick="startVoiceInput()" title="语音输入">🎤</button>
         <button class="send-btn" id="cs-send-btn" onclick="csSend()" title="发送">➤</button>
       </div>
     </main>
@@ -557,7 +577,7 @@ a:hover { text-decoration: underline; }
 
   <!-- Footer -->
   <footer class="app-footer">
-    灵枢 AI 客服 Demo · 基于 LLM + 工具调用架构 · <a href="https://github.com/kisaragiy/lingShu" target="_blank">GitHub</a>
+    <span id="cs-footer-text">灵枢 AI 客服 Demo · 基于 LLM + 工具调用架构</span> · <a href="https://github.com/kisaragiy/lingShu" target="_blank">GitHub</a>
   </footer>
 </div>
 
@@ -578,6 +598,65 @@ const CS_HISTORY_KEY = 'lingShu_cs_history';
 let _csSessionId = localStorage.getItem(CS_SESSION_KEY) || 'cs_' + Date.now().toString(36);
 let _csMessages = [];    // Current session messages: [{role, content, time}]
 let _csHistory = [];     // All sessions: [{id, title, count, updated}]
+
+// ─── Multi-language ───
+const LANG = {
+  zh: {
+    title: '灵枢智能客服',
+    placeholder: '输入您的问题...',
+    welcome: '你好！欢迎使用灵枢智能客服 🎉\n\n我可以帮你：\n📦 **查订单** — 输入订单号或手机号\n🚚 **查物流** — 查看配送进度\n🛒 **商品咨询** — 推荐、对比、参数\n💰 **查优惠** — 优惠券与促销活动\n📍 **改地址** — 修改收货地址\n🔄 **退换货** — 申请退换货\n❓ **FAQ** — 售后政策解答\n👤 **转人工** — 联系真人客服',
+    historyTitle: '💬 对话历史',
+    newChat: '➕ 新建',
+    scenarioTitle: '🎧 智能客服 Demo',
+    scenarioDesc: '基于 LLM + 工具调用的 AI 客服系统，覆盖售前咨询、订单查询、退换货处理等场景。',
+    demoLabel: '快速演示场景',
+    sendTitle: '发送',
+    micTitle: '语音输入',
+    footer: '灵枢 AI 客服 Demo · 基于 LLM + 工具调用架构',
+    thinkingDone: '🤖 思考完成 · 正在输入…',
+    noHistory: '暂无对话记录',
+    newConv: '新对话',
+    ratingOk: '感谢反馈 👍',
+    ratingBad: '感谢反馈，我们会改进',
+    copied: '已复制',
+    resetToast: '已开启新对话',
+    voiceUnavailable: '语音输入不可用',
+    darkTitle: '切换深色模式',
+    langTitle: '切换语言',
+    loading: '正在加载...',
+    agentLabel: '智能客服',
+    userLabel: '我',
+    errRequestFailed: '请求失败',
+  },
+  en: {
+    title: 'LingShu AI Assistant',
+    placeholder: 'Type your question...',
+    welcome: 'Hello! Welcome to LingShu AI Customer Service 🎉\n\nI can help you:\n📦 **Track Order** — Enter order number or phone\n🚚 **Track Shipment** — Check delivery status\n🛒 **Product Inquiry** — Recommendations, compare, specs\n💰 **Check Deals** — Coupons & promotions\n📍 **Change Address** — Update shipping address\n🔄 **Returns** — Request return/exchange\n❓ **FAQ** — After-sales policy\n👤 **Agent** — Talk to a human',
+    historyTitle: '💬 History',
+    newChat: '➕ New',
+    scenarioTitle: '🎧 AI Customer Service Demo',
+    scenarioDesc: 'LLM + Tool-Calling powered AI customer service for pre-sales, order tracking, returns & exchanges.',
+    demoLabel: 'Quick Demo Scenarios',
+    sendTitle: 'Send',
+    micTitle: 'Voice Input',
+    footer: 'LingShu AI Customer Service Demo · LLM + Tool-Calling',
+    thinkingDone: '🤖 Thinking complete · Typing…',
+    noHistory: 'No conversations yet',
+    newConv: 'New Conversation',
+    ratingOk: 'Thanks for the feedback 👍',
+    ratingBad: 'Thanks, we\'ll improve',
+    copied: 'Copied',
+    resetToast: 'New conversation started',
+    voiceUnavailable: 'Voice input not available',
+    darkTitle: 'Toggle dark mode',
+    langTitle: 'Switch language',
+    loading: 'Loading...',
+    agentLabel: 'Assistant',
+    userLabel: 'Me',
+    errRequestFailed: 'Request failed',
+  }
+};
+let _lang = localStorage.getItem('lingShu_cs_lang') || 'zh';
 
 // ─── Splash ───
 function hideSplash() {
@@ -609,6 +688,49 @@ function initCsDarkMode() {
     document.body.classList.add('dark');
     document.getElementById('cs-dark-btn').textContent = '☀️';
   }
+}
+
+// ─── Multi-language ───
+function toggleLang() {
+  _lang = _lang === 'zh' ? 'en' : 'zh';
+  localStorage.setItem('lingShu_cs_lang', _lang);
+  applyLang();
+}
+
+function applyLang() {
+  const t = LANG[_lang] || LANG.zh;
+  document.title = t.title;
+  document.querySelector('.header-title').textContent = t.title;
+  document.getElementById('cs-lang-btn').textContent = _lang === 'zh' ? '中/EN' : 'EN/中';
+  document.getElementById('cs-input').placeholder = t.placeholder;
+  document.getElementById('cs-send-btn').title = t.sendTitle;
+  document.getElementById('cs-mic-btn').title = t.micTitle;
+  document.getElementById('cs-dark-btn').title = t.darkTitle;
+  document.getElementById('cs-footer-text').textContent = t.footer;
+  document.getElementById('splash-status').textContent = t.loading;
+
+  // History panel header
+  const historyHeader = document.querySelector('.history-header span');
+  if (historyHeader) historyHeader.textContent = t.historyTitle;
+  const newBtn = document.querySelector('.history-new-btn');
+  if (newBtn) newBtn.textContent = t.newChat;
+
+  // Intro panel
+  const introH2 = document.querySelector('.intro-panel h2');
+  if (introH2) introH2.textContent = t.scenarioTitle;
+  const introP = document.querySelector('.intro-panel > div > p');
+  if (introP) introP.textContent = t.scenarioDesc;
+  const demoLabel = document.querySelector('.intro-panel div[style*="font-size:13px"]');
+  if (demoLabel) demoLabel.textContent = t.demoLabel;
+
+  // Re-render welcome / messages if needed
+  const container = document.getElementById('cs-messages');
+  if (container && container.children.length === 1) {
+    // Only the welcome bubble — re-render with new language
+    container.innerHTML = '';
+    showWelcome();
+  }
+  renderHistory();
 }
 
 // ─── Escape HTML ───
@@ -828,6 +950,35 @@ function showWelcome() {
     '❓ **FAQ** — 售后政策解答\n' +
     '👤 **转人工** — 联系真人客服');
   setQuickReplies(['📦 查订单', '🛒 推荐商品', '💰 有什么优惠', '👤 转人工']);
+}
+
+// ─── Voice Input ───
+function startVoiceInput() {
+  const recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!recognition) {
+    toast((LANG[_lang] || LANG.zh).voiceUnavailable, 'err');
+    return;
+  }
+  const r = new recognition();
+  r.lang = 'zh-CN';
+  r.interimResults = false;
+  r.maxAlternatives = 1;
+  const micBtn = document.getElementById('cs-mic-btn');
+  micBtn.classList.add('recording');
+  r.onresult = function(e) {
+    const transcript = e.results[0][0].transcript;
+    const input = document.getElementById('cs-input');
+    input.value = transcript;
+    csSend();
+  };
+  r.onerror = function(e) {
+    micBtn.classList.remove('recording');
+    toast((LANG[_lang] || LANG.zh).voiceUnavailable + ': ' + e.error, 'err');
+  };
+  r.onend = function() {
+    micBtn.classList.remove('recording');
+  };
+  r.start();
 }
 
 // ─── Send ───
