@@ -1,14 +1,19 @@
 """
 Misc tools — think, files, code, RAG, finance, stock, permissions
 """
+import contextlib
 import json
 import os
-import time
+from datetime import UTC
 
-from ..pipeline.llm import _session, HARNESS_DIR, WORKSPACE_DIR, call_llama, call_llama_censored, is_censored_content, _post_cloud
-
+from ..pipeline.llm import (
+    HARNESS_DIR,
+    WORKSPACE_DIR,
+    call_llama,
+    call_llama_censored,
+    is_censored_content,
+)
 from .registry import register_tool
-
 
 # ==================== 路径安全解析 ====================
 
@@ -70,9 +75,9 @@ def _tool_summarize(text: str, max_output: int = 500) -> str:
 def _tool_code_execute(code: str) -> str:
     """执行 Python 代码并返回输出（沙箱模式：限定安全模块和 builtins）"""
     import io
+    import signal as _sig
     import sys as _sys
     import traceback as _tb
-    import signal as _sig
 
     # ─── Restricted builtins ───
     _SAFE_BUILTINS = {
@@ -108,8 +113,7 @@ def _tool_code_execute(code: str) -> str:
             base = fullname.split('.')[0]
             if base in self._whitelist:
                 return None  # Use default import
-            raise ImportError("模块 '%s' 不在安全沙箱白名单中。只允许: %s" %
-                              (fullname, ', '.join(sorted(self._whitelist))))
+            raise ImportError("模块 '{}' 不在安全沙箱白名单中。只允许: {}".format(fullname, ', '.join(sorted(self._whitelist))))
 
     # ─── Pre-scan for dangerous patterns ───
     _DANGEROUS_KEYWORDS = [
@@ -121,7 +125,7 @@ def _tool_code_execute(code: str) -> str:
     ]
     for kw in _DANGEROUS_KEYWORDS:
         if kw in code:
-            return "[code_execute] ⚠️ 安全沙箱拒绝: 代码包含危险关键字 '%s'" % kw
+            return f"[code_execute] ⚠️ 安全沙箱拒绝: 代码包含危险关键字 '{kw}'"
 
     # Capture stdout
     old_stdout = _sys.stdout
@@ -136,7 +140,6 @@ def _tool_code_execute(code: str) -> str:
         compiled = compile(code.strip(), '<exec>', 'exec')
 
         # Set timeout on Windows
-        old_alarm = None
         if hasattr(_sig, 'SIGALRM'):
             _sig.signal(_sig.SIGALRM, _timeout_handler)
             _sig.alarm(30)
@@ -166,17 +169,15 @@ def _tool_code_execute(code: str) -> str:
     except TimeoutError:
         return "[code_execute] ⚠️ 代码执行超时（30s）"
     except Exception as e:
-        return "[code_execute] 执行失败: %s\n%s" % (e, _tb.format_exc()[:200])
+        return f"[code_execute] 执行失败: {e}\n{_tb.format_exc()[:200]}"
     finally:
         _sys.stdout = old_stdout
         # Restore original meta path
         if 'orig_meta_path' in dir():
             _sys.meta_path = orig_meta_path
         if hasattr(_sig, 'SIGALRM'):
-            try:
+            with contextlib.suppress(ValueError, OSError):
                 _sig.alarm(0)
-            except (ValueError, OSError):
-                pass
 
 
 def _tool_github_issues(repo: str = "", state: str = "open", limit: int = 10) -> str:
@@ -209,8 +210,8 @@ def _tool_datetime(format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
 
 
 def _now_iso() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    from datetime import datetime
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _tool_permission_gate(action: str = "", reason: str = "", confirm_code: str = "") -> str:
@@ -221,7 +222,7 @@ def _tool_permission_gate(action: str = "", reason: str = "", confirm_code: str 
     if confirm_code:
         path = os.path.join(log_dir, f"{confirm_code}.json")
         if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 record = json.load(f)
             record["confirmed_at"] = _now_iso()
             record["status"] = "confirmed"

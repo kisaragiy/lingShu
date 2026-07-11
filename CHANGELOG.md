@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.48.0 — 2026-07-11
+
+### Added — 代码质量
+- 🧹 **Ruff 配置** — 集成到 pyproject.toml，target py311，line-length 120，select E/F/I/UP/SIM
+- 🐛 **修复 2 个真实 bug** — cs_agent.py 缺 `import json`（F821）、api_fastapi.py 缺 `classify_cs_intent` 导入
+- 🚀 **自动 lint 修复** — `ruff check --fix` 修复 163 个问题（未使用导入、格式、简化等）
+- 🧑‍💻 **User-Agent 轮换** — 4 种浏览器 UA 自动轮换，降低 DDG 频率限制
+
+### Added — 搜索链稳定性
+- 🔥 **搜索预热** — `_warm_search_cache()` 在模块加载时后台线程预热 SearXNG + DDG，消除首次搜索冷启动延迟
+- 预热失败静默忽略
+
 ## v0.47.0 — 2026-07-11
 
 ### Added — 测试体系

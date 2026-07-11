@@ -11,8 +11,6 @@
 """
 
 import time
-import os
-import json
 
 # ─── 默认阈值 ───
 MAX_TOKENS_PER_TASK = 100000       # ~2.5 元（deepseek-v4 单价）

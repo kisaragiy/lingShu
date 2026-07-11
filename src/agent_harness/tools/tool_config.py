@@ -23,7 +23,7 @@ def _load():
     global _disabled_tools
     try:
         if CONFIG_FILE.exists():
-            with _lock, open(CONFIG_FILE, "r") as f:
+            with _lock, open(CONFIG_FILE) as f:
                 data = json.load(f)
             _disabled_tools = set(data.get("disabled_tools", []))
         else:

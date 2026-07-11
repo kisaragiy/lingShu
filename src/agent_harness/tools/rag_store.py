@@ -12,6 +12,7 @@ Storage: JSON chunks + NPY embeddings per collection.
 Supports PDF, DOCX, TXT, Markdown.
 """
 
+import contextlib
 import hashlib
 import json
 import math
@@ -20,7 +21,6 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -75,7 +75,7 @@ def _load_chunks(collection: str) -> list[dict]:
     with _lock:
         try:
             if os.path.isfile(p):
-                with open(p, "r", encoding="utf-8") as f:
+                with open(p, encoding="utf-8") as f:
                     return json.load(f)
         except (json.JSONDecodeError, OSError):
             # Corrupted file — will be rebuilt by next index operation
@@ -95,14 +95,12 @@ def _save_chunks(collection: str, chunks: list[dict]):
             os.replace(tmp, p)
         except Exception:
             if os.path.exists(tmp):
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp)
-                except OSError:
-                    pass
             raise
 
 
-def _load_embeddings(collection: str) -> Optional[np.ndarray]:
+def _load_embeddings(collection: str) -> np.ndarray | None:
     """Load embeddings NPY. Returns None on corruption or missing file."""
     p = _embs_path(collection)
     with _lock:
@@ -126,15 +124,11 @@ def _save_embeddings(collection: str, embs: np.ndarray):
             os.replace(tmp, p)
         except Exception:
             if os.path.exists(tmp + ".npy"):
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp + ".npy")
-                except OSError:
-                    pass
             if os.path.exists(tmp):
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp)
-                except OSError:
-                    pass
             raise
 
 
@@ -325,7 +319,7 @@ def _parse_file(filepath: str) -> str:
     ext = Path(filepath).suffix.lower()
 
     if ext in (".txt", ".md"):
-        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+        with open(filepath, encoding="utf-8", errors="replace") as f:
             return f.read()
 
     elif ext == ".pdf":
@@ -363,7 +357,7 @@ def _parse_file(filepath: str) -> str:
         return "\n".join(paragraphs)
 
     else:
-        raise ValueError("不支持的文件类型: %s。支持的: %s" % (ext, SUPPORTED_EXTENSIONS))
+        raise ValueError(f"不支持的文件类型: {ext}。支持的: {SUPPORTED_EXTENSIONS}")
 
 
 # ─── Public API ───
@@ -422,7 +416,7 @@ def index_file(filepath: str, collection: str = "default", filename: str = "") -
         dict with indexing results
     """
     if not os.path.isfile(filepath):
-        raise FileNotFoundError("文件不存在: %s" % filepath)
+        raise FileNotFoundError(f"文件不存在: {filepath}")
 
     source = filename or os.path.basename(filepath)
     text = _parse_file(filepath)

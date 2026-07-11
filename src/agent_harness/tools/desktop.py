@@ -1,13 +1,10 @@
 """
 Desktop tools — GUI automation, web browsing, chat sending
 """
+import contextlib
 import json
 import os
 import time
-
-from ..pipeline.llm import (_session, _post_cloud, is_censored_content,
-                          call_llama, call_llama_censored,
-                          HARNESS_DIR, WORKSPACE_DIR)
 
 from .registry import register_tool
 
@@ -28,8 +25,9 @@ def _set_clipboard_text(text: str):
 
 def _set_clipboard_dib(img):
     """设置剪贴板图像（DIB格式）"""
-    import win32clipboard
     import io as _io
+
+    import win32clipboard
     output = _io.BytesIO()
     img.convert("RGB").save(output, format="BMP")
     data = output.getvalue()[14:]
@@ -62,8 +60,9 @@ def _capture_error_screenshot(name: str, kwargs: dict, error: str):
 def _tool_desktop_diagnose(context: str = "") -> str:
     """桌面诊断：截图 + 列出所有可见窗口 + OCR 识别文字。
     在任何失败后调用以获取故障现场信息。"""
-    import pyautogui as _gui
     import time as _t
+
+    import pyautogui as _gui
     os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
     ts = _t.strftime("%Y%m%d_%H%M%S")
     lines = [f"[诊断] {context}", f"时间: {ts}"]
@@ -136,8 +135,7 @@ def _tool_wechat_send(contact: str = "", message: str = "", screenshot_first: bo
             if w.isMinimized:
                 w.restore()
             else:
-                try: w.activate()
-                except: pass
+                with contextlib.suppress(BaseException): w.activate()
             _t.sleep(1)
             rect = w.left, w.top, w.width, w.height
             log.append(f"[步骤1] 微信窗口已激活(pygetwindow): {w.title} ({w.width}x{w.height})")
@@ -146,7 +144,8 @@ def _tool_wechat_send(contact: str = "", message: str = "", screenshot_first: bo
     except Exception as e:
         log.append(f"[步骤1] pygetwindow 激活失败，尝试 win32gui: {e}")
         try:
-            import win32gui, win32con
+            import win32con
+            import win32gui
             def _find_wechat(h, _):
                 if win32gui.IsWindowVisible(h) and "微信" in win32gui.GetWindowText(h):
                     nonlocal hwnd, rect
@@ -229,8 +228,8 @@ def _tool_wechat_send(contact: str = "", message: str = "", screenshot_first: bo
     # 步骤5-6: 截图+粘贴
     if screenshot_first:
         try:
+
             from PIL import ImageGrab
-            import io
             img = ImageGrab.grab(all_screens=True)
             _set_clipboard_dib(img)
             spath = os.path.join(SCREENSHOTS_DIR, f"screenshot_{ts}.png")
@@ -304,8 +303,7 @@ def _tool_qq_send(contact: str = "", message: str = "", screenshot_first: bool =
         if w.isMinimized:
             w.restore()
         else:
-            try: w.activate()
-            except: pass
+            with contextlib.suppress(BaseException): w.activate()
         _t.sleep(1)
         rect = w.left, w.top, w.width, w.height
         log.append(f"[步骤1] QQ/TIM 窗口已激活: {w.title} ({w.width}x{w.height})")
@@ -611,7 +609,9 @@ def _tool_desktop_gui(action: str = "screenshot", x: int = -1, y: int = -1,
         return f"[截图保存] {path}"
     if action == "clipboard_image":
         try:
-            import win32clipboard, io
+            import io
+
+            import win32clipboard
             from PIL import ImageGrab
             img = ImageGrab.grab()
             output = io.BytesIO()
@@ -712,8 +712,7 @@ def _tool_desktop_gui(action: str = "screenshot", x: int = -1, y: int = -1,
             if w.isMinimized:
                 w.restore()
             else:
-                try: w.activate()
-                except: pass
+                with contextlib.suppress(BaseException): w.activate()
             import time as _t; _t.sleep(0.8)
             return f"[窗口] {w.title}\n{_verify()}"
         except ImportError:
@@ -776,8 +775,9 @@ def _tool_app_launch(app: str, args: str = "", wait_for_window: str = "", bring_
         # 等待窗口出现
         if wait_for_window:
             try:
-                import pygetwindow as gw
                 import time as _t
+
+                import pygetwindow as gw
                 for _ in range(int(wait_for_window)):
                     matched = [w for w in gw.getAllWindows() if wait_for_window.lower() in w.title.lower()]
                     if matched:

@@ -12,7 +12,6 @@ Usage:
 
 import argparse
 import sys
-import json
 import time
 
 
@@ -56,8 +55,8 @@ def cmd_run(args):
 
 def cmd_eval(args):
     """Run evaluation suite."""
+    from .eval import CI_TASKS, EVAL_DATASET, run_eval, save_report
     from .graph_multi import run_multi_agent
-    from .eval import run_eval, save_report, EVAL_DATASET, CI_TASKS
 
     def runner(task_request: str) -> dict:
         return run_multi_agent(

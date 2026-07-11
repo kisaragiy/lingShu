@@ -110,10 +110,10 @@ def _encode(payload: dict, secret: str) -> str:
     header = {"alg": "HS256", "typ": "JWT"}
     header_b64 = _b64enc(json.dumps(header, separators=(",", ":")).encode("utf-8"))
     payload_b64 = _b64enc(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    message = "%s.%s" % (header_b64, payload_b64)
+    message = f"{header_b64}.{payload_b64}"
     sig = hmac.new(secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).digest()
     sig_b64 = _b64enc(sig)
-    return "%s.%s.%s" % (header_b64, payload_b64, sig_b64)
+    return f"{header_b64}.{payload_b64}.{sig_b64}"
 
 
 # ─── Token verification ───
@@ -138,7 +138,7 @@ def verify_token(token: str, expected_type: str = "access") -> dict | None:
     header_b64, payload_b64, sig_b64 = parts
 
     # Verify signature
-    message = "%s.%s" % (header_b64, payload_b64)
+    message = f"{header_b64}.{payload_b64}"
     expected_sig = hmac.new(secret.encode("utf-8"), message.encode("utf-8"),
                             hashlib.sha256).digest()
     actual_sig = _b64dec(sig_b64)

@@ -8,10 +8,9 @@ Supports owner_id for multi-user isolation.
 
 import json
 import os
-import time
 import threading
+import time
 from pathlib import Path
-from typing import Optional
 
 REPORTS_DIR = Path(os.environ.get(
     "HARNESS_REPORTS_DIR",
@@ -30,7 +29,7 @@ def _load_index() -> list[dict]:
     _ensure()
     if INDEX_FILE.exists():
         try:
-            with _lock, open(INDEX_FILE, "r", encoding="utf-8") as f:
+            with _lock, open(INDEX_FILE, encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             pass
@@ -60,17 +59,17 @@ def save_report(title: str, content: str, tags: list[str] = None,
     _ensure()
     timestamp = int(time.time())
     report_id = "rpt_%d_%s" % (timestamp, _slugify(title)[:20])
-    filename = "%s.md" % report_id
+    filename = f"{report_id}.md"
     filepath = REPORTS_DIR / filename
 
     # Write markdown file
-    content_bytes = content.encode("utf-8")
+    content.encode("utf-8")
     with _lock, open(filepath, "w", encoding="utf-8") as f:
         f.write("---\n")
-        f.write("title: %s\n" % title)
+        f.write(f"title: {title}\n")
         f.write("created: %d\n" % timestamp)
-        f.write("tags: %s\n" % json.dumps(tags or [], ensure_ascii=False))
-        f.write("owner_id: %s\n" % owner_id)
+        f.write(f"tags: {json.dumps(tags or [], ensure_ascii=False)}\n")
+        f.write(f"owner_id: {owner_id}\n")
         f.write("---\n\n")
         f.write(content)
 
@@ -112,7 +111,7 @@ def list_reports(limit: int = 50, offset: int = 0,
     return index[offset:offset + limit]
 
 
-def get_report(report_id: str) -> Optional[dict]:
+def get_report(report_id: str) -> dict | None:
     """Get a report's metadata and content."""
     index = _load_index()
     for meta in index:

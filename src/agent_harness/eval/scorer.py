@@ -52,10 +52,7 @@ def score_task(
         keyword_score = 40  # no keyword check = full points
 
     # ─── Tool score (30 points) ───
-    if expected_tool:
-        tool_score = 30 if expected_tool in tool_calls else 0
-    else:
-        tool_score = 30  # no tool expected = full points
+    tool_score = (30 if expected_tool in tool_calls else 0) if expected_tool else 30
 
     # ─── Latency score (15 points) ───
     if latency_s <= 5:

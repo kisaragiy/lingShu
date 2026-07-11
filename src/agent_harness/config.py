@@ -72,4 +72,4 @@ def print_config_warnings():
     if not _CONFIG_WARNINGS:
         check_config()
     for w in _CONFIG_WARNINGS:
-        print("[config] ⚠️  %s" % w, file=sys.stderr)
+        print(f"[config] ⚠️  {w}", file=sys.stderr)

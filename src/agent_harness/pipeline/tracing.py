@@ -18,11 +18,11 @@ Usage:
 """
 
 import json
-import time
 import os
-from dataclasses import dataclass, field
-from typing import Any, Optional
+import time
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -157,7 +157,7 @@ class TraceCollector:
         import uuid
         self.trace_id = trace_id or str(uuid.uuid4())
         self._stack: list[TraceSpan] = []
-        self._root: Optional[TraceSpan] = None
+        self._root: TraceSpan | None = None
         self._start_time = time.time()
         self._cb_tripped = False
         self._cb_reason = ""

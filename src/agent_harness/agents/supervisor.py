@@ -1,16 +1,14 @@
 """Supervisor Agent — analyzes tasks and delegates to workers."""
 
 import json
-import time
-from typing import Any
 
 from ..config import (
-    LLAMA_API, DEEPSEEK_API, CLOUD_API_KEY,
-    MODEL_LLAMA, MODEL_DEEPSEEK,
+    LLAMA_API,
+    MODEL_LLAMA,
     SUPERVISOR_MAX_ROUNDS,
 )
-from ..pipeline.state import SupervisorState, WorkerResult
 from ..pipeline.cancel import is_cancelled
+from ..pipeline.state import SupervisorState
 
 # ─── Worker capability definitions ───
 
@@ -80,9 +78,9 @@ def supervisor_analyze(state: SupervisorState) -> dict:
         if kb_cols:
             kb_names = ", ".join(kb_cols)
             kb_hint = (
-                "\n\n📚 知识库可用! 已有 collections: %s\n"
+                f"\n\n📚 知识库可用! 已有 collections: {kb_names}\n"
                 "如果用户询问与已上传文档相关的问题，搜索 worker 使用 rag_query 工具检索知识库。\n"
-                "知识库问答应走 search worker。" % kb_names
+                "知识库问答应走 search worker。"
             )
     except Exception:
         pass

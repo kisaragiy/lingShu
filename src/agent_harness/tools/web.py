@@ -1,9 +1,10 @@
 """Web tools — search, fetch, scrape"""
+import contextlib
 import json
 import os
 import time
 
-from ..pipeline.llm import _session, HARNESS_DIR, call_llama
+from ..pipeline.llm import HARNESS_DIR, _session, call_llama
 
 _SEARCH_CACHE: dict[str, tuple[float, list]] = {}  # query_key → (timestamp, results)
 _SEARCH_CACHE_TTL = 300  # 5 分钟
@@ -75,12 +76,38 @@ def _log_search_diag(
     if len(_SEARCH_DIAG) > 20:
         _SEARCH_DIAG.pop()
     # Also print to stderr for server-side debugging
-    strategy_tag = " [%s]" % strategy if strategy else ""
+    strategy_tag = f" [{strategy}]" if strategy else ""
     print(
         "[Search] %s%s → %s (%d 结果) %s"
         % (engine, strategy_tag, status, count, detail[:60]),
         file=__import__("sys").stderr,
     )
+
+
+def _warm_search_cache():
+    """预热搜索缓存 — 在后台线程中 ping SearXNG 和 DDG，静默忽略所有错误。
+
+    在模块导入时通过 daemon 线程调用，不会阻塞启动或关闭。
+    """
+    import threading as _t
+
+    def _warm():
+        # 1. Ping SearXNG
+        with contextlib.suppress(Exception):
+            _session.get(
+                "http://127.0.0.1:4000/search",
+                params={"q": "test", "format": "json"},
+                timeout=5,
+            )
+        # 2. Ping DDG
+        with contextlib.suppress(Exception):
+            _session.get(
+                "https://html.duckduckgo.com/html/?q=test",
+                headers={"User-Agent": _pick_user_agent()},
+                timeout=5,
+            )
+
+    _t.Thread(target=_warm, daemon=True).start()
 
 
 def _tool_search(query: str, max_results: int = 5) -> list:
@@ -89,9 +116,9 @@ def _tool_search(query: str, max_results: int = 5) -> list:
     返回格式: ["title: snippet [url]", ...]
     搜索失败时返回 ["[搜索失败] 原因"] 以便 validate_result 识别。
     """
-    import time as _time
     import re as _re
     import sys
+    import time as _time
 
     # 缓存命中
     now = _time.time()
@@ -136,6 +163,15 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                 headers=headers,
                 timeout=15,
             )
+            if r.status_code != 200:
+                # 重试一次：换 User-Agent 避免 DDG 限流
+                _log_search_diag(query, "DuckDuckGo", "retry", 0, f"HTTP {r.status_code}")
+                r = _session.get(
+                    "https://html.duckduckgo.com/html/",
+                    params={"q": query},
+                    headers={"User-Agent": _pick_user_agent()},
+                    timeout=15,
+                )
             if r.status_code == 200:
                 # Parse result links from DuckDuckGo HTML (multi-strategy)
                 html = r.text
@@ -158,7 +194,7 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                     nu = _normalize_url(url)
                     if nu not in seen_urls:
                         seen_urls.add(nu)
-                        parsed.append("%s: %s [%s]" % (title, snippet, url))
+                        parsed.append(f"{title}: {snippet} [{url}]")
                         s1_count += 1
                 strategy_counts["s1_result__a"] = s1_count
 
@@ -178,7 +214,7 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                         if nu not in seen_urls:
                             seen_urls.add(nu)
                             snippet = snippets2[i] if i < len(snippets2) else ""
-                            parsed.append("%s: %s [%s]" % (title, snippet, url))
+                            parsed.append(f"{title}: {snippet} [{url}]")
                             s2_count += 1
                     strategy_counts["s2_result-link"] = s2_count
 
@@ -193,11 +229,10 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                         nu = _normalize_url(url)
                         if nu not in seen_urls and not any(
                             skip in url for skip in ["duckduckgo.com", "//ads."]
-                        ):
-                            if _re.search(r'/(article|page|post|item|product|news|content|blog)', url):
-                                seen_urls.add(nu)
-                                parsed.append("%s: [%s]" % (title, url))
-                                s3_count += 1
+                        ) and _re.search(r'/(article|page|post|item|product|news|content|blog)', url):
+                            seen_urls.add(nu)
+                            parsed.append(f"{title}: [{url}]")
+                            s3_count += 1
                     strategy_counts["s3_generic_article"] = s3_count
 
                 # Strategy 4: h2.result__title containers and generic result containers
@@ -212,7 +247,7 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                         nu = _normalize_url(url)
                         if nu not in seen_urls:
                             seen_urls.add(nu)
-                            parsed.append("%s: [%s]" % (title.strip(), url))
+                            parsed.append(f"{title.strip()}: [{url}]")
                             s4a_count += 1
 
                     # 4b: any <a href="http..."> inside a result-like container div
@@ -233,7 +268,7 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                                     skip in url for skip in ["duckduckgo.com", "//ads."]
                                 ):
                                     seen_urls.add(nu)
-                                    parsed.append("%s: [%s]" % (title.strip(), url))
+                                    parsed.append(f"{title.strip()}: [{url}]")
                                     s4b_count += 1
                                     if len(parsed) >= max_results:
                                         break
@@ -299,6 +334,27 @@ def _tool_fetch(url: str, max_chars: int = 8000) -> str:
         return f"[fetch] 抓取失败: {e}"
 
 
+def _try_playwright_fetch(url: str) -> str | None:
+    """尝试用 Playwright 无头浏览器抓取页面文本。
+
+    返回提取的纯文本（前 5000 字符），失败返回 None。
+    所有错误静默忽略，超时 15 秒。
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, timeout=15000)
+            page = browser.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            page.wait_for_timeout(3000)
+            text = page.inner_text("body") or ""
+            browser.close()
+            return text[:5000]
+    except Exception:
+        return None
+
+
 def _tool_web_scrape(url: str, extract_links: bool = False) -> str:
     """强化版网页爬取 — 提取标题 + 正文 + 可选链接列表"""
     try:
@@ -334,13 +390,29 @@ def _tool_web_scrape(url: str, extract_links: bool = False) -> str:
 def _tool_agent_browser(url: str, instruction: str) -> str:
     """智能浏览器 — 按指令提取关键信息，不返回全页文本（节省 token）"""
     import re as _re
+
+    text = None
+
+    # 1. Normal HTTP fetch
     try:
         r = _session.get(url, timeout=15, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         })
-        if r.status_code != 200:
-            return f"[browser] HTTP {r.status_code}"
-        text = r.text
+        if r.status_code == 200:
+            text = r.text
+    except Exception:
+        pass
+
+    # 2. Fallback: Playwright（当 HTTP 抓取失败时）
+    if text is None:
+        playwright_text = _try_playwright_fetch(url)
+        if playwright_text is not None:
+            text = playwright_text
+
+    if text is None:
+        return "[browser] 抓取失败: HTTP 和 Playwright 均不可用"
+
+    try:
         for tag in ("script", "style", "nav", "footer", "header"):
             text = _re.sub(rf"<{tag}[^>]*>.*?</{tag}>", " ", text, flags=_re.DOTALL | _re.IGNORECASE)
         text = _re.sub(r"<[^>]+>", " ", text)
@@ -349,10 +421,14 @@ def _tool_agent_browser(url: str, instruction: str) -> str:
         result, _ = call_llama([{"role": "user", "content": prompt}], system_prompt="你是信息提取器，只输出结果。")
         return result.strip()[:1500]
     except Exception as e:
-        return f"[browser] 抓取失败: {e}"
+        return f"[browser] 处理失败: {e}"
 
+
+# Execute at import: warm search cache in background daemon thread
+_warm_search_cache()
 
 from .registry import register_tool
+
 register_tool("search", _tool_search, {
     "description": "搜索网络获取最新信息",
     "properties": {"query": "string", "max_results": "integer"},

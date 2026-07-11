@@ -11,16 +11,16 @@ Flow:
   5. Return response + tool results metadata
 """
 
+import json
+
 from .customer_service import (
-    cs_lookup_order,
-    cs_create_ticket,
-    cs_check_ticket,
-    cs_search_faq,
-    cs_query_product,
-    cs_check_promotion,
-    cs_estimate_delivery,
-    cs_modify_address,
     classify_cs_intent,
+    cs_check_promotion,
+    cs_create_ticket,
+    cs_estimate_delivery,
+    cs_lookup_order,
+    cs_query_product,
+    cs_search_faq,
 )
 
 
@@ -199,12 +199,12 @@ def _call_cs_llm(message: str, intent: str, tool_data: str, context: str) -> str
     )
 
     user = (
-        "【用户消息】\n%s\n\n"
-        "【识别意图】\n%s\n\n"
-        "【查询结果】\n%s\n\n"
-        "【对话历史】\n%s\n\n"
+        "【用户消息】\n{}\n\n"
+        "【识别意图】\n{}\n\n"
+        "【查询结果】\n{}\n\n"
+        "【对话历史】\n{}\n\n"
         "请根据以上信息生成客服回复。"
-    ) % (message, intent, tool_data, context or "（无）")
+    ).format(message, intent, tool_data, context or "（无）")
 
     reply = _call_llm(
         [{"role": "user", "content": user}],
@@ -302,7 +302,10 @@ def _call_cs_llm_stream_tokens(
     Uses requests with stream=True. Returns empty list if LLM fails
     (caller should fall back to template).
     """
+    import json
+
     import requests as req_lib
+
     from ..config import LLAMA_API, MODEL_LLAMA
 
     system = (
@@ -321,12 +324,12 @@ def _call_cs_llm_stream_tokens(
     )
 
     user = (
-        "【用户消息】\n%s\n\n"
-        "【识别意图】\n%s\n\n"
-        "【查询结果】\n%s\n\n"
-        "【对话历史】\n%s\n\n"
+        "【用户消息】\n{}\n\n"
+        "【识别意图】\n{}\n\n"
+        "【查询结果】\n{}\n\n"
+        "【对话历史】\n{}\n\n"
         "请根据以上信息生成客服回复。"
-    ) % (message, intent, tool_data, context or "（无）")
+    ).format(message, intent, tool_data, context or "（无）")
 
     payload = {
         "model": MODEL_LLAMA,

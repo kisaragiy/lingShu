@@ -1,13 +1,12 @@
 """Evaluation Runner — runs all eval tasks through Agent Harness and reports scores."""
 
-import time
 import json
 import os
-from typing import Any
+import time
 from dataclasses import dataclass, field
 
-from .dataset import EVAL_DATASET, CI_TASKS, NETWORK_TASKS
-from .scorer import score_task, EvalScore
+from .dataset import CI_TASKS, EVAL_DATASET, NETWORK_TASKS
+from .scorer import EvalScore, score_task
 
 
 @dataclass
@@ -27,7 +26,7 @@ class EvalReport:
     def summary(self) -> str:
         lines = [
             f"\n{'='*60}",
-            f"  Agent Harness Evaluation Report",
+            "  Agent Harness Evaluation Report",
             f"  {self.timestamp}",
             f"{'='*60}",
             f"  Tasks: {self.total_tasks} total, {self.passed} passed, "
@@ -40,7 +39,7 @@ class EvalReport:
         for s in self.scores:
             lines.append(f"  {s.summary()}")
         if self.failures:
-            lines.append(f"\n  Failures:")
+            lines.append("\n  Failures:")
             for f in self.failures:
                 lines.append(f"    - {f}")
         return "\n".join(lines)

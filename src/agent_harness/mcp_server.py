@@ -7,14 +7,15 @@ Protocol: JSON-RPC 2.0 over stdio
 """
 
 import json
-import sys
 import os
+import sys
 import traceback
 
 # Ensure imports work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_harness.tools.registry import TOOL_REGISTRY, call_tool as _call_tool
+from agent_harness.tools.registry import TOOL_REGISTRY
+from agent_harness.tools.registry import call_tool as _call_tool
 
 
 def _rpc_error(id_val, code: int, message: str):

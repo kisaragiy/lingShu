@@ -1,6 +1,6 @@
 """Pipeline state definitions — single-agent and multi-agent."""
 
-from typing import TypedDict, Any
+from typing import Any, TypedDict
 
 
 class HarnessState(TypedDict, total=False):

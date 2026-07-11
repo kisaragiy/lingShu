@@ -5,6 +5,7 @@ how long each took, search queries executed, etc.
 Storage: ~/.agent-harness/agent_logs/{session_id}.jsonl
 """
 
+import contextlib
 import json
 import os
 import threading
@@ -31,7 +32,7 @@ def log_event(session_id: str, event_type: str, data: dict):
     """
     _ensure()
     safe_id = session_id.replace("/", "_").replace("\\", "_").replace("..", "_")[:40]
-    log_file = LOG_DIR / ("%s.jsonl" % safe_id)
+    log_file = LOG_DIR / (f"{safe_id}.jsonl")
     entry = {
         "ts": time.time(),
         "type": event_type,
@@ -57,19 +58,17 @@ def get_logs(session_id: str, limit: int = 50) -> list[dict]:
     """
     _ensure()
     safe_id = session_id.replace("/", "_").replace("\\", "_").replace("..", "_")[:40]
-    log_file = LOG_DIR / ("%s.jsonl" % safe_id)
+    log_file = LOG_DIR / (f"{safe_id}.jsonl")
     events = []
     with _lock:
         try:
             if log_file.exists():
-                with open(log_file, "r", encoding="utf-8") as f:
+                with open(log_file, encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if line:
-                            try:
+                            with contextlib.suppress(json.JSONDecodeError):
                                 events.append(json.loads(line))
-                            except json.JSONDecodeError:
-                                pass
         except OSError:
             pass
     events.sort(key=lambda e: e.get("ts", 0), reverse=True)
@@ -80,7 +79,7 @@ def clear_logs(session_id: str) -> bool:
     """Delete agent logs for a session."""
     _ensure()
     safe_id = session_id.replace("/", "_").replace("\\", "_").replace("..", "_")[:40]
-    log_file = LOG_DIR / ("%s.jsonl" % safe_id)
+    log_file = LOG_DIR / (f"{safe_id}.jsonl")
     with _lock:
         try:
             if log_file.exists():

@@ -5,7 +5,6 @@ Tools registry — tool registration, invocation, and validation
 from tools import TOOL_REGISTRY, register_tool, call_tool, validate_result
 """
 
-import json
 import os
 import time
 

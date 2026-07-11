@@ -12,7 +12,6 @@ Scenarios:
   - 投诉 + FAQ + 转人工
 """
 
-import json
 import random
 import time
 
@@ -260,15 +259,15 @@ def cs_lookup_order(query: str) -> str:
         lines = [
             "📦 **订单信息**",
             "━━━━━━━━━━━━━━━━━",
-            "**订单号**: %s" % order["order_id"],
-            "**商品**: %s" % order["product"],
+            "**订单号**: {}".format(order["order_id"]),
+            "**商品**: {}".format(order["product"]),
             "**金额**: ¥%d" % order["price"],
-            "**状态**: %s" % order["status"],
+            "**状态**: {}".format(order["status"]),
             "**物流**: %s" % (order["logistics"] or "待发货"),
-            "**预计送达**: %s" % order["estimated_delivery"],
+            "**预计送达**: {}".format(order["estimated_delivery"]),
         ]
         if order.get("notes"):
-            lines.append("**备注**: %s" % order["notes"])
+            lines.append("**备注**: {}".format(order["notes"]))
         return "\n".join(lines)
 
     orders = _find_orders_by_phone(query)
@@ -301,15 +300,15 @@ def cs_query_product(query: str) -> str:
         if p["name"].lower() == q or p["id"].lower() == q:
             stock_icon = "✅ 有货" if p["stock"] else "❌ 已售罄"
             lines = [
-                "🛒 **%s**" % p["name"],
+                "🛒 **{}**".format(p["name"]),
                 "━━━━━━━━━━━━━━━━━",
                 "**价格**: ¥%d" % p["price"],
-                "**库存**: %s" % stock_icon,
-                "**分类**: %s" % p["category"],
-                "**简介**: %s" % p["desc"],
+                f"**库存**: {stock_icon}",
+                "**分类**: {}".format(p["category"]),
+                "**简介**: {}".format(p["desc"]),
             ]
             if p.get("installment"):
-                lines.append("**分期**: %s" % p["installment"])
+                lines.append("**分期**: {}".format(p["installment"]))
             return "\n".join(lines)
 
     # Partial match by name
@@ -330,7 +329,7 @@ def cs_query_product(query: str) -> str:
             result += "• `%s` — ¥%d %s\n   %s\n" % (p["name"], p["price"], stock, p["desc"][:60] + "...")
         return result
 
-    return "❌ 未找到相关商品 `%s`。试试其他关键词。" % query
+    return f"❌ 未找到相关商品 `{query}`。试试其他关键词。"
 
 
 def cs_check_promotion(query: str = "") -> str:
@@ -361,9 +360,9 @@ def cs_check_promotion(query: str = "") -> str:
     result = "🎉 **当前可用优惠**\n"
     result += "━━━━━━━━━━━━━━━━━\n"
     for p in available:
-        result += "\n**%s** (`%s`)\n" % (p["name"], p["code"])
-        result += "└ %s | 有效期至 %s\n" % (p["discount"], p["valid_until"])
-        result += "└ 适用: %s\n" % p["products"]
+        result += "\n**{}** (`{}`)\n".format(p["name"], p["code"])
+        result += "└ {} | 有效期至 {}\n".format(p["discount"], p["valid_until"])
+        result += "└ 适用: {}\n".format(p["products"])
     result += "\n💡 结账时输入优惠码即可使用。"
     return result
 
@@ -373,20 +372,20 @@ def cs_estimate_delivery(order_id: str = "") -> str:
     if order_id:
         order = _find_order_by_id(order_id)
         if not order:
-            return "❌ 未找到订单 `%s`。" % order_id
+            return f"❌ 未找到订单 `{order_id}`。"
 
         status = order["status"]
         if status in ("已签收", "已完成"):
-            return "✅ 订单 `%s` 已于预计日期前送达。如未收到，请联系客服。" % order_id
+            return f"✅ 订单 `{order_id}` 已于预计日期前送达。如未收到，请联系客服。"
         elif status == "已取消":
-            return "ℹ️ 订单 `%s` 已取消，无需配送。" % order_id
+            return f"ℹ️ 订单 `{order_id}` 已取消，无需配送。"
         elif status == "待付款":
-            return "⚠️ 订单 `%s` 尚未付款，请完成支付后安排发货。" % order_id
+            return f"⚠️ 订单 `{order_id}` 尚未付款，请完成支付后安排发货。"
         elif order.get("logistics"):
-            return "🚚 订单 `%s` 配送中（%s），预计 **%s** 前送达。" % (
+            return "🚚 订单 `{}` 配送中（{}），预计 **{}** 前送达。".format(
                 order_id, order["logistics"], order["estimated_delivery"])
         else:
-            return "📦 订单 `%s` 正在准备中，预计 **%s** 前发货。" % (order_id, order["estimated_delivery"])
+            return "📦 订单 `{}` 正在准备中，预计 **{}** 前发货。".format(order_id, order["estimated_delivery"])
     else:
         return (
             "📬 **配送时效参考**\n"
@@ -407,21 +406,21 @@ def cs_modify_address(order_id: str, new_address: str) -> str:
     """
     order = _find_order_by_id(order_id)
     if not order:
-        return "❌ 未找到订单 `%s`。" % order_id
+        return f"❌ 未找到订单 `{order_id}`。"
 
     if order["status"] not in ("待发货", "待付款"):
-        return "❌ 订单 `%s` 当前状态为「%s」，已无法修改地址。\n已发货订单请联系物流公司改址。" % (order_id, order["status"])
+        return "❌ 订单 `{}` 当前状态为「{}」，已无法修改地址。\n已发货订单请联系物流公司改址。".format(order_id, order["status"])
 
     # Simulate address change
     old_addr = order["address"]
     return (
         "✅ **地址修改成功**\n"
         "━━━━━━━━━━━━━━━━━\n"
-        "**订单**: `%s`\n"
-        "**原地址**: %s\n"
-        "**新地址**: %s\n\n"
+        f"**订单**: `{order_id}`\n"
+        f"**原地址**: {old_addr}\n"
+        f"**新地址**: {new_address}\n\n"
         "新地址将在下次配送时生效。"
-    ) % (order_id, old_addr, new_address)
+    )
 
 
 def cs_search_faq(query: str, top_k: int = 3) -> str:
@@ -444,7 +443,7 @@ def cs_search_faq(query: str, top_k: int = 3) -> str:
     if results:
         items = []
         for _, entry in results:
-            items.append("**❓ %s**\n%s" % (entry["question"], entry["answer"]))
+            items.append("**❓ {}**\n{}".format(entry["question"], entry["answer"]))
         return "\n\n".join(items)
 
     # Try RAG as fallback
@@ -475,12 +474,12 @@ def cs_create_ticket(order_id: str, issue_type: str, description: str) -> str:
     return (
         "✅ **工单已创建**\n"
         "━━━━━━━━━━━━━━━━━\n"
-        "**工单号**: %s\n"
-        "**类型**: %s\n"
-        "**状态**: %s\n"
-        "**时间**: %s\n\n"
+        "**工单号**: {}\n"
+        "**类型**: {}\n"
+        "**状态**: {}\n"
+        "**时间**: {}\n\n"
         "我们会尽快处理您的请求，预计在 24 小时内回复。"
-    ) % (ticket_id, issue_type, ticket["status"], ticket["created_at"])
+    ).format(ticket_id, issue_type, ticket["status"], ticket["created_at"])
 
 
 def cs_check_ticket(ticket_id: str) -> str:
@@ -490,12 +489,12 @@ def cs_check_ticket(ticket_id: str) -> str:
             return (
                 "🎫 **工单状态**\n"
                 "━━━━━━━━━━━━━━━━━\n"
-                "**工单号**: %s\n"
-                "**类型**: %s\n"
-                "**状态**: %s\n"
-                "**创建时间**: %s\n"
-            ) % (t["ticket_id"], t["type"], t["status"], t["created_at"])
-    return "❌ 未找到工单 `%s`，请检查工单号是否正确。" % ticket_id
+                "**工单号**: {}\n"
+                "**类型**: {}\n"
+                "**状态**: {}\n"
+                "**创建时间**: {}\n"
+            ).format(t["ticket_id"], t["type"], t["status"], t["created_at"])
+    return f"❌ 未找到工单 `{ticket_id}`，请检查工单号是否正确。"
 
 
 # ═══════════════════════════════════════

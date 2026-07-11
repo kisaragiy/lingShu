@@ -4,12 +4,11 @@ Takes raw chat analysis content, re-processes it through the multi-agent
 to add source citations, proper formatting, and generates a standalone HTML file.
 """
 
-import json
 import os
 import re
 import time
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 REPORTS_DIR = Path(os.environ.get(
     "HARNESS_REPORTS_DIR",
@@ -156,15 +155,15 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
                 seen_headers.add(h_text)
                 anchor = h_text.lower().replace(" ", "-").replace("（","").replace("）","").replace("，","").replace("、","-")[:40]
                 level = "toc-h3" if line_s.startswith("### ") else "toc-h2"
-                toc_items.append('<li class="%s"><a href="#%s">%s</a></li>' % (level, anchor, h_text))
+                toc_items.append(f'<li class="{level}"><a href="#{anchor}">{h_text}</a></li>')
 
     toc_html = ""
     if len(toc_items) > 2:
         toc_html = """
         <div class="toc">
             <h2 class="toc-title">📑 目录</h2>
-            <ol class="toc-list">%s</ol>
-        </div>""" % "\n".join(toc_items)
+            <ol class="toc-list">{}</ol>
+        </div>""".format("\n".join(toc_items))
 
     # Add anchors to headers in body_html
     seen_headers = set()
@@ -174,7 +173,7 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
             return m.group(0)
         seen_headers.add(h_text)
         anchor = h_text.lower().replace(" ", "-").replace("（","").replace("）","").replace("，","").replace("、","-")[:40]
-        return '<%s id="%s">%s</%s>' % (m.group(1), anchor, h_text, m.group(1))
+        return f'<{m.group(1)} id="{anchor}">{h_text}</{m.group(1)}>'
 
     body_html = re.sub(r'<(h[23])>(.*?)</\1>', _anchor_header, body_html)
 
@@ -195,141 +194,141 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
             type_icon = {"news": "📰", "paper": "📄", "official": "🏛️", "web": "🌐"}.get(source_type, "🌐")
             access_date = s.get("access_date", _now_str)
             items += '<li id="source-%d" class="source-item">' % i
-            items += '<span class="source-type">%s</span> ' % type_icon
-            items += '<a href="%s" target="_blank" rel="noopener">%s</a>' % (url, title_text)
-            items += '<span class="source-meta"> · %s · %s</span>' % (source_type, access_date)
+            items += f'<span class="source-type">{type_icon}</span> '
+            items += f'<a href="{url}" target="_blank" rel="noopener">{title_text}</a>'
+            items += f'<span class="source-meta"> · {source_type} · {access_date}</span>'
             items += '</li>'
-        sources_html = """
+        sources_html = f"""
         <div class="section">
             <h2>📎 参考来源</h2>
-            <ol class="sources">%s</ol>
-        </div>""" % items
+            <ol class="sources">{items}</ol>
+        </div>"""
 
     html = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>%s</title>
+<title>{}</title>
 <style>
-  @page { margin: 2.2cm 2.5cm; size: A4; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
+  @page {{ margin: 2.2cm 2.5cm; size: A4; }}
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
     font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
     color: #1e293b; background: #f1f5f9; line-height: 1.75;
     padding: 40px 24px; max-width: 960px; margin: 0 auto;
-  }
-  .report-container {
+  }}
+  .report-container {{
     background: #ffffff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.06);
     padding: 48px 56px; margin-bottom: 24px;
-  }
-  .report-header {
+  }}
+  .report-header {{
     border-bottom: 3px solid #1e293b; padding-bottom: 28px; margin-bottom: 36px;
-  }
-  .report-header h1 {
+  }}
+  .report-header h1 {{
     font-size: 30px; font-weight: 700; color: #0f172a; margin-bottom: 12px;
     line-height: 1.3; letter-spacing: 0.5px;
-  }
-  .report-meta {
+  }}
+  .report-meta {{
     font-size: 13px; color: #64748b; display: flex; flex-wrap: wrap; gap: 16px;
-  }
-  .report-meta span { display: inline-flex; align-items: center; gap: 4px; }
-  .tag {
+  }}
+  .report-meta span {{ display: inline-flex; align-items: center; gap: 4px; }}
+  .tag {{
     display: inline-block; padding: 2px 10px; border-radius: 6px;
     background: #eef2ff; color: #2563eb; font-size: 11px; font-weight: 500;
-  }
+  }}
   /* ─── TOC ─── */
-  .toc { background: #f8fafc; border-radius: 12px; padding: 24px 28px; margin-bottom: 32px; border: 1px solid #e2e8f0; }
-  .toc-title { font-size: 16px; font-weight: 600; color: #0f172a; margin-bottom: 12px; border: none; padding: 0; }
-  .toc-list { list-style: none; padding: 0; margin: 0; }
-  .toc-list li { margin-bottom: 6px; font-size: 14px; }
-  .toc-list li a { color: #2563eb; text-decoration: none; }
-  .toc-list li a:hover { text-decoration: underline; }
-  .toc-list li.toc-h3 { padding-left: 20px; font-size: 13px; color: #475569; }
+  .toc {{ background: #f8fafc; border-radius: 12px; padding: 24px 28px; margin-bottom: 32px; border: 1px solid #e2e8f0; }}
+  .toc-title {{ font-size: 16px; font-weight: 600; color: #0f172a; margin-bottom: 12px; border: none; padding: 0; }}
+  .toc-list {{ list-style: none; padding: 0; margin: 0; }}
+  .toc-list li {{ margin-bottom: 6px; font-size: 14px; }}
+  .toc-list li a {{ color: #2563eb; text-decoration: none; }}
+  .toc-list li a:hover {{ text-decoration: underline; }}
+  .toc-list li.toc-h3 {{ padding-left: 20px; font-size: 13px; color: #475569; }}
   /* ─── Headings ─── */
-  h2 {
+  h2 {{
     font-size: 22px; font-weight: 600; color: #0f172a;
     margin: 36px 0 16px; padding-bottom: 8px;
     border-bottom: 2px solid #e2e8f0;
-  }
-  h2:first-of-type { margin-top: 0; }
-  h3 {
+  }}
+  h2:first-of-type {{ margin-top: 0; }}
+  h3 {{
     font-size: 17px; font-weight: 600; color: #1e293b;
     margin: 24px 0 10px;
-  }
+  }}
   /* ─── Body ─── */
-  p { margin-bottom: 14px; font-size: 14.5px; color: #334155; }
-  table {
-    width: 100%%; border-collapse: separate; border-spacing: 0;
+  p {{ margin-bottom: 14px; font-size: 14.5px; color: #334155; }}
+  table {{
+    width: 100%; border-collapse: separate; border-spacing: 0;
     margin: 20px 0; font-size: 13.5px; border-radius: 10px; overflow: hidden;
     border: 1px solid #e2e8f0;
-  }
-  th {
+  }}
+  th {{
     background: #f1f5f9; color: #0f172a; padding: 10px 14px;
     text-align: left; font-weight: 600; font-size: 13px;
     border-bottom: 2px solid #e2e8f0;
-  }
-  td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; }
-  tr:last-child td { border-bottom: none; }
-  tr:nth-child(even) td { background: #f8fafc; }
-  ul, ol { margin: 8px 0 16px 20px; font-size: 14.5px; color: #334155; }
-  li { margin-bottom: 6px; }
-  strong { color: #0f172a; }
-  .highlight {
+  }}
+  td {{ padding: 10px 14px; border-bottom: 1px solid #f1f5f9; }}
+  tr:last-child td {{ border-bottom: none; }}
+  tr:nth-child(even) td {{ background: #f8fafc; }}
+  ul, ol {{ margin: 8px 0 16px 20px; font-size: 14.5px; color: #334155; }}
+  li {{ margin-bottom: 6px; }}
+  strong {{ color: #0f172a; }}
+  .highlight {{
     background: #f8fafc; padding: 18px 22px; border-radius: 10px;
     border-left: 4px solid #2563eb; margin: 20px 0;
     font-size: 14px; color: #1e293b;
-  }
+  }}
   /* ─── Sources ─── */
-  .sources { margin: 12px 0; }
-  .sources li { margin-bottom: 10px; }
-  .source-item { padding: 4px 0; }
-  .source-type { font-size: 14px; margin-right: 4px; }
-  .source-meta { font-size: 11px; color: #94a3b8; }
-  .sources a { color: #2563eb; text-decoration: none; word-break: break-all; font-size: 13px; }
-  .sources a:hover { text-decoration: underline; }
-  sup.cite { font-size: 11px; vertical-align: super; line-height: 0; margin: 0 2px; }
-  sup.cite a { color: #2563eb; text-decoration: none; font-weight: 600; }
-  sup.cite a:hover { text-decoration: underline; }
+  .sources {{ margin: 12px 0; }}
+  .sources li {{ margin-bottom: 10px; }}
+  .source-item {{ padding: 4px 0; }}
+  .source-type {{ font-size: 14px; margin-right: 4px; }}
+  .source-meta {{ font-size: 11px; color: #94a3b8; }}
+  .sources a {{ color: #2563eb; text-decoration: none; word-break: break-all; font-size: 13px; }}
+  .sources a:hover {{ text-decoration: underline; }}
+  sup.cite {{ font-size: 11px; vertical-align: super; line-height: 0; margin: 0 2px; }}
+  sup.cite a {{ color: #2563eb; text-decoration: none; font-weight: 600; }}
+  sup.cite a:hover {{ text-decoration: underline; }}
   /* ─── Footer / Print bar ─── */
-  .footer { text-align: center; font-size: 12px; color: #94a3b8; padding: 24px 0; }
-  .print-bar { text-align: center; margin-bottom: 12px; }
-  .print-btn {
+  .footer {{ text-align: center; font-size: 12px; color: #94a3b8; padding: 24px 0; }}
+  .print-bar {{ text-align: center; margin-bottom: 12px; }}
+  .print-btn {{
     background: #2563eb; color: #fff; border: none; padding: 8px 20px;
     border-radius: 8px; font-size: 13px; cursor: pointer; transition: background .15s;
-  }
-  .print-btn:hover { background: #1d4ed8; }
-  @media print {
-    body { background: #fff; padding: 0; }
-    .report-container { box-shadow: none; border-radius: 0; padding: 40px; break-inside: avoid; }
-    .print-bar { display: none; }
-    .footer { position: running(footer); }
-    h2, h3 { break-after: avoid; }
-    table { break-inside: avoid; }
-  }
+  }}
+  .print-btn:hover {{ background: #1d4ed8; }}
+  @media print {{
+    body {{ background: #fff; padding: 0; }}
+    .report-container {{ box-shadow: none; border-radius: 0; padding: 40px; break-inside: avoid; }}
+    .print-bar {{ display: none; }}
+    .footer {{ position: running(footer); }}
+    h2, h3 {{ break-after: avoid; }}
+    table {{ break-inside: avoid; }}
+  }}
 </style>
 </head>
 <body>
 <div class="report-container">
   <div class="report-header">
-    <h1>%s</h1>
+    <h1>{}</h1>
     <div class="report-meta">
-      <span>📅 %s</span>
-      <span>📄 %s 字 · 约 %s 分钟阅读</span>
+      <span>📅 {}</span>
+      <span>📄 {} 字 · 约 {} 分钟阅读</span>
       <span>⚡ 灵枢 AI 调研助手</span>
     </div>
   </div>
-  %s
-  %s
-  %s
-  %s
+  {}
+  {}
+  {}
+  {}
 </div>
 <div class="print-bar"><button class="print-btn" onclick="window.print()">🖨️ 打印 / 导出 PDF</button></div>
 <div class="footer">由灵枢 (LingShu Agent) 自动生成 · 数据基于公开搜索结果 · 仅供参考</div>
-<script>document.addEventListener('keydown',function(e){if(e.key==='p'&&(e.ctrlKey||e.metaKey))window.print()});</script>
+<script>document.addEventListener('keydown',function(e){{if(e.key==='p'&&(e.ctrlKey||e.metaKey))window.print()}});</script>
 </body>
-</html>""" % (title, title, now, "%d" % word_count, "%d" % read_time,
-            toc_html, body_html, sources_html, "<div class='tags'>%s</div>" % " ".join('<span class="tag">%s</span>' % t for t in tags) if tags else "")
+</html>""".format(title, title, now, "%d" % word_count, "%d" % read_time,
+            toc_html, body_html, sources_html, "<div class='tags'>{}</div>".format(" ".join(f'<span class="tag">{t}</span>' for t in tags)) if tags else "")
 
     return html
 
@@ -339,7 +338,7 @@ def save_formal_report(title: str, html: str, tags: list[str] = None, source_ses
     _ensure()
     timestamp = int(time.time())
     report_id = "formal_%d_%s" % (timestamp, _slugify(title)[:20])
-    filename = "%s.html" % report_id
+    filename = f"{report_id}.html"
     filepath = REPORTS_DIR / filename
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -395,25 +394,25 @@ def _markdown_to_html(text: str) -> str:
 
         # Headers
         if stripped.startswith("### "):
-            html.append("<h3>%s</h3>" % stripped[4:])
+            html.append(f"<h3>{stripped[4:]}</h3>")
         elif stripped.startswith("## "):
-            html.append("<h2>%s</h2>" % stripped[3:])
+            html.append(f"<h2>{stripped[3:]}</h2>")
         elif stripped.startswith("# "):
-            html.append("<h2>%s</h2>" % stripped[2:])
+            html.append(f"<h2>{stripped[2:]}</h2>")
         # Unordered list
         elif stripped.startswith("- ") or stripped.startswith("* "):
             content = stripped[2:]
             if not in_list:
                 html.append("<ul>")
                 in_list = True
-            html.append("<li>%s</li>" % content)
+            html.append(f"<li>{content}</li>")
         # Ordered list
         elif re.match(r"^\d+[.、]\s", stripped):
             content = re.sub(r"^\d+[.、]\s", "", stripped)
             if not in_list:
                 html.append("<ol>")
                 in_list = True
-            html.append("<li>%s</li>" % content)
+            html.append(f"<li>{content}</li>")
         else:
             if in_list:
                 html.append("</ul>")
@@ -423,9 +422,9 @@ def _markdown_to_html(text: str) -> str:
                 pass
             # Bold wrapping
             elif stripped.startswith("**") and stripped.endswith("**"):
-                html.append("<p><strong>%s</strong></p>" % stripped[2:-2])
+                html.append(f"<p><strong>{stripped[2:-2]}</strong></p>")
             else:
-                html.append("<p>%s</p>" % stripped)
+                html.append(f"<p>{stripped}</p>")
 
     if in_table:
         html.append("</table>")

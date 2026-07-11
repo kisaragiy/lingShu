@@ -12,7 +12,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional, Union
 
 # ─── Paths ───
 
@@ -55,7 +54,7 @@ def load_config() -> dict:
     _ensure_dir()
     if CONFIG_PATH.exists():
         try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(CONFIG_PATH, encoding="utf-8") as f:
                 user = json.load(f)
             merged = {**DEFAULT_CONFIG, **user}
             merged["llm"] = {**DEFAULT_CONFIG["llm"], **(user.get("llm", {}))}
@@ -89,13 +88,10 @@ def ensure_setup_complete():
 
 def has_chinese(path: str) -> bool:
     """Check if a path contains Chinese characters."""
-    for c in path:
-        if '\u4e00' <= c <= '\u9fff' or '\u3000' <= c <= '\u303f':
-            return True
-    return False
+    return any('一' <= c <= '鿿' or '\u3000' <= c <= '〿' for c in path)
 
 
-def find_llama_cpp() -> Optional[str]:
+def find_llama_cpp() -> str | None:
     """Detect llama.cpp directory."""
     candidates = [
         r"C:\llama\llama.cpp",
@@ -110,7 +106,7 @@ def find_llama_cpp() -> Optional[str]:
     return None
 
 
-def find_comfyui() -> Optional[str]:
+def find_comfyui() -> str | None:
     """Detect ComfyUI directory."""
     candidates = [
         r"C:\DrawingLive\ComfyUI",
@@ -134,7 +130,7 @@ def check_port(port: int, host: str = "127.0.0.1") -> bool:
         s.connect((host, port))
         s.close()
         return True
-    except (socket.timeout, ConnectionError, OSError):
+    except (TimeoutError, ConnectionError, OSError):
         return False
 
 
@@ -301,7 +297,7 @@ def fix_action(action: str) -> dict:
 
     fn = action_map.get(action)
     if not fn:
-        return {"success": False, "error": "Unknown action: %s" % action}
+        return {"success": False, "error": f"Unknown action: {action}"}
 
     try:
         return fn()
@@ -433,15 +429,15 @@ def _fix_auto_configure() -> dict:
         if info.get("available"):
             chosen = {"name": name, "endpoint": info.get("endpoint", ""), "label": info.get("label", name)}
             results["steps"].append({
-                "action": "detect_%s" % name,
+                "action": f"detect_{name}",
                 "success": True,
-                "message": "%s 可用" % info.get("label", name),
+                "message": "{} 可用".format(info.get("label", name)),
             })
             break
         results["steps"].append({
-            "action": "detect_%s" % name,
+            "action": f"detect_{name}",
             "success": False,
-            "message": "%s 不可用" % info.get("label", name),
+            "message": "{} 不可用".format(info.get("label", name)),
         })
 
     if chosen:

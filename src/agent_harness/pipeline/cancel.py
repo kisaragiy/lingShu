@@ -5,9 +5,8 @@ Putting this in a separate module avoids circular imports.
 """
 
 import threading
-from typing import Optional
 
-_cancel_event: Optional[threading.Event] = None
+_cancel_event: threading.Event | None = None
 
 
 class CancelledError(Exception):
@@ -15,7 +14,7 @@ class CancelledError(Exception):
     pass
 
 
-def set_cancel_event(event: Optional[threading.Event]):
+def set_cancel_event(event: threading.Event | None):
     global _cancel_event
     _cancel_event = event
 

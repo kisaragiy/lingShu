@@ -99,3 +99,53 @@ class TestSearchChain:
         results = _tool_search("test", max_results=3)
         assert len(results) >= 1
         assert any("SearXNG Result" in r for r in results)
+
+
+# ─── URL normalization tests ───
+
+def test_normalize_url_strips_trailing_slash():
+    from src.agent_harness.tools.web import _normalize_url
+    assert _normalize_url("https://example.com/") == "https://example.com"
+
+
+def test_normalize_url_strips_www():
+    from src.agent_harness.tools.web import _normalize_url
+    assert _normalize_url("https://www.example.com") == "https://example.com"
+
+
+def test_normalize_url_strips_utm():
+    from src.agent_harness.tools.web import _normalize_url
+    result = _normalize_url("https://example.com/page?utm_source=twitter&a=1")
+    assert "utm_source" not in result
+    assert "a=1" in result
+
+
+def test_normalize_url_strips_fbclid():
+    from src.agent_harness.tools.web import _normalize_url
+    result = _normalize_url("https://example.com?fbclid=abc123")
+    assert "fbclid" not in result
+
+
+def test_user_agent_rotation():
+    from src.agent_harness.tools.web import _pick_user_agent, _USER_AGENTS
+    agents = [_pick_user_agent() for _ in range(len(_USER_AGENTS) + 1)]
+    assert agents[0] in _USER_AGENTS
+    assert agents[len(_USER_AGENTS)] == agents[0]
+
+
+def test_search_cache_hit():
+    """Second call with same query returns cached results (no HTTP calls)."""
+    from src.agent_harness.tools.web import _tool_search, _SEARCH_CACHE
+    # Prime cache manually (simulates a prior successful search)
+    _SEARCH_CACHE["prime:3"] = (__import__("time").time(), ["cached result [https://x.com]"])
+    # With nothing registered for HTTP, cache should return the saved value
+    results = _tool_search("prime", max_results=3)
+    assert "cached result" in results[0]
+
+
+def test_utm_deduplication():
+    """URLs that differ only in UTM params should normalize to same value."""
+    from src.agent_harness.tools.web import _normalize_url
+    u1 = _normalize_url("https://www.example.com/page/")
+    u2 = _normalize_url("https://example.com/page?utm_source=twitter")
+    assert u1 == u2

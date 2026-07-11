@@ -13,12 +13,13 @@ Task file format:
     ~/.agent-harness/scheduler/tasks/*.json
 """
 
+import contextlib
 import json
 import os
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 SCHEDULER_DIR = Path(os.environ.get(
@@ -36,7 +37,7 @@ def _ensure():
 
 def _task_path(task_id: str) -> Path:
     safe = task_id.replace("/", "_").replace("\\", "_")
-    return TASKS_DIR / ("%s.json" % safe)
+    return TASKS_DIR / (f"{safe}.json")
 
 
 def _parse_cron(expr: str) -> dict | None:
@@ -114,7 +115,7 @@ def add_task(task_id: str, schedule: str, prompt: str,
     _ensure()
     parsed = _parse_cron(schedule)
     if parsed is None:
-        raise ValueError("无效的调度表达式: %s" % schedule)
+        raise ValueError(f"无效的调度表达式: {schedule}")
 
     now = int(time.time())
     task = {
@@ -180,10 +181,8 @@ def list_tasks() -> list[dict]:
     _ensure()
     tasks = []
     for f in sorted(TASKS_DIR.glob("*.json")):
-        try:
+        with contextlib.suppress(json.JSONDecodeError, OSError):
             tasks.append(json.loads(f.read_text("utf-8")))
-        except (json.JSONDecodeError, OSError):
-            pass
     return tasks
 
 
@@ -217,10 +216,8 @@ class AgentScheduler:
     def _loop(self):
         """Main scheduling loop."""
         while not self._stop_event.is_set():
-            try:
+            with contextlib.suppress(Exception):
                 self._tick()
-            except Exception:
-                pass
             self._stop_event.wait(_POLL_INTERVAL)
 
     def _tick(self):
@@ -284,22 +281,22 @@ class AgentScheduler:
             # Log result
             log_dir = SCHEDULER_DIR / "logs"
             log_dir.mkdir(exist_ok=True)
-            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
             log_entry = {
                 "ts": ts,
                 "task_id": task_id,
                 "output_len": len(output),
                 "output_preview": output[:200],
             }
-            log_file = log_dir / ("run_%s_%s.json" % (task_id.replace("/", "_"), ts))
+            log_file = log_dir / ("run_{}_{}.json".format(task_id.replace("/", "_"), ts))
             log_file.write_text(json.dumps(log_entry, ensure_ascii=False, indent=2))
 
         except Exception as e:
             import traceback as _tb
             log_dir = SCHEDULER_DIR / "logs"
             log_dir.mkdir(exist_ok=True)
-            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            (log_dir / ("error_%s_%s.json" % (task_id.replace("/", "_"), ts))).write_text(
+            ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+            (log_dir / ("error_{}_{}.json".format(task_id.replace("/", "_"), ts))).write_text(
                 json.dumps({"ts": ts, "task_id": task_id, "error": str(e),
                            "traceback": _tb.format_exc()[-500:]},
                           ensure_ascii=False, indent=2)

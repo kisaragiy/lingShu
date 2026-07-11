@@ -15,11 +15,11 @@ Usage:
     sessions = list_sessions(owner_id="u_xxx")
 """
 
+import contextlib
 import json
 import os
-import time
 import threading
-from pathlib import Path
+import time
 
 # ─── Config ───
 
@@ -39,7 +39,7 @@ _lock = threading.RLock()
 def _session_path(session_id: str) -> str:
     """Get filesystem path for a session file."""
     safe_id = session_id.replace("/", "_").replace("\\", "_").replace("..", "_")
-    return os.path.join(SESSION_DIR, "%s.json" % safe_id)
+    return os.path.join(SESSION_DIR, f"{safe_id}.json")
 
 
 # ─── Public API ───
@@ -67,7 +67,7 @@ def save_session(session_id: str, messages: list[dict], owner_id: str = ""):
     # Load existing session data to preserve title/pinned
     existing = {}
     try:
-        with _lock, open(path, "r", encoding="utf-8") as f:
+        with _lock, open(path, encoding="utf-8") as f:
             existing = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         pass
@@ -95,10 +95,8 @@ def save_session(session_id: str, messages: list[dict], owner_id: str = ""):
             os.replace(tmp_path, path)  # Atomic on POSIX, near-atomic on Windows
         except Exception:
             if os.path.exists(tmp_path):
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp_path)
-                except OSError:
-                    pass
             raise
 
 
@@ -111,7 +109,7 @@ def load_session(session_id: str) -> list[dict] | None:
     path = _session_path(session_id)
     with _lock:
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             return data.get("messages", [])
         except (FileNotFoundError, json.JSONDecodeError):
@@ -140,15 +138,13 @@ def list_sessions(owner_id: str | None = None) -> list[dict]:
                 continue
             path = os.path.join(SESSION_DIR, fname)
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
                 # Skip expired
                 age = now - data.get("updated_at", 0)
                 if age > SESSION_TTL:
-                    try:
+                    with contextlib.suppress(OSError):
                         os.unlink(path)
-                    except OSError:
-                        pass
                     continue
                 # Filter by owner
                 if owner_id is not None and data.get("owner_id", "") != owner_id:
@@ -199,7 +195,7 @@ def clean_expired() -> int:
                 continue
             path = os.path.join(SESSION_DIR, fname)
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
                 age = now - data.get("updated_at", 0)
                 if age > SESSION_TTL:
@@ -284,7 +280,7 @@ def update_session_meta(session_id: str, **kwargs) -> dict | None:
     path = _session_path(session_id)
     with _lock:
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return None

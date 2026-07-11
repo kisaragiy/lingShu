@@ -6,13 +6,11 @@ Provides:
 - Audit log for sensitive operations
 """
 
-import hashlib
 import hmac
 import json
 import os
 import secrets
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # ─── Token Storage ───
@@ -90,7 +88,7 @@ def log_audit(tool_name: str, source: str, args: dict, result: str = "", duratio
     _ensure_dir()
     AUDIT_DIR.mkdir(exist_ok=True)
     entry = {
-        "ts": datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S%f"),
+        "ts": datetime.now(UTC).strftime("%Y%m%d_%H%M%S%f"),
         "tool": tool_name,
         "source": source,
         "args": {k: str(v)[:200] for k, v in args.items()},

@@ -1,9 +1,7 @@
 """ComfyUI tools — image/video generation, LoRA management"""
-import json
 import os
-import time
 
-from ..pipeline.llm import _session, HARNESS_DIR, _post_cloud
+from ..pipeline.llm import HARNESS_DIR, _post_cloud
 from .registry import register_tool
 
 
@@ -19,13 +17,12 @@ def _tool_comfyui_text2img(prompt: str, workflow: str = "", retries: int = 2, lo
 
         optimized = optimize_prompt(prompt)
         # LoRA 注入
+        import contextlib
         if lora:
-            try:
+            with contextlib.suppress(ImportError):
                 from comfyui_lora_tools import lora_inject_lora_into_workflow as _lora_inject
-            except ImportError:
-                pass  # LoRA 工具不可用则跳过
         try:
-            from comfyui_tools import text_to_image, _ensure_comfyui_running
+            from comfyui_tools import _ensure_comfyui_running, text_to_image
             _ensure_comfyui_running()
             result = text_to_image(optimized, workflow_name=workflow, max_retries=retries)
             # text_to_image 返回字符串，解析评分和路径
@@ -52,7 +49,7 @@ def _tool_comfyui_img2img(prompt: str, image_path: str = "", workflow: str = "",
         skills_dir = os.path.join(os.path.dirname(HARNESS_DIR), "skills")
         if skills_dir not in sys.path:
             sys.path.insert(0, skills_dir)
-        from comfyui_tools import image_to_image, _ensure_comfyui_running, optimize_prompt
+        from comfyui_tools import _ensure_comfyui_running, image_to_image, optimize_prompt
         _ensure_comfyui_running()
         optimized = optimize_prompt(prompt)
         from comfyui_tools import _extract_positive
@@ -117,7 +114,7 @@ def _tool_comfyui_text2video(prompt: str, workflow: str = "", frames: int = 81) 
         skills_dir = os.path.join(os.path.dirname(HARNESS_DIR), "skills")
         if skills_dir not in sys.path:
             sys.path.insert(0, skills_dir)
-        from comfyui_tools import text_to_video, _ensure_comfyui_running
+        from comfyui_tools import _ensure_comfyui_running, text_to_video
         _ensure_comfyui_running()
         result = text_to_video(prompt, workflow_name=workflow, frames=frames)
         return f"ComfyUI 文生视频: {result}"
@@ -132,7 +129,6 @@ def _tool_comfyui_optimize_comic(raw_prompt: str, style_ref: str = "Production I
         skills_dir = os.path.join(os.path.dirname(HARNESS_DIR), "skills")
         if skills_dir not in sys.path:
             sys.path.insert(0, skills_dir)
-        from comfyui_tools import optimize_prompt
         system = (
             f"你是全球顶尖AI视觉艺术总监，专注漫剧提示词设计。参考{style_ref}风格。"
             "对用户提供的画面描述，按六维度扩写："

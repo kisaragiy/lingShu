@@ -12,9 +12,7 @@
 
 import json
 import os
-import sys
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # ─── Audit log directory ───
 HARNESS_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".."))
@@ -40,14 +38,14 @@ def log_audit(tool_name: str, source: str, args: dict, result: str = "",
     """写入结构化审计日志"""
     _ensure_audit_dir()
     entry = {
-        "ts": datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S%f"),
+        "ts": datetime.now(UTC).strftime("%Y%m%d_%H%M%S%f"),
         "tool": tool_name,
         "source": source,
         "args": {k: str(v)[:200] for k, v in args.items()},
         "result": str(result)[:200],
         "duration_ms": round(duration_ms, 1),
     }
-    path = os.path.join(AUDIT_DIR, "audit_%s.json" % entry["ts"])
+    path = os.path.join(AUDIT_DIR, "audit_{}.json".format(entry["ts"]))
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(entry, f, ensure_ascii=False, indent=2)
@@ -82,11 +80,8 @@ def check_permission(tool_name: str, source: str = "harness",
     if level == "irreversible":
         # 始终记录审计日志
         log_audit(tool_name, source, {})
-        if auto_confirm:
-            # 兼容模式：记录日志后放行
-            return True
-        # 严格模式：需要人类确认
-        return False
+        # 兼容模式：记录日志后放行；严格模式：需要人类确认
+        return auto_confirm
 
     # 未知级别，安全起见拒绝
     return False

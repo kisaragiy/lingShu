@@ -5,15 +5,18 @@ project structure and import from `pipeline.llm`. This module provides
 the same interface using the new agent_harness package.
 """
 
-import os
 import json
+import os
+
 import requests as req_lib
 
 from ..config import (
-    LLAMA_API, OLLAMA_API, DEEPSEEK_API,
-    CLOUD_API_DIRECT, CLOUD_API_KEY,
-    MODEL_LLAMA, MODEL_DEEPSEEK,
-    HARNESS_DIR, MEMORY_DIR, SKILLS_DIR,
+    CLOUD_API_KEY,
+    DEEPSEEK_API,
+    HARNESS_DIR,
+    LLAMA_API,
+    MODEL_DEEPSEEK,
+    MODEL_LLAMA,
 )
 
 # Re-export for tools/ compatibility

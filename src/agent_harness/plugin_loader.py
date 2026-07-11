@@ -74,7 +74,7 @@ def load_plugins() -> list[dict]:
             info["success"] = True
 
         except Exception as e:
-            info["error"] = "%s: %s" % (type(e).__name__, str(e))
+            info["error"] = f"{type(e).__name__}: {str(e)}"
             info["traceback"] = traceback.format_exc()[-500:]
 
         _loaded_plugins.append(info)

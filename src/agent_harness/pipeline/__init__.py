@@ -1,7 +1,7 @@
 """Pipeline — re-exports."""
 
-from .state import HarnessState, SupervisorState, WorkerState, WorkerResult
 from .circuit_breaker import CircuitBreaker
+from .state import HarnessState, SupervisorState, WorkerResult, WorkerState
 from .tracing import TraceCollector, TraceSpan, TraceTree
 
 __all__ = [

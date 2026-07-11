@@ -12,15 +12,12 @@ Output: comic_output/{timestamp}/output.mp4 + intermediates
 
 import json
 import os
+import shutil
 import time
 import uuid
-import shutil
 from dataclasses import dataclass, field
-from typing import Any
 
 from ..config import LLAMA_API, MODEL_LLAMA
-from ..pipeline.tracing import TraceCollector
-
 
 # ─── Data types ───
 
@@ -252,7 +249,7 @@ def generate_scene_audio(scene: Scene, output_dir: str) -> str:
         dur = scene.duration_s
         subprocess.run([
             "ffmpeg", "-y", "-f", "lavfi",
-            "-i", f"anullsrc=r=24000:cl=mono",
+            "-i", "anullsrc=r=24000:cl=mono",
             "-t", str(dur),
             audio_path,
         ], capture_output=True, timeout=10)
@@ -299,7 +296,7 @@ def assemble_video(script: ComicScript, output_dir: str,
         print("⚠ No valid scenes to assemble")
         return ""
 
-    with open(concat_file, "w", encoding="utf-8") as f:
+    with open(concat_file, "w", encoding="utf-8"):
         for i, s in enumerate(valid_scenes):
             # Video input (image → video stream)
             input_args.extend([
@@ -316,7 +313,7 @@ def assemble_video(script: ComicScript, output_dir: str,
                 # Silent audio
                 input_args.extend([
                     "-f", "lavfi", "-t", str(s.duration_s),
-                    "-i", f"anullsrc=r=24000:cl=mono",
+                    "-i", "anullsrc=r=24000:cl=mono",
                 ])
 
             # Filter: image → video with zoom effect

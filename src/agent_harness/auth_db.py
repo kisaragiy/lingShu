@@ -7,13 +7,12 @@ SQLite schema:
 """
 
 import base64
-import json
+import contextlib
 import os
 import secrets
 import sqlite3
 import threading
 import time
-from datetime import datetime, timezone
 from hashlib import pbkdf2_hmac
 from pathlib import Path
 
@@ -31,7 +30,7 @@ def _hash_password(password: str) -> str:
     """Hash password with random salt. Returns salt$hash_b64."""
     salt = secrets.token_hex(32)
     dk = pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), _PBKDF2_ITERATIONS)
-    return "%s$%s" % (salt, base64.b64encode(dk).decode('ascii'))
+    return "{}${}".format(salt, base64.b64encode(dk).decode('ascii'))
 
 def _verify_password(password: str, stored: str) -> bool:
     """Verify password against stored hash."""
@@ -76,10 +75,8 @@ def close_all_connections():
     for attr in dir(_thread_local):
         conn = getattr(_thread_local, attr, None)
         if isinstance(conn, sqlite3.Connection):
-            try:
+            with contextlib.suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
     _thread_local = None
 
 
@@ -136,7 +133,7 @@ def create_user(username: str, password: str, role: str = "user",
 
     existing = db.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
     if existing:
-        raise ValueError("用户名 '%s' 已存在" % username)
+        raise ValueError(f"用户名 '{username}' 已存在")
 
     uid = "u_" + secrets.token_hex(16)
     now = int(time.time())

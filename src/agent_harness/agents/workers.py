@@ -7,14 +7,14 @@ Workers are designed to be called in parallel by the supervisor.
 import json
 import re
 import time
-from typing import Literal, Any
-from langgraph.graph import StateGraph, END
+from typing import Literal
 
-from ..config import LLAMA_API, MODEL_LLAMA
-from ..pipeline.state import WorkerState, WorkerResult
-from ..tools.registry import TOOL_REGISTRY, call_tool, validate_result
+from langgraph.graph import END, StateGraph
+
 from ..agents.supervisor import WORKER_CAPABILITIES
-
+from ..config import LLAMA_API, MODEL_LLAMA
+from ..pipeline.state import WorkerResult, WorkerState
+from ..tools.registry import TOOL_REGISTRY, call_tool, validate_result
 
 # ─── Token optimization utilities ───
 
@@ -49,10 +49,7 @@ def _is_simple_task(task: str) -> bool:
         if re.search(pat, t):
             return True
     # Pure chat without tool requirements
-    if len(t) < 50 and not any(kw in t for kw in
-        ['搜索', '查找', '分析', '代码', 'python', '文件', '执行', '运行']):
-        return True
-    return False
+    return bool(len(t) < 50 and not any(kw in t for kw in ['搜索', '查找', '分析', '代码', 'python', '文件', '执行', '运行']))
 
 
 # ─── LLM call for workers ───

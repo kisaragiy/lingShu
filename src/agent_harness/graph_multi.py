@@ -20,24 +20,25 @@ Architecture:
 import concurrent.futures
 import time
 import uuid
-from typing import Literal, Any
-from langgraph.graph import StateGraph, END
+from typing import Any, Literal
 
-from .config import SUPERVISOR_MAX_ROUNDS
-from .pipeline.state import SupervisorState, WorkerResult
-from .pipeline.circuit_breaker import CircuitBreaker
-from .pipeline.tracing import TraceCollector
+from langgraph.graph import END, StateGraph
+
 from .agents import (
-    supervisor_analyze, supervisor_collect, supervisor_replan,
-    run_worker, WORKER_CAPABILITIES,
+    run_worker,
+    supervisor_analyze,
+    supervisor_collect,
+    supervisor_replan,
 )
+from .config import SUPERVISOR_MAX_ROUNDS
 
 # ─── Cancel event mechanism ───
 from .pipeline.cancel import (
-    set_cancel_event, clear_cancel_event,
-    is_cancelled, check_cancelled, CancelledError,
+    is_cancelled,
 )
-
+from .pipeline.circuit_breaker import CircuitBreaker
+from .pipeline.state import SupervisorState, WorkerResult
+from .pipeline.tracing import TraceCollector
 
 # Module-level trace collector — set before graph invocation
 _trace_collector: TraceCollector | None = None
@@ -176,13 +177,13 @@ def supervisor_finalize(state: SupervisorState) -> dict:
 
     worker_results = state.get("worker_results", {})
     combined = "\n\n".join(
-        "### %s\n%s" % (w, r.get('output', '无结果')[:2000])
+        "### {}\n{}".format(w, r.get('output', '无结果')[:2000])
         for w, r in worker_results.items()
     )
 
     # Use LLM to craft final response
-    from .agents.supervisor import _call_llm
     from .agent_log import log_event
+    from .agents.supervisor import _call_llm
 
     # Log finalize start
     log_event(state.get("session_id", "unknown"), "finalize", {

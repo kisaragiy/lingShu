@@ -28,25 +28,26 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .api_security import (
-    load_or_generate_token,
-    reset_token as _reset_token,
-    validate_token,
-    audit_config as _audit_config,
-    log_audit as _log_audit,
-)
+from . import __version__
 from . import auth_db as _auth_db
 from . import auth_jwt as _auth_jwt
-from . import __version__
-from .tools.tool_config import is_tool_enabled, toggle_tool as _toggle_tool, list_disabled as _list_disabled_tools
+from .api_security import (
+    load_or_generate_token,
+    validate_token,
+)
+from .api_security import (
+    reset_token as _reset_token,
+)
+from .tools.tool_config import is_tool_enabled
+from .tools.tool_config import list_disabled as _list_disabled_tools
+from .tools.tool_config import toggle_tool as _toggle_tool
 
 HOST = os.environ.get("HARNESS_API_HOST", "127.0.0.1")
 PORT = int(os.environ.get("HARNESS_API_PORT", "8788"))
@@ -68,18 +69,28 @@ MAX_HISTORY_MSGS = MAX_HISTORY_ROUNDS * 2    # 每个 round = user + assistant
 SESSION_TRIM_AT = MAX_HISTORY_ROUNDS * 4     # 持久化保留弹性（4x 保留未修剪的历史）
 
 # ─── Session store (persistent) ───
+# ─── Running task registry (for cancellation) ───
+import threading as _threading
+
+from .pipeline.session_store import (
+    delete_session as _delete_session,
+)
+from .pipeline.session_store import (
+    init_store as _init_session_store,
+)
+from .pipeline.session_store import (
+    list_sessions as _list_sessions,
+)
+from .pipeline.session_store import (
+    load_session as _load_session,
+)
 from .pipeline.session_store import (
     save_session as _save_session,
-    load_session as _load_session,
-    list_sessions as _list_sessions,
-    delete_session as _delete_session,
-    clean_expired as _clean_expired,
-    init_store as _init_session_store,
+)
+from .pipeline.session_store import (
     session_count as _session_count,
 )
 
-# ─── Running task registry (for cancellation) ───
-import threading as _threading
 _running_tasks: dict[str, _threading.Event] = {}
 _running_tasks_lock = _threading.Lock()
 
@@ -90,10 +101,7 @@ _running_tasks_lock = _threading.Lock()
 # Default: 5 concurrent agents — enough for 2-3 simultaneous users.
 # Set HARNESS_MAX_CONCURRENT_AGENTS=0 to disable limit.
 _MAX_CONCURRENT_AGENTS = int(os.environ.get("HARNESS_MAX_CONCURRENT_AGENTS", "5"))
-if _MAX_CONCURRENT_AGENTS > 0:
-    _agent_semaphore = _threading.Semaphore(_MAX_CONCURRENT_AGENTS)
-else:
-    _agent_semaphore = None
+_agent_semaphore = _threading.Semaphore(_MAX_CONCURRENT_AGENTS) if _MAX_CONCURRENT_AGENTS > 0 else None
 
 # Thread pool for async file I/O (sessions, reports)
 _io_executor = None
@@ -111,7 +119,7 @@ def _build_history_context(messages: list[dict]) -> str:
         content = m.get("content", "")
         if len(content) > 300:
             content = content[:300] + "..."
-        lines.append("[%s]: %s" % (role, content))
+        lines.append(f"[{role}]: {content}")
     return "\n".join(lines[-16:])
 
 
@@ -127,7 +135,7 @@ def _sse_chunk(content: str, role: str = "") -> str:
     obj = {
         "choices": [{"delta": delta, "index": 0, "finish_reason": None}]
     }
-    return "data: %s\n\n" % json.dumps(obj, ensure_ascii=False)
+    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
 
 def _sse_done(result_text: str) -> str:
@@ -137,24 +145,24 @@ def _sse_done(result_text: str) -> str:
         "choices": [{"delta": {}, "index": 0, "finish_reason": "stop"}],
         "usage": usage,
     }
-    return "data: %s\n\ndata: [DONE]\n\n" % json.dumps(obj, ensure_ascii=False)
+    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\ndata: [DONE]\n\n"
 
 
 # ─── Execute harness (blocking, run in thread) ───
 
 def _execute_multi(prompt: str, history_context: str, session_id: str = "") -> dict:
-    from .graph_multi import run_multi_agent, set_progress_queue, clear_progress_queue, _progress_queue
-    from .pipeline.cancel import set_cancel_event, clear_cancel_event
+    from .graph_multi import _progress_queue, run_multi_agent
     enhanced = prompt
     if history_context:
         enhanced = (
-            "以下是本对话的历史记录（越新的越靠前）:\n%s\n\n"
-            "请基于以上对话上下文，回答用户当前的问题:\n%s"
-        ) % (history_context, prompt)
+            f"以下是本对话的历史记录（越新的越靠前）:\n{history_context}\n\n"
+            f"请基于以上对话上下文，回答用户当前的问题:\n{prompt}"
+        )
 
     # Auto-inject knowledge base context if available
     try:
-        from .tools.rag_store import query as rag_query, list_collections
+        from .tools.rag_store import list_collections
+        from .tools.rag_store import query as rag_query
         kb_cols = list_collections()
         if kb_cols:
             kb_results = []
@@ -166,12 +174,12 @@ def _execute_multi(prompt: str, history_context: str, session_id: str = "") -> d
                     pass
             if kb_results:
                 kb_context = "\n\n".join(
-                    "[知识库 - %s] %s" % (r.get("source", "unknown"), r["text"])
+                    "[知识库 - {}] {}".format(r.get("source", "unknown"), r["text"])
                     for r in kb_results[:3]
                 )
                 enhanced = (
-                    "以下是从知识库中检索到的相关信息（请优先使用这些信息回答）:\n%s\n\n"
-                    "用户问题: %s" % (kb_context, enhanced)
+                    f"以下是从知识库中检索到的相关信息（请优先使用这些信息回答）:\n{kb_context}\n\n"
+                    f"用户问题: {enhanced}"
                 )
                 if _progress_queue:
                     _progress_queue.put({
@@ -188,11 +196,12 @@ def _execute_single(prompt: str, history_context: str) -> str:
     from .graph import run as run_single
     enhanced = prompt
     if history_context:
-        enhanced = "以下是对话历史:\n%s\n\n当前问题: %s" % (history_context, prompt)
+        enhanced = f"以下是对话历史:\n{history_context}\n\n当前问题: {prompt}"
 
     # Auto-inject KB context
     try:
-        from .tools.rag_store import query as rag_query, list_collections
+        from .tools.rag_store import list_collections
+        from .tools.rag_store import query as rag_query
         kb_cols = list_collections()
         if kb_cols:
             kb_results = []
@@ -204,9 +213,9 @@ def _execute_single(prompt: str, history_context: str) -> str:
                     pass
             if kb_results:
                 kb_context = "\n".join(
-                    "[知识库] %s" % r["text"] for r in kb_results[:2]
+                    "[知识库] {}".format(r["text"]) for r in kb_results[:2]
                 )
-                enhanced = "知识库信息:\n%s\n\n%s" % (kb_context, enhanced)
+                enhanced = f"知识库信息:\n{kb_context}\n\n{enhanced}"
     except Exception:
         pass
 
@@ -218,8 +227,8 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
     """Run harness in a thread, pushing progress events into queue."""
     try:
         # Connect progress queue and cancel event to graph modules
-        from .graph_multi import set_progress_queue, clear_progress_queue
-        from .pipeline.cancel import set_cancel_event, clear_cancel_event, is_cancelled
+        from .graph_multi import clear_progress_queue, set_progress_queue
+        from .pipeline.cancel import clear_cancel_event, set_cancel_event
         set_progress_queue(q)
 
         # Acquire agent semaphore
@@ -265,7 +274,7 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
-        q.put({"type": "error", "content": "❌ 执行出错: %s\n\n%s" % (e, tb[:500])})
+        q.put({"type": "error", "content": f"❌ 执行出错: {e}\n\n{tb[:500]}"})
         q.put({"type": "done"})
     finally:
         try:
@@ -448,11 +457,11 @@ async def serve_frontend():
         needs_admin = _auth_db.needs_initial_admin()
         token_script = (
             '<script>'
-            'window.__API_TOKEN__="%s";'
-            'window.__NEEDS_ADMIN__=%s;'
-            'window.__VERSION__="%s";'
+            'window.__API_TOKEN__="{}";'
+            'window.__NEEDS_ADMIN__={};'
+            'window.__VERSION__="{}";'
             '</script>'
-        ) % (_API_TOKEN, "true" if needs_admin else "false", __version__)
+        ).format(_API_TOKEN, "true" if needs_admin else "false", __version__)
         if "</head>" in html:
             html = html.replace("</head>", token_script + "</head>")
         else:
@@ -637,7 +646,7 @@ async def chat_completions(req: ChatRequest, request: Request):
         elif "rate limit" in err_str.lower() or "429" in err_str:
             response_text = "[HarnessError] API 调用频率过高，请等待后重试"
         else:
-            response_text = "[HarnessError] %s" % err_str[:200]
+            response_text = f"[HarnessError] {err_str[:200]}"
     finally:
         # Release agent semaphore
         if acquired and _agent_semaphore is not None:
@@ -735,7 +744,6 @@ async def auto_configure():
 async def list_tools():
     """List all registered tools (with enabled/disabled status)."""
     try:
-        import agent_harness.tools as _t
         from agent_harness.tools.registry import TOOL_REGISTRY
         tools = {
             k: {
@@ -815,7 +823,7 @@ async def get_report(report_id: str):
 
     # Try finding the file directly
     for ext in [".html", ".md"]:
-        path = _RD / ("%s%s" % (report_id, ext))
+        path = _RD / (f"{report_id}{ext}")
         if path.exists():
             content = path.read_text(encoding="utf-8")
             if ext == ".html":
@@ -823,7 +831,7 @@ async def get_report(report_id: str):
             # For .md, return JSON
             return {"id": report_id, "content": content, "format": "md"}
         # Also search for any file starting with report_id
-        for f in _RD.glob("%s*" % report_id):
+        for f in _RD.glob(f"{report_id}*"):
             content = f.read_text(encoding="utf-8")
             if f.suffix == ".html":
                 return HTMLResponse(content)
@@ -913,7 +921,7 @@ async def delete_session_endpoint(session_id: str, request: Request):
     if _delete_session(session_id):
         return {"status": "deleted", "session_id": session_id}
     return JSONResponse(
-        {"error": "Session not found: %s" % session_id},
+        {"error": f"Session not found: {session_id}"},
         status_code=404,
     )
 
@@ -967,7 +975,7 @@ async def export_single_session(session_id: str):
     return StreamingResponse(
         iter([json.dumps(data, ensure_ascii=False, indent=2)]),
         media_type="application/json",
-        headers={"Content-Disposition": "attachment; filename=session_%s.json" % session_id[:12]},
+        headers={"Content-Disposition": f"attachment; filename=session_{session_id[:12]}.json"},
     )
 
 
@@ -988,7 +996,8 @@ async def search_messages(request: Request, q: str = ""):
 # AGENT LOG API
 # ═══════════════════════════════════════
 
-from .agent_log import get_logs as _get_logs, clear_logs as _clear_logs
+from .agent_log import clear_logs as _clear_logs
+from .agent_log import get_logs as _get_logs
 
 
 @app.get("/v1/sessions/{session_id}/logs")
@@ -1038,7 +1047,7 @@ async def cancel_task(session_id: str):
         event = _running_tasks.get(session_id)
     if not event:
         return JSONResponse(
-            {"error": "No running task for session: %s" % session_id},
+            {"error": f"No running task for session: {session_id}"},
             status_code=404,
         )
     event.set()
@@ -1052,7 +1061,7 @@ async def cancel_task(session_id: str):
 async def kb_list_collections():
     """List all knowledge base collections."""
     try:
-        from .tools.rag_store import list_collections, collection_info
+        from .tools.rag_store import collection_info, list_collections
         cols = list_collections()
         return {
             "collections": [
@@ -1075,10 +1084,10 @@ async def kb_upload_file(request: Request):
     Returns indexing results.
     """
     try:
-        from .tools.rag_store import index_file, collection_info
+        from .tools.rag_store import collection_info, index_file
     except Exception as e:
         return JSONResponse(
-            {"error": "RAG store not available: %s" % e},
+            {"error": f"RAG store not available: {e}"},
             status_code=500,
         )
 
@@ -1132,13 +1141,13 @@ async def kb_delete_collection(name: str):
         from .tools.rag_store import delete_collection
     except Exception as e:
         return JSONResponse(
-            {"error": "RAG store not available: %s" % e},
+            {"error": f"RAG store not available: {e}"},
             status_code=500,
         )
     if delete_collection(name):
         return {"status": "deleted", "collection": name}
     return JSONResponse(
-        {"error": "Collection not found: %s" % name},
+        {"error": f"Collection not found: {name}"},
         status_code=404,
     )
 
@@ -1149,7 +1158,7 @@ async def kb_query(q: str = "", collection: str = "default", top_k: int = 5):
     try:
         from .tools.rag_store import query as rag_query
     except Exception as e:
-        return JSONResponse({"error": "RAG store not available: %s" % e}, status_code=500)
+        return JSONResponse({"error": f"RAG store not available: {e}"}, status_code=500)
     if not q:
         return {"results": []}
     try:
@@ -1460,14 +1469,14 @@ async def toggle_skill(name: str):
         disabled_dir.rename(enabled_dir)
         return {"name": name, "enabled": True}
 
-    return JSONResponse({"error": "技能不存在: %s" % name}, status_code=404)
+    return JSONResponse({"error": f"技能不存在: {name}"}, status_code=404)
 
 
 @app.get("/v1/skills/marketplace")
 async def marketplace_search(q: str = ""):
     """Search the SkillHub marketplace for available skills."""
-    import subprocess
     import shutil
+    import subprocess
     skillhub = shutil.which("skillhub") or os.path.expanduser("~/.local/bin/skillhub")
     if not os.path.isfile(skillhub):
         return {"skills": [], "error": "SkillHub not installed"}
@@ -1476,7 +1485,7 @@ async def marketplace_search(q: str = ""):
             [skillhub, "search", q] if q else [skillhub, "search", ""],
             capture_output=True, text=True, timeout=15,
         )
-        lines = [l.strip() for l in r.stdout.split("\n") if l.strip() and not l.startswith("NAME")]
+        lines = [line.strip() for line in r.stdout.split("\n") if line.strip() and not line.startswith("NAME")]
         skills = []
         for line in lines[:50]:
             parts = line.split(None, 2)
@@ -1499,7 +1508,8 @@ async def marketplace_install(request: Request):
     slug = (body.get("slug", "") or "").strip()
     if not slug:
         return JSONResponse({"error": "缺少 slug 参数"}, status_code=400)
-    import subprocess, shutil
+    import shutil
+    import subprocess
     skillhub = shutil.which("skillhub") or os.path.expanduser("~/.local/bin/skillhub")
     if not os.path.isfile(skillhub):
         return JSONResponse({"error": "SkillHub 未安装"}, status_code=400)
@@ -1579,7 +1589,6 @@ async def search_diagnostics():
     except (ImportError, AttributeError):
         return {"diag": [], "count": 0}
 
-from pathlib import Path as _P
 
 
 @app.get("/v1/export/sessions")
@@ -1601,7 +1610,8 @@ async def export_sessions():
 @app.get("/v1/export/reports")
 async def export_reports():
     """Export all reports as JSON metadata + Markdown content."""
-    from .pipeline.report_store import REPORTS_DIR as _RD, _load_index
+    from .pipeline.report_store import REPORTS_DIR as _RD
+    from .pipeline.report_store import _load_index
     index = _load_index()
     data = []
     for meta in index:
@@ -1629,7 +1639,8 @@ async def export_backup():
                 sessions_data.append({"id": s["id"], "messages": msgs})
         zf.writestr("sessions.json", json.dumps(sessions_data, ensure_ascii=False, indent=2))
         # Reports
-        from .pipeline.report_store import REPORTS_DIR as _RD, _load_index
+        from .pipeline.report_store import REPORTS_DIR as _RD
+        from .pipeline.report_store import _load_index
         index = _load_index()
         reports_data = []
         for meta in index:
@@ -1653,7 +1664,11 @@ async def export_backup():
 # SCHEDULER (CRON) API
 # ═══════════════════════════════════════
 
-from .agent_cron import add_task as _cron_add, update_task as _cron_update, delete_task as _cron_delete, get_task as _cron_get, list_tasks as _cron_list
+from .agent_cron import add_task as _cron_add
+from .agent_cron import delete_task as _cron_delete
+from .agent_cron import get_task as _cron_get
+from .agent_cron import list_tasks as _cron_list
+from .agent_cron import update_task as _cron_update
 
 
 @app.get("/v1/scheduler/tasks")
@@ -1747,12 +1762,12 @@ async def cs_chat(request: Request):
     if history:
         recent = history[-4:]  # last 2 exchanges
         context = "\n".join(
-            "%s: %s" % (m["role"], m["content"][:100])
+            "{}: {}".format(m["role"], m["content"][:100])
             for m in recent
         )
-
     # Run CS agent
     from .agents.cs_agent import run_cs_agent
+    from .tools.customer_service import classify_cs_intent
     result = run_cs_agent(message, context=context)
     reply = result.get("reply", "")
     intent = result.get("intent", classify_cs_intent(message))
@@ -1801,13 +1816,13 @@ async def cs_chat_stream(request: Request):
     if history:
         recent = history[-4:]
         context = "\n".join(
-            "%s: %s" % (m["role"], m["content"][:100])
+            "{}: {}".format(m["role"], m["content"][:100])
             for m in recent
         )
 
     # Run tools synchronously (fast)
+    from .agents.cs_agent import _call_cs_llm_stream_tokens, _execute_tools, _get_quick_replies, _template_fallback
     from .tools.customer_service import classify_cs_intent
-    from .agents.cs_agent import _execute_tools, _call_cs_llm_stream_tokens, _get_quick_replies, _template_fallback
 
     intent = classify_cs_intent(message)
     tool_results = _execute_tools(intent, message)
@@ -1818,11 +1833,11 @@ async def cs_chat_stream(request: Request):
         from concurrent.futures import ThreadPoolExecutor
 
         # 1. Intent event
-        yield "data: %s\n\n" % json.dumps({"type": "intent", "intent": intent}, ensure_ascii=False)
+        yield "data: {}\n\n".format(json.dumps({"type": "intent", "intent": intent}, ensure_ascii=False))
 
         # 2. Tool result events
         for name, result in tool_results.items():
-            yield "data: %s\n\n" % json.dumps({"type": "tool", "name": name, "result": result[:200]}, ensure_ascii=False)
+            yield "data: {}\n\n".format(json.dumps({"type": "tool", "name": name, "result": result[:200]}, ensure_ascii=False))
 
         # 3. Stream LLM tokens (run in thread pool)
         loop = asyncio.get_event_loop()
@@ -1838,20 +1853,20 @@ async def cs_chat_stream(request: Request):
         # Fallback if LLM returned nothing
         if not full_reply or len(full_reply.strip()) < 10:
             fallback = _template_fallback(intent, message, tool_summary)
-            yield "data: %s\n\n" % json.dumps({"type": "token", "content": fallback}, ensure_ascii=False)
+            yield "data: {}\n\n".format(json.dumps({"type": "token", "content": fallback}, ensure_ascii=False))
             full_reply = fallback
         else:
             # Yield tokens one by one
             for t in tokens:
-                yield "data: %s\n\n" % json.dumps({"type": "token", "content": t}, ensure_ascii=False)
+                yield "data: {}\n\n".format(json.dumps({"type": "token", "content": t}, ensure_ascii=False))
 
         # 4. Done event with quick replies
         quick_replies = _get_quick_replies(intent, tool_results)
-        yield "data: %s\n\n" % json.dumps({
+        yield "data: {}\n\n".format(json.dumps({
             "type": "done",
             "quick_replies": quick_replies,
             "session_id": session_id,
-        }, ensure_ascii=False)
+        }, ensure_ascii=False))
 
         # Save to session
         session_messages = history + [
@@ -1915,7 +1930,7 @@ def main():
         print("  用户:     %d 人" % user_count)
     if _MAX_CONCURRENT_AGENTS > 0:
         print("  并发:     %d 个 Agent 同时执行" % _MAX_CONCURRENT_AGENTS)
-    print("  Token:     %s...%s" % (_API_TOKEN[:8], _API_TOKEN[-4:]))
+    print(f"  Token:     {_API_TOKEN[:8]}...{_API_TOKEN[-4:]}")
     print("  " + ("-" * 40))
     print("")
 
