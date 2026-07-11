@@ -1,5 +1,4 @@
-"""Pipeline — re-exports."""
-
+"""Core pipeline — re-exports."""
 from .circuit_breaker import CircuitBreaker
 from .state import HarnessState, SupervisorState, WorkerResult, WorkerState
 from .tracing import TraceCollector, TraceSpan, TraceTree

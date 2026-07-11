@@ -57,9 +57,9 @@ def mock_session(mock_response, monkeypatch):
             return resp
 
     fake_session = MockSession()
-    monkeypatch.setattr("agent_harness.pipeline.llm._session", fake_session)
+    monkeypatch.setattr("agent_harness.core.pipeline.llm._session", fake_session)
     # Also patch the session used by web.py which imports it from llm
-    from agent_harness.tools import web as web_module
+    from agent_harness.core.tools import web as web_module
     monkeypatch.setattr(web_module, "_session", fake_session)
 
     return fake_session

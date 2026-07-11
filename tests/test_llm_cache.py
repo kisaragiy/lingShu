@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from agent_harness.pipeline.llm import (
+from agent_harness.core.pipeline.llm import (
     _llm_cache_key,
     _llm_cache_get,
     _llm_cache_set,
@@ -83,7 +83,7 @@ def test_call_llama_skips_cache_high_temp(monkeypatch):
         cache_lookups.append(key)
         return None
 
-    monkeypatch.setattr("agent_harness.pipeline.llm._llm_cache_get", tracking_get)
+    monkeypatch.setattr("agent_harness.core.pipeline.llm._llm_cache_get", tracking_get)
 
     # Mock the POST to avoid real HTTP
     import requests
@@ -99,11 +99,8 @@ def test_call_llama_skips_cache_high_temp(monkeypatch):
 
     monkeypatch.setattr(requests.Session, "post", lambda *a, **kw: MockResp())
 
-    # Set HARNESS_MODEL to something known in config
-    monkeypatch.setattr("agent_harness.pipeline.llm.MODEL_LLAMA", "test-model")
-
-    # Mock LLAMA_API
-    monkeypatch.setattr("agent_harness.pipeline.llm.LLAMA_API", "http://test/api")
+    monkeypatch.setattr("agent_harness.core.pipeline.llm.MODEL_LLAMA", "test-model")
+    monkeypatch.setattr("agent_harness.core.pipeline.llm.LLAMA_API", "http://test/api")
 
     content, tokens = call_llama(
         [{"role": "user", "content": "hi"}],
@@ -127,8 +124,8 @@ def test_call_llama_saves_cache(monkeypatch):
             }
 
     monkeypatch.setattr(requests.Session, "post", lambda *a, **kw: MockResp())
-    monkeypatch.setattr("agent_harness.pipeline.llm.MODEL_LLAMA", "test-model")
-    monkeypatch.setattr("agent_harness.pipeline.llm.LLAMA_API", "http://test/api")
+    monkeypatch.setattr("agent_harness.core.pipeline.llm.MODEL_LLAMA", "test-model")
+    monkeypatch.setattr("agent_harness.core.pipeline.llm.LLAMA_API", "http://test/api")
 
     content, tokens = call_llama(
         [{"role": "user", "content": "save me"}],
@@ -151,8 +148,8 @@ def test_call_llama_http_error_returns_empty(monkeypatch):
             return {}
 
     monkeypatch.setattr(requests.Session, "post", lambda *a, **kw: MockResp())
-    monkeypatch.setattr("agent_harness.pipeline.llm.MODEL_LLAMA", "test-model")
-    monkeypatch.setattr("agent_harness.pipeline.llm.LLAMA_API", "http://test/api")
+    monkeypatch.setattr("agent_harness.core.pipeline.llm.MODEL_LLAMA", "test-model")
+    monkeypatch.setattr("agent_harness.core.pipeline.llm.LLAMA_API", "http://test/api")
 
     content, tokens = call_llama(
         [{"role": "user", "content": "fail"}],

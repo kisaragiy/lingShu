@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.54.0 — 2026-07-11
+
+### Changed — 代码分层（Phase 1）
+- 🏗️ **目录重组** — 扁平的 `agent_harness/` 拆为三层架构：
+  - `core/` — 共享基础设施（agents/tools/pipeline/auth/graph/config）
+  - `apps/research/` — 灵枢调研助手（report/eval/ComfyUI/static）
+  - `apps/cs_demo/` — 客服 Demo（cs_agent/customer_service/static）
+- 🧭 **`main.py`** — 统一入口，挂载两个 app
+- 📦 **所有 git mv 保留文件历史** — `agent_harness/api_fastapi.py` 拆分后移除
+- ✅ **63 测试全通过**
+
 ## v0.53.0 — 2026-07-11
 
 ### Fixed — 核心 Agent 管线降级（14 版本首次修复）

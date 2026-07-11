@@ -1,14 +1,9 @@
-"""Tools — import all tool modules to trigger register_tool() calls.
+"""Core tools — import all tool modules to trigger register_tool() calls.
 
 Each module registers its tools at import time via the global TOOL_REGISTRY.
 """
-
-# Import tool modules to trigger registration
 import contextlib
 
-from . import (
-    comfyui as _comfyui,
-)
 from . import (
     desktop as _desktop,
 )
@@ -33,5 +28,5 @@ with contextlib.suppress(ImportError):
 __all__ = [
     "TOOL_REGISTRY", "register_tool", "call_tool", "validate_result",
     "_capture_error_screenshot",
-    "_comfyui", "_desktop", "_misc", "_web", "_parallel",
+    "_desktop", "_misc", "_web", "_parallel",
 ]

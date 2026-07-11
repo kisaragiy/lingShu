@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent_harness.pipeline.report_formatter import (
+from agent_harness.apps.research.pipeline.report_formatter import (
     _format_citations,
     _is_valid_url,
     _extract_sources_from_text,

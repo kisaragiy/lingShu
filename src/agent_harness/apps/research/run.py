@@ -21,13 +21,13 @@ def cmd_run(args):
 
     if args.single:
         print(f"[Single-Agent] {request}")
-        from .graph import run as run_single
+        from agent_harness.core.graph import run as run_single
         result = run_single(request)
         print(f"\n{'='*60}")
         print(result)
         print(f"{'='*60}")
     else:
-        from .graph_multi import run_multi_agent
+        from agent_harness.core.graph.graph_multi import run_multi_agent
         result = run_multi_agent(
             request,
             goal=args.goal or "",
@@ -55,8 +55,8 @@ def cmd_run(args):
 
 def cmd_eval(args):
     """Run evaluation suite."""
-    from .eval import CI_TASKS, EVAL_DATASET, run_eval, save_report
-    from .graph_multi import run_multi_agent
+    from agent_harness.apps.research.eval import CI_TASKS, EVAL_DATASET, run_eval, save_report
+    from agent_harness.core.graph.graph_multi import run_multi_agent
 
     def runner(task_request: str) -> dict:
         return run_multi_agent(
@@ -89,19 +89,19 @@ def cmd_eval(args):
 
 def cmd_serve(args):
     """Start FastAPI server."""
-    from .api_fastapi import main
+    from agent_harness.main import main
     main()
 
 
 def cmd_mcp(args):
     """Start MCP server."""
-    from .mcp_server import main
+    from agent_harness.core.mcp_server import main
     main()
 
 
 def cmd_comic(args):
     """Generate AIGC short video."""
-    from .agents.comic_agent import produce_comic
+    from agent_harness.apps.research.agents.comic_agent import produce_comic
 
     result = produce_comic(
         user_prompt=args.prompt,

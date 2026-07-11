@@ -9,7 +9,7 @@ from unittest.mock import patch, MagicMock
 # Clear search cache before each test to avoid cross-test pollution
 @pytest.fixture(autouse=True)
 def clear_search_cache():
-    from src.agent_harness.tools.web import _SEARCH_CACHE
+    from src.agent_harness.core.tools.web import _SEARCH_CACHE
     _SEARCH_CACHE.clear()
 
 
@@ -55,42 +55,42 @@ def _make_side_effect(searxng_resp, ddg_resp):
 
 class TestSearchChain:
 
-    @patch("src.agent_harness.tools.web._session")
+    @patch("src.agent_harness.core.tools.web._session")
     def test_ddg_strategy1(self, mock_session):
-        from src.agent_harness.tools.web import _tool_search
+        from src.agent_harness.core.tools.web import _tool_search
         mock_session.get.side_effect = _make_side_effect(
             MockResponse(status_code=500), MockResponse(text=DDG_S1))
         results = _tool_search("test", max_results=3)
         assert len(results) >= 1
         assert any("Result One" in r for r in results)
 
-    @patch("src.agent_harness.tools.web._session")
+    @patch("src.agent_harness.core.tools.web._session")
     def test_ddg_strategy2(self, mock_session):
-        from src.agent_harness.tools.web import _tool_search
+        from src.agent_harness.core.tools.web import _tool_search
         mock_session.get.side_effect = _make_side_effect(
             MockResponse(status_code=500), MockResponse(text=DDG_S2))
         results = _tool_search("test", max_results=3)
         assert len(results) >= 1
 
-    @patch("src.agent_harness.tools.web._session")
+    @patch("src.agent_harness.core.tools.web._session")
     def test_generic_links(self, mock_session):
-        from src.agent_harness.tools.web import _tool_search
+        from src.agent_harness.core.tools.web import _tool_search
         mock_session.get.side_effect = _make_side_effect(
             MockResponse(status_code=500), MockResponse(text=DDG_GENERIC))
         results = _tool_search("test", max_results=3)
         assert len(results) >= 1
 
-    @patch("src.agent_harness.tools.web._session")
+    @patch("src.agent_harness.core.tools.web._session")
     def test_all_fail(self, mock_session):
-        from src.agent_harness.tools.web import _tool_search
+        from src.agent_harness.core.tools.web import _tool_search
         mock_session.get.return_value = MockResponse(status_code=500)
         results = _tool_search("test", max_results=3)
         assert len(results) >= 1
         assert "搜索失败" in results[0]
 
-    @patch("src.agent_harness.tools.web._session")
+    @patch("src.agent_harness.core.tools.web._session")
     def test_searxng_success_skips_ddg(self, mock_session):
-        from src.agent_harness.tools.web import _tool_search
+        from src.agent_harness.core.tools.web import _tool_search
         srx_resp = MockResponse(status_code=200)
         srx_resp.json = lambda: {
             "results": [{"title": "SearXNG Result", "content": "内容", "url": "https://srx.com/1"}]
@@ -104,30 +104,30 @@ class TestSearchChain:
 # ─── URL normalization tests ───
 
 def test_normalize_url_strips_trailing_slash():
-    from src.agent_harness.tools.web import _normalize_url
+    from src.agent_harness.core.tools.web import _normalize_url
     assert _normalize_url("https://example.com/") == "https://example.com"
 
 
 def test_normalize_url_strips_www():
-    from src.agent_harness.tools.web import _normalize_url
+    from src.agent_harness.core.tools.web import _normalize_url
     assert _normalize_url("https://www.example.com") == "https://example.com"
 
 
 def test_normalize_url_strips_utm():
-    from src.agent_harness.tools.web import _normalize_url
+    from src.agent_harness.core.tools.web import _normalize_url
     result = _normalize_url("https://example.com/page?utm_source=twitter&a=1")
     assert "utm_source" not in result
     assert "a=1" in result
 
 
 def test_normalize_url_strips_fbclid():
-    from src.agent_harness.tools.web import _normalize_url
+    from src.agent_harness.core.tools.web import _normalize_url
     result = _normalize_url("https://example.com?fbclid=abc123")
     assert "fbclid" not in result
 
 
 def test_user_agent_rotation():
-    from src.agent_harness.tools.web import _pick_user_agent, _USER_AGENTS
+    from src.agent_harness.core.tools.web import _pick_user_agent, _USER_AGENTS
     agents = [_pick_user_agent() for _ in range(len(_USER_AGENTS) + 1)]
     assert agents[0] in _USER_AGENTS
     assert agents[len(_USER_AGENTS)] == agents[0]
@@ -135,7 +135,7 @@ def test_user_agent_rotation():
 
 def test_search_cache_hit():
     """Second call with same query returns cached results (no HTTP calls)."""
-    from src.agent_harness.tools.web import _tool_search, _SEARCH_CACHE
+    from agent_harness.core.tools.web import _tool_search, _SEARCH_CACHE
     # Prime cache manually (simulates a prior successful search)
     _SEARCH_CACHE["prime:3"] = (__import__("time").time(), ["cached result [https://x.com]"])
     # With nothing registered for HTTP, cache should return the saved value
@@ -145,7 +145,7 @@ def test_search_cache_hit():
 
 def test_utm_deduplication():
     """URLs that differ only in UTM params should normalize to same value."""
-    from src.agent_harness.tools.web import _normalize_url
+    from src.agent_harness.core.tools.web import _normalize_url
     u1 = _normalize_url("https://www.example.com/page/")
     u2 = _normalize_url("https://example.com/page?utm_source=twitter")
     assert u1 == u2

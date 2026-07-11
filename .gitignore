@@ -18,5 +18,8 @@ eval_report.json
 comic_output/
 *.json
 uv.lock
+api_token.txt
+jwt_secret.txt
+*.key
 *.spec
 /site/

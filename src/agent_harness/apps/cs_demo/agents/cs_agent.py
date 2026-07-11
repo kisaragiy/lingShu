@@ -13,7 +13,7 @@ Flow:
 
 import json
 
-from .customer_service import (
+from agent_harness.apps.cs_demo.tools.customer_service import (
     classify_cs_intent,
     cs_check_promotion,
     cs_create_ticket,

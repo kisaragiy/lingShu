@@ -1,6 +1,6 @@
 [project]
 name = "agent-harness"
-version = "0.53.0"
+version = "0.54.0"
 description = "LangGraph-based multi-agent orchestration framework with MCP tool ecosystem"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -50,10 +50,10 @@ all = [
 ]
 
 [project.scripts]
-agent-harness = "agent_harness.run:main"
-agent-mcp = "agent_harness.mcp_server:main"
-agent-api = "agent_harness.api_fastapi:main"
-agent-comic = "agent_harness.run:main"
+agent-harness = "agent_harness.apps.research.run:main"
+agent-mcp = "agent_harness.core.mcp_server:main"
+agent-api = "agent_harness.main:main"
+agent-comic = "agent_harness.apps.research.run:main"
 
 [build-system]
 requires = ["setuptools>=75.0", "wheel"]

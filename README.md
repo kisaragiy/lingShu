@@ -1,48 +1,29 @@
 <div align="center">
 
-# 🧠 灵枢 (LingShu Agent)
+# 🧠 灵枢 (LingShu)
 
-**AI 调研助手 · LLM + 工具编排智能体平台**
+**AI 调研助手 — 多 Agent 编排 · 搜索分析报告全链路自动化**
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-2b5b84?logo=python&logoColor=white)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-1c3d5a?logo=langchain)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-f5de17)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/kisaragiy/lingShu?style=flat&logo=github)](https://github.com/kisaragiy/lingShu)
-[![CI](https://img.shields.io/badge/CI-passing-22c55e?logo=githubactions)](https://github.com/kisaragiy/lingShu/actions)
 
 > **灵枢者，智之枢也。** Supervisor-Worker 多智能体架构，搜索→分析→报告全链路自动化。
 >
-> 👉 [🎧 在线体验客服 Demo](https://github.com/kisaragiy/lingShu#-cs-demo-%E5%AE%A2%E6%9C%8D%E6%99%BA%E8%83%BD%E4%BD%93%E9%AA%8C)
->
-> 📦 [下载 CS Demo 独立 exe](https://github.com/kisaragiy/lingShu/releases) — 双击即用，无需配置
+> 本地优先、开箱即用。不是聊天机器人，是帮你干活出报告的 AI。
 
 </div>
 
 ---
 
-## 📸 先看效果
-
-### 🎧 智能客服 Demo
-
-<p align="center">
-  <img src="docs/screenshots/cs-demo-chat.png" alt="CS Demo 聊天界面" width="700">
-  <br>
-  <em>LLM 驱动客服：商品推荐、订单查询、物流追踪、优惠券 —— 9 种场景实时对话</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/cs-demo-stream.png" alt="CS Demo SSE 流式回复" width="700">
-  <br>
-  <em>SSE 流式逐 token 回复：思考过程可视化 + 打字机效果</em>
-</p>
-
-### 🖥️ 灵枢主界面
+## 🖥️ 效果
 
 <p align="center">
   <img src="docs/screenshots/lingShu-dashboard.png" alt="灵枢主界面" width="700">
   <br>
-  <em>搜索→分析→报告全链路，支持多 Agent 并行执行</em>
+  <em>搜索→分析→报告全链路，多 Agent 并行执行</em>
 </p>
 
 ---
@@ -89,71 +70,47 @@
 
 ## ⚡ 快速开始
 
-### 方式 1：下载 exe（推荐）
-
-从 [Releases](https://github.com/kisaragiy/lingShu/releases) 下载 `lingShu.exe`，双击启动即可体验完整功能。
-
-### 方式 2：在线体验客服 Demo
+### 源码运行
 
 ```bash
-# 一键启动 CS Demo
 git clone https://github.com/kisaragiy/lingShu.git
 cd lingShu
 pip install -e .
-python run_cs_demo.py
-# → 浏览器自动打开 http://127.0.0.1:8788/cs-demo
+
+# 启动 Web 服务
+python -m agent_harness.main
+# → http://127.0.0.1:8788
 ```
 
-### 方式 3：源码运行
+### 使用 pip 安装
 
 ```bash
 pip install git+https://github.com/kisaragiy/lingShu.git
 
-# 启动 Web 服务
-agent-harness serve    # → http://127.0.0.1:8788
-
-# 或直接运行单次任务
-agent-harness run "用 Python 分析这份销售数据"
-agent-harness run --trace "搜索 AI Agent 最新进展"  # 带执行追踪
-agent-harness eval                                    # 运行评估套件
+# 启动
+agent-harness serve
+# → http://127.0.0.1:8788
 ```
+
+> 需要自行配置 LLM 后端（OpenAI 兼容 API 即可，详见下方文档）。
 
 ---
 
 ## ✨ 核心特性
 
-### 🎯 AI 调研助手
-
-| 特性 | 描述 |
-|------|------|
-| **多 Agent 编排** | Supervisor-Worker 架构，Search/Analyze/Execute 三 Worker 并行执行，支持多轮 Replan |
-| **全链路自动化** | 搜索 → 分析 → 排版精美的 HTML 报告（A4 打印优化），一条指令完成 |
-| **41+ 工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票/消息 6 大类 |
-| **三重熔断** | Token 预算 / 超时 / 无进展 自动熔断保护 |
-| **全链路追踪** | 执行耗时、Token 消耗、工具调用可视化 |
-
 ### 🤖 LLM 集成
 
 | 能力 | 说明 |
 |------|------|
+| **多 Agent 编排** | Supervisor-Worker 架构，Search/Analyze/Execute 三 Worker 并行执行，支持多轮 Replan |
+| **全链路自动化** | 搜索 → 分析 → 排版精美的 HTML 报告（A4 打印优化），一条指令完成 |
 | **OpenAI 兼容 API** | `/v1/chat/completions` + `/v1/models`，支持 SSE 流式 |
 | **三模型群回退** | 本地 llama.cpp → WSL Ollama → DeepSeek Flash API 自动降级 |
-| **Open WebUI 集成** | 添加自定义 OpenAI 连接即可使用 |
+| **45+ 工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类 |
+| **三重熔断** | Token 预算 / 超时 / 无进展 自动熔断保护 |
+| **RAG 知识库** | 上传 PDF/DOCX/TXT → 向量搜索 + BM25 关键词降级 |
+| **JWT 认证** | Access+Refresh 双 token + RBAC 权限 + 审计日志 |
 | **MCP 协议** | JSON-RPC 2.0 标准暴露工具，外部 Agent 可调用 |
-
-### 🎧 智能客服 Demo
-
-| 场景 | 说明 |
-|------|------|
-| 📦 查订单 | 订单号/手机号/姓名查询，12 条真实感 Mock 订单 |
-| 🚚 查物流 | 配送进度追踪 + 时效估算 |
-| 🛒 售前咨询 | 商品目录查询、对比、分期方案（10 款热销商品） |
-| 💰 查优惠 | 优惠券/促销活动实时查询 |
-| 📍 改地址 | 收货地址修改（验证规则） |
-| 🔄 退换货 | 售后工单创建 |
-| 👤 转人工 | 排队模拟 + 热线 |
-
-> Demo 特点：SSE 流式回复、思考过程可视化、打字机光标效果、暗色/亮色模式自适应
 
 ---
 
@@ -163,10 +120,11 @@ agent-harness eval                                    # 运行评估套件
 |------|------|
 | **编排框架** | LangGraph · FastAPI · Uvicorn |
 | **推理引擎** | Qwen3.6-35B (llama.cpp) · DeepSeek Flash · Ollama 模型群 |
-| **前端** | 原生 HTML/CSS/JS · 暗色模式 · SSE 流式 |
-| **工具层** | Playwright · PyAutoGUI · ComfyUI REST API · ChromaDB · SearXNG · Edge-TTS |
-| **数据** | ChromaDB · SQLite · Pandas |
-| **部署** | Docker · PyInstaller exe · Open WebUI · WSL |
+| **前端** | pywebview (WebView2) · 原生 HTML/CSS/JS · SSE 流式 |
+| **工具层** | Playwright · PyAutoGUI · ComfyUI REST API · SearXNG |
+| **安全** | JWT (HMAC-SHA256) · RBAC · CSP · 速率限制 · 审计日志 |
+| **数据** | SQLite · JSON 文件 · NPY 向量索引 |
+| **部署** | PyInstaller exe · Docker · Open WebUI |
 
 ---
 
@@ -174,32 +132,25 @@ agent-harness eval                                    # 运行评估套件
 
 ```
 src/agent_harness/
-├── agents/
-│   ├── supervisor.py       # Supervisor Agent（分析/分配/验收/重规划）
-│   ├── workers.py          # Search/Analyze/Execute 三 Worker
-│   ├── cs_agent.py         # 客服 Agent（规则引擎 + LLM 驱动）
-│   └── comic_agent.py      # AIGC 视频管线
-├── pipeline/
-│   ├── state.py            # TypedDict 状态定义
-│   ├── llm.py              # LLM 调用封装（多模型回退）
-│   ├── circuit_breaker.py  # 三重熔断器
-│   └── tracing.py          # 全链路追踪
-├── tools/
-│   ├── web.py              # 搜索/抓取/浏览
-│   ├── desktop.py          # GUI/浏览器/消息
-│   ├── comfyui.py          # 图像/视频生成
-│   ├── customer_service.py # 客服 Mock 数据 + 工具
-│   └── misc.py             # 文件/代码/RAG/股票
-├── static/
-│   ├── index.html          # 主应用前端
-│   ├── cs-demo.html        # 独立客服 Demo 页面
-│   └── css/lingShu.css     # 主应用样式
-├── eval/                   # 评估套件（10 条回归测试）
-├── graph.py                # 单 Agent 管线
-├── graph_multi.py          # 多 Agent 管线
-├── api_fastapi.py          # OpenAI 兼容 API + SSE
-└── mcp_server.py           # MCP 协议服务器
+├── core/                        # 共享基础设施
+│   ├── agents/                  # Supervisor / Worker 编排
+│   ├── tools/                   # 搜索、RAG、桌面自动化、注册中心
+│   ├── pipeline/                # LLM 调用、熔断器、会话存储、状态
+│   ├── auth/                    # JWT 认证、RBAC、API 安全
+│   └── graph/                   # 单 Agent / 多 Agent 图定义
+├── apps/
+│   └── research/                # 调研助手（主应用）
+│       ├── api.py               # 调研 API 端点
+│       ├── run.py               # 启动脚本
+│       ├── static/              # 前端 HTML/CSS/JS
+│       ├── pipeline/            # 报告模板、报告存储
+│       └── tools/               # ComfyUI 绘画
+├── main.py                      # 入口 + 路由
+├── plugin_loader.py             # 插件系统
+└── api_fastapi.py               # OpenAI 兼容 API 入口
 ```
+
+> 另有独立 Demo: [cs-agent-demo](https://github.com/kisaragiy/cs-agent-demo) — LLM 驱动客服系统（基于 lingShu-core）
 
 ---
 

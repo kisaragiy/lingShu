@@ -1,6 +1,4 @@
-"""Agent implementations — Supervisor + Workers + ComicAgent."""
-
-from .comic_agent import ComicResult, ComicScript, Scene, produce_comic
+"""Core agents — Supervisor + Workers."""
 from .supervisor import (
     WORKER_CAPABILITIES,
     supervisor_analyze,
@@ -13,5 +11,4 @@ __all__ = [
     "supervisor_analyze", "supervisor_collect", "supervisor_replan",
     "WORKER_CAPABILITIES",
     "build_worker", "run_worker",
-    "produce_comic", "ComicResult", "ComicScript", "Scene",
 ]

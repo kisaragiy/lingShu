@@ -1,8 +1,8 @@
 """ComfyUI tools — image/video generation, LoRA management"""
 import os
 
-from ..pipeline.llm import HARNESS_DIR, _post_cloud
-from .registry import register_tool
+from agent_harness.core.pipeline.llm import HARNESS_DIR, _post_cloud
+from agent_harness.core.tools.registry import register_tool
 
 
 def _tool_comfyui_text2img(prompt: str, workflow: str = "", retries: int = 2, lora: str = "") -> str:

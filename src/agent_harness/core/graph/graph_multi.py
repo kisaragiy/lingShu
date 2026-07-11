@@ -24,21 +24,21 @@ from typing import Any, Literal
 
 from langgraph.graph import END, StateGraph
 
-from .agents import (
+from ..agents import (
     run_worker,
     supervisor_analyze,
     supervisor_collect,
     supervisor_replan,
 )
-from .config import SUPERVISOR_MAX_ROUNDS
+from ..config import SUPERVISOR_MAX_ROUNDS
 
 # ─── Cancel event mechanism ───
-from .pipeline.cancel import (
+from ..pipeline.cancel import (
     is_cancelled,
 )
-from .pipeline.circuit_breaker import CircuitBreaker
-from .pipeline.state import SupervisorState, WorkerResult
-from .pipeline.tracing import TraceCollector
+from ..pipeline.circuit_breaker import CircuitBreaker
+from ..pipeline.state import SupervisorState, WorkerResult
+from ..pipeline.tracing import TraceCollector
 
 # Module-level trace collector — set before graph invocation
 _trace_collector: TraceCollector | None = None

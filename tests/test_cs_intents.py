@@ -1,6 +1,6 @@
 """Tests for CS intent classification — rule-based, no server needed."""
 import pytest
-from agent_harness.tools.customer_service import classify_cs_intent
+from agent_harness.apps.cs_demo.tools.customer_service import classify_cs_intent
 
 
 class TestCSIntentClassification:

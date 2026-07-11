@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from agent_harness.api_security import validate_token, load_or_generate_token, reset_token
-from agent_harness.auth_jwt import (
+from agent_harness.core.auth.api_security import validate_token, load_or_generate_token, reset_token
+from agent_harness.core.auth.auth_jwt import (
     create_access_token,
     create_refresh_token,
     verify_token,

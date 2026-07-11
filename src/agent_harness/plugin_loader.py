@@ -94,5 +94,5 @@ def get_plugin_tools() -> list[str]:
     We can't track which tool came from which plugin directly,
     but the registry timestamp can give us a hint.
     """
-    from .tools.registry import TOOL_REGISTRY
+    from agent_harness.core.tools.registry import TOOL_REGISTRY
     return list(TOOL_REGISTRY.keys())

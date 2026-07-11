@@ -17,7 +17,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from ..config import LLAMA_API, MODEL_LLAMA
+from agent_harness.core.config import LLAMA_API, MODEL_LLAMA
 
 # ─── Data types ───
 
