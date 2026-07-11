@@ -1,7 +1,5 @@
 """Main entry point — FastAPI app with shared middleware + both app routers."""
-import json
 import os
-import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -11,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from agent_harness import __version__
 from agent_harness.core.auth import auth_db as _auth_db
-from agent_harness.core.auth.api_security import load_or_generate_token, validate_token
+from agent_harness.core.auth.api_security import validate_token
 from agent_harness.core.auth import auth_jwt as _auth_jwt
 from agent_harness.core.config import require_config
 from agent_harness.apps.research.api import router as research_router, HOST, PORT, _API_TOKEN, _check_rate_limit, _RATE_LIMIT_WINDOW, _RATE_LIMIT_MAX, _AUTH_EXEMPT_PREFIXES, _AUTH_EXEMPT_EXACT, _AUTH_EXEMPT_V1

@@ -8,16 +8,14 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from agent_harness import __version__
 from agent_harness.core.auth import auth_db as _auth_db
 from agent_harness.core.auth import auth_jwt as _auth_jwt
 from agent_harness.core.auth.api_security import (
     load_or_generate_token,
-    validate_token,
 )
 from agent_harness.core.auth.api_security import (
     reset_token as _reset_token,
@@ -27,9 +25,6 @@ from agent_harness.core.tools.tool_config import list_disabled as _list_disabled
 from agent_harness.core.tools.tool_config import toggle_tool as _toggle_tool
 from agent_harness.core.pipeline.session_store import (
     delete_session as _delete_session,
-)
-from agent_harness.core.pipeline.session_store import (
-    init_store as _init_session_store,
 )
 from agent_harness.core.pipeline.session_store import (
     list_sessions as _list_sessions,

@@ -1,5 +1,5 @@
 """TODO: Rename this file and all references."""
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 from pathlib import Path
 

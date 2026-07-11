@@ -181,7 +181,7 @@ def _call_cs_llm(message: str, intent: str, tool_data: str, context: str) -> str
 
     Falls back to template response if LLM is unavailable.
     """
-    from ..agents.supervisor import _call_llm
+    from agent_harness.core.agents.supervisor import _call_llm
 
     system = (
         "你是灵枢电商平台的智能客服助手。你的风格：专业、耐心、有同理心。\n\n"
@@ -305,7 +305,7 @@ def _call_cs_llm_stream_tokens(
 
     import requests as req_lib
 
-    from ..config import LLAMA_API, MODEL_LLAMA
+    from agent_harness.core.config import LLAMA_API, MODEL_LLAMA
 
     system = (
         "你是灵枢电商平台的智能客服助手。你的风格：专业、耐心、有同理心。\n\n"

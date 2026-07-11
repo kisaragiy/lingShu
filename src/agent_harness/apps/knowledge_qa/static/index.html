@@ -1,15 +1,87 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Knowledge_Qa App</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>知识库问答助手 — LingShu Knowledge QA</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #f5f6f8; color: #1a1a2e; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+.container { max-width: 600px; width: 100%; padding: 40px 20px; }
+h1 { font-size: 24px; margin-bottom: 8px; color: #1a1a2e; }
+.subtitle { font-size: 14px; color: #6b7280; margin-bottom: 24px; }
+.card { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 16px; }
+.card h2 { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #374151; }
+.card p { font-size: 13px; color: #6b7280; line-height: 1.6; }
+.placeholder { text-align: center; padding: 40px 20px; color: #9ca3af; font-size: 14px; }
+.placeholder-icon { font-size: 48px; margin-bottom: 12px; }
+.badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 10px; background: #eef2ff; color: #2563eb; margin-right: 4px; }
+.status-bar { display: flex; gap: 8px; margin-bottom: 16px; }
+.btn { background: #2563eb; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+.btn:hover { background: #1d4ed8; }
+.btn-secondary { background: #f0f1f4; color: #374151; }
+.btn-secondary:hover { background: #e2e4e9; }
+</style>
 </head>
-<body class="bg-gray-50 min-h-screen flex items-center justify-center">
-    <div class="text-center p-8">
-        <h1 class="text-4xl font-bold text-gray-800 mb-4">Knowledge_Qa App</h1>
-        <p class="text-lg text-gray-600">TODO: Replace with your app name</p>
+<body>
+<div class="container">
+  <h1>📚 知识库问答助手</h1>
+  <p class="subtitle">基于 RAG 的知识库问答场景 · Knowledge QA Demo</p>
+
+  <div class="status-bar">
+    <span class="badge">🧩 垂直场景 #2</span>
+    <span class="badge">📄 RAG 驱动</span>
+    <span class="badge">🏗️ 开发中</span>
+  </div>
+
+  <div class="card">
+    <h2>关于此场景</h2>
+    <p>知识库问答助手是灵枢平台的第二个垂直场景，通过 <code>scripts/create-app.py</code> 脚手架生成。</p>
+    <p style="margin-top:8px">当前为骨架代码，完整功能待实现：</p>
+    <ul style="margin:8px 0 0 20px;font-size:13px;color:#6b7280;line-height:1.8">
+      <li>接入灵枢主应用的 RAG 引擎</li>
+      <li>知识库文档上传与管理</li>
+      <li>向量搜索 + LLM 生成回答</li>
+      <li>独立的前端聊天界面</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>快速验证</h2>
+    <p>API 端点已就绪：</p>
+    <pre style="background:#f8fafc;padding:12px;border-radius:8px;margin:8px 0;font-size:12px">POST /knowledge-qa/api/query
+{"query": "你的问题", "top_k": 3}</pre>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <input id="query-input" style="flex:1;padding:10px 14px;border:1px solid #e2e4e9;border-radius:8px;font-size:14px" placeholder="输入问题...">
+      <button class="btn" onclick="testQuery()">测试</button>
     </div>
+    <div id="result" style="margin-top:12px;font-size:13px;color:#6b7280"></div>
+  </div>
+
+  <div class="placeholder">
+    <div class="placeholder-icon">🧩</div>
+    <div>使用 <code>python scripts/create-app.py your_app</code><br>创建你的垂直场景</div>
+  </div>
+</div>
+
+<script>
+async function testQuery() {
+  const q = document.getElementById('query-input').value.trim();
+  const result = document.getElementById('result');
+  if (!q) { result.textContent = '请输入问题'; return; }
+  result.innerHTML = '查询中...';
+  try {
+    const r = await fetch('/knowledge-qa/api/query', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: q, top_k: 3}),
+    });
+    const data = await r.json();
+    result.innerHTML = '🤖 ' + data.answer;
+  } catch(e) {
+    result.innerHTML = '❌ 查询失败: ' + e.message;
+  }
+}
+</script>
 </body>
 </html>

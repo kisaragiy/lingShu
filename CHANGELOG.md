@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.60.0 — 2026-07-11
+
+### Fixed
+- 🐛 **CS Demo 非流式接口 500** — cs_agent.py 导入路径错误（代码分层后未更新）
+- 🐛 **`sys` undefined in supervisor.py** — F821 真实 bug
+- 🧹 **Ruff 全部修复** — UP031（27 个）+ F401（9 个）+ F821 = 0 error
+
+### Added
+- 🧩 **knowledge-qa 场景真实化** — 独立页面 + API 端点 + 注册到 main.py
+  - 访问 `/knowledge-qa` 查看
+  - API: `POST /knowledge-qa/api/query`
+
 ## v0.59.0 — 2026-07-11
 
 ### Added — README 截图 + 第二垂直场景
