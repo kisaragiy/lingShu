@@ -71,6 +71,32 @@ function togglePinSession(sessionId, pin) {
   }).then(() => { loadSidebarSessions(); }).catch(() => {});
 }
 
+// ─── Sidebar toggle ───
+let _sidebarOpen = true;
+
+function toggleSidebar() {
+  _sidebarOpen = !_sidebarOpen;
+  document.body.classList.toggle('sidebar-collapsed', !_sidebarOpen);
+  localStorage.setItem('lingShu_sidebar_open', _sidebarOpen ? '1' : '0');
+}
+
+function initSidebarState() {
+  const saved = localStorage.getItem('lingShu_sidebar_open');
+  if (saved === '0') {
+    _sidebarOpen = false;
+    document.body.classList.add('sidebar-collapsed');
+  } else {
+    _sidebarOpen = true;
+    document.body.classList.remove('sidebar-collapsed');
+  }
+}
+// Initialize on load
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initSidebarState);
+} else {
+  initSidebarState();
+}
+
 function onSidebarFilterChange() {
   sidebarFilter = document.getElementById('sidebar-search-input').value;
   renderSidebarList();

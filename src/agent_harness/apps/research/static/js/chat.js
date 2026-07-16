@@ -160,6 +160,12 @@ async function sendChatMessage() {
       signal: chatAbortController.signal,
     });
 
+    if (!resp.ok) {
+      let errMsg = '';
+      try { const err = await resp.json(); errMsg = err.error?.message || err.detail || ''; } catch(e) {}
+      throw new Error(errMsg || `服务返回 ${resp.status}，请检查后端 LLM 服务是否已启动或 API 地址是否正确。可以在设置页中修改 API 地址后重试。`);
+    }
+
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';

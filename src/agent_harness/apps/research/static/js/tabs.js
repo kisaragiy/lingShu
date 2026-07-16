@@ -511,9 +511,12 @@ function renderDashboard() {
       <!-- Sidebar -->
       <div class="app-sidebar" id="sidebar">
         <div class="sidebar-search">
-          <input id="sidebar-search-input" type="text" placeholder="搜索会话..."
-            oninput="onSidebarFilterChange()" onfocus="showSearchSuggestions()"
-            onblur="setTimeout(hideSearchSuggestions,200)" autocomplete="off">
+          <div class="sidebar-search-row">
+            <span class="sidebar-toggle-btn" onclick="toggleSidebar()" title="收起侧边栏">☰</span>
+            <input id="sidebar-search-input" type="text" placeholder="搜索会话..."
+              oninput="onSidebarFilterChange()" onfocus="showSearchSuggestions()"
+              onblur="setTimeout(hideSearchSuggestions,200)" autocomplete="off">
+          </div>
           <div id="sidebar-search-suggestions" class="search-suggestions hidden"></div>
         </div>
         <div class="sidebar-actions">

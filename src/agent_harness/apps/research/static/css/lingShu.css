@@ -146,10 +146,34 @@ body {
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
   overflow: hidden;
+  transition: width .2s ease, min-width .2s ease, opacity .2s ease;
+}
+.sidebar-collapsed .app-sidebar {
+  width: 0; min-width: 0; overflow: hidden; opacity: 0;
+}
+.sidebar-collapsed .app-main {
+  margin-left: 0;
 }
 .sidebar-search {
   padding: 12px;
   border-bottom: 1px solid var(--border);
+}
+.sidebar-search .sidebar-search-row {
+  display: flex; align-items: center; gap: 6px;
+}
+.sidebar-toggle-btn {
+  font-size: 16px; cursor: pointer; padding: 4px 6px;
+  border-radius: 4px; user-select: none; flex-shrink: 0;
+  color: var(--text-muted);
+}
+.sidebar-toggle-btn:hover {
+  background: var(--bg-secondary); color: var(--text-primary);
+}
+.sidebar-collapsed .sidebar-toggle-btn {
+  position: fixed; top: 8px; left: 8px; z-index: 1000;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; font-size: 18px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 .sidebar-search input {
   width: 100%; padding: 8px 12px;
