@@ -1,7 +1,7 @@
 <!--pages/chat/chat.wxml-->
-<view class="container">
+<view class="container {{mode === 'cs' ? 'cs-mode' : ''}}">
   <!-- 模式提示 -->
-  <view class="mode-bar">
+  <view class="mode-bar {{mode === 'cs' ? 'cs-bar' : ''}}">
     <text class="mode-label">{{modeName}}</text>
     <text class="clear-btn" bindtap="clearHistory">清空</text>
   </view>
@@ -10,8 +10,8 @@
   <scroll-view class="messages" scroll-y="true" scroll-top="{{scrollTop}}" scroll-with-animation="true">
     <block wx:for="{{messages}}" wx:key="index">
       <view class="message-row {{item.role === 'user' ? 'user-row' : 'assistant-row'}}">
-        <view class="avatar {{item.role === 'user' ? 'user-avatar' : 'bot-avatar'}}">
-          <text>{{item.role === 'user' ? '我' : '枢'}}</text>
+        <view class="avatar {{item.role === 'user' ? 'user-avatar' : 'bot-avatar'}} {{mode === 'cs' ? 'cs-avatar' : ''}}">
+          <text>{{item.role === 'user' ? '我' : (mode === 'cs' ? '服' : '枢')}}</text>
         </view>
         <view class="bubble {{item.role === 'user' ? 'user-bubble' : 'bot-bubble'}}">
           <text>{{item.content}}</text>
@@ -48,7 +48,7 @@
   <view class="input-area">
     <view class="input-wrapper">
       <input class="text-input"
-        placeholder="输入你的问题..."
+        placeholder="{{mode === 'cs' ? '输入你的问题，如：查订单、退换货...' : (mode === 'research' ? '输入研究话题，AI 自动搜索分析...' : '输入你的问题...')}}"
         bindinput="onInput"
         value="{{inputValue}}"
         bindconfirm="sendMessage"
