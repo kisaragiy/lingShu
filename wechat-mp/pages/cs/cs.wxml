@@ -1,0 +1,15 @@
+<!-- pages/cs/cs.wxml -->
+<view class="container">
+  <view class="header-bar">
+    <text class="page-title">智能客服</text>
+    <text class="page-desc">选择你需要的服务，或者直接去对话页咨询</text>
+  </view>
+
+  <view class="scenarios">
+    <view class="cs-card" wx:for="{{scenarios}}" wx:key="id" bindtap="startCS" data-id="{{item.id}}">
+      <text class="cs-icon">{{item.icon}}</text>
+      <text class="cs-name">{{item.name}}</text>
+      <text class="cs-desc">{{item.desc}}</text>
+    </view>
+  </view>
+</view>

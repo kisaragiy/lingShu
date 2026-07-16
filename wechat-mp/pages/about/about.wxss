@@ -1,0 +1,131 @@
+/* pages/about/about.wxss */
+page {
+  background: #f5f6f8;
+}
+.container {
+  padding: 30px 16px;
+  background: #f5f6f8;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.logo-area {
+  text-align: center;
+  margin-bottom: 24px;
+}
+.logo-circle {
+  width: 72px;
+  height: 72px;
+  border-radius: 36px;
+  background: linear-gradient(135deg, #2563eb, #10b981);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px;
+}
+.logo-text {
+  font-size: 36px;
+}
+.app-name {
+  font-size: 20px;
+  font-weight: bold;
+  color: #222;
+  display: block;
+}
+.version {
+  font-size: 13px;
+  color: #999;
+  margin-top: 4px;
+  display: block;
+}
+.desc-section {
+  text-align: center;
+  margin-bottom: 24px;
+  padding: 0 20px;
+}
+.desc-text {
+  font-size: 14px;
+  color: #666;
+  display: block;
+}
+.desc-sub {
+  font-size: 12px;
+  color: #999;
+  margin-top: 4px;
+  display: block;
+}
+.info-section {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #f5f6f8;
+}
+.info-row:last-child {
+  border-bottom: none;
+}
+.info-label {
+  font-size: 14px;
+  color: #999;
+}
+.info-value {
+  font-size: 14px;
+  color: #333;
+  font-weight: 500;
+}
+.links {
+  width: 100%;
+}
+.link-item {
+  display: flex;
+  align-items: center;
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.link-item:active {
+  background: #f8f9ff;
+}
+.link-icon {
+  font-size: 22px;
+  margin-right: 12px;
+}
+.link-info {
+  flex: 1;
+}
+.link-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  display: block;
+}
+.link-url {
+  font-size: 12px;
+  color: #999;
+  margin-top: 2px;
+  display: block;
+}
+.copy-hint {
+  font-size: 12px;
+  color: #2563eb;
+  padding: 4px 10px;
+  border: 1px solid #2563eb;
+  border-radius: 12px;
+}
+.footer-text {
+  font-size: 11px;
+  color: #ccc;
+  margin-top: 24px;
+  display: block;
+}

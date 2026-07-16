@@ -1,0 +1,63 @@
+<!--pages/chat/chat.wxml-->
+<view class="container">
+  <!-- 模式提示 -->
+  <view class="mode-bar">
+    <text class="mode-label">{{modeName}}</text>
+    <text class="clear-btn" bindtap="clearHistory">清空</text>
+  </view>
+
+  <!-- 消息列表 -->
+  <scroll-view class="messages" scroll-y="true" scroll-top="{{scrollTop}}" scroll-with-animation="true">
+    <block wx:for="{{messages}}" wx:key="index">
+      <view class="message-row {{item.role === 'user' ? 'user-row' : 'assistant-row'}}">
+        <view class="avatar {{item.role === 'user' ? 'user-avatar' : 'bot-avatar'}}">
+          <text>{{item.role === 'user' ? '我' : '枢'}}</text>
+        </view>
+        <view class="bubble {{item.role === 'user' ? 'user-bubble' : 'bot-bubble'}}">
+          <text>{{item.content}}</text>
+        </view>
+      </view>
+    </block>
+
+    <!-- Loading 指示器 -->
+    <view class="loading-indicator" wx:if="{{loading}}">
+      <view class="loading-avatar bot-avatar">
+        <text>枢</text>
+      </view>
+      <view class="loading-bubble">
+        <view class="dot-pulse">
+          <view class="dot dot1"></view>
+          <view class="dot dot2"></view>
+          <view class="dot dot3"></view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 快捷回复 -->
+    <view class="quick-replies" wx:if="{{quickReplies.length > 0 && !loading}}">
+      <view class="qr-title">快捷操作</view>
+      <view class="qr-list">
+        <view class="qr-item" wx:for="{{quickReplies}}" wx:key="index" bindtap="onQuickReply" data-text="{{item}}">
+          <text>{{item}}</text>
+        </view>
+      </view>
+    </view>
+  </scroll-view>
+
+  <!-- 输入区 -->
+  <view class="input-area">
+    <view class="input-wrapper">
+      <input class="text-input"
+        placeholder="输入你的问题..."
+        bindinput="onInput"
+        value="{{inputValue}}"
+        bindconfirm="sendMessage"
+        disabled="{{loading}}"
+        confirm-type="send"
+      />
+    </view>
+    <view class="send-btn {{(!inputValue.trim() || loading) ? 'disabled' : ''}}" bindtap="sendMessage">
+      <text>{{loading ? '' : '发送'}}</text>
+    </view>
+  </view>
+</view>

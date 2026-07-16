@@ -1,0 +1,43 @@
+<!-- pages/reports/reports.wxml -->
+<view class="container">
+  <view class="header-bar">
+    <text class="page-title">调研报告</text>
+    <text class="page-desc">AI 自动搜索分析生成的正式报告</text>
+  </view>
+
+  <!-- 加载中 -->
+  <view class="loading-state" wx:if="{{loading}}">
+    <view class="loading-spinner"></view>
+    <text class="loading-text">加载中...</text>
+  </view>
+
+  <!-- 错误状态 -->
+  <view class="empty-state" wx:elif="{{error}}">
+    <text class="empty-icon">⚠️</text>
+    <text class="empty-text">加载失败</text>
+    <text class="empty-desc">请检查网络连接和 API 地址</text>
+    <button class="btn" bindtap="loadReports">重新加载</button>
+  </view>
+
+  <!-- 空状态 -->
+  <view class="empty-state" wx:elif="{{reports.length === 0}}">
+    <text class="empty-icon">📄</text>
+    <text class="empty-text">暂无报告</text>
+    <text class="empty-desc">在对话页输入调研需求，AI 会自动生成报告</text>
+    <button class="btn" bindtap="goChat">去调研</button>
+  </view>
+
+  <!-- 报告列表 -->
+  <view class="report-list" wx:else>
+    <view class="report-card" wx:for="{{reports}}" wx:key="id" bindtap="viewDetail" data-id="{{item.id}}">
+      <text class="report-title">{{item.title}}</text>
+      <text class="report-summary" wx:if="{{item.summary}}">{{item.summary}}</text>
+      <view class="report-meta">
+        <text class="report-date">{{item.date || item.created_at || ''}}</text>
+        <text class="report-status {{(item.status === 'done' || !item.status) ? 'done' : ''}}">
+          {{item.status === 'done' || !item.status ? '已完成' : '生成中'}}
+        </text>
+      </view>
+    </view>
+  </view>
+</view>

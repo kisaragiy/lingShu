@@ -1,0 +1,52 @@
+<!-- pages/about/about.wxml -->
+<view class="container">
+  <view class="logo-area">
+    <view class="logo-circle">
+      <text class="logo-text">🧠</text>
+    </view>
+    <text class="app-name">灵枢助手</text>
+    <text class="version">v{{version}}</text>
+  </view>
+
+  <view class="desc-section">
+    <text class="desc-text">灵枢 (LingShu) — AI 应用开发实战项目</text>
+    <text class="desc-sub">多 Agent 编排 · 搜索分析报告全链路</text>
+  </view>
+
+  <view class="info-section">
+    <view class="info-row">
+      <text class="info-label">开发者</text>
+      <text class="info-value">{{developerName}}</text>
+    </view>
+    <view class="info-row">
+      <text class="info-label">技术栈</text>
+      <text class="info-value">Python · FastAPI · LangGraph</text>
+    </view>
+    <view class="info-row">
+      <text class="info-label">前端</text>
+      <text class="info-value">微信小程序</text>
+    </view>
+  </view>
+
+  <view class="links">
+    <view class="link-item" bindtap="copyText" data-text="{{githubUrl}}">
+      <text class="link-icon">🌐</text>
+      <view class="link-info">
+        <text class="link-label">GitHub 项目地址</text>
+        <text class="link-url">{{githubUrl}}</text>
+      </view>
+      <text class="copy-hint">复制</text>
+    </view>
+
+    <view class="link-item" bindtap="copyText" data-text="{{wechatId}}">
+      <text class="link-icon">💬</text>
+      <view class="link-info">
+        <text class="link-label">开发者微信</text>
+        <text class="link-url">{{wechatId}}</text>
+      </view>
+      <text class="copy-hint">复制</text>
+    </view>
+  </view>
+
+  <text class="footer-text">© 2025 Nous Research · 灵枢项目</text>
+</view>

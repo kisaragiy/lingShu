@@ -1,0 +1,30 @@
+<!-- pages/report-detail/report-detail.wxml -->
+<view class="container">
+  <!-- Loading -->
+  <view class="loading-state" wx:if="{{loading}}">
+    <view class="loading-spinner"></view>
+    <text class="loading-text">加载中...</text>
+  </view>
+
+  <!-- Error -->
+  <view class="empty-state" wx:elif="{{error}}">
+    <text class="empty-icon">⚠️</text>
+    <text class="empty-text">加载失败</text>
+    <text class="empty-desc">报告不存在或无法加载</text>
+    <button class="btn" bindtap="loadReport" data-id="{{id}}">重新加载</button>
+  </view>
+
+  <!-- Report Content -->
+  <view wx:else>
+    <view class="report-header">
+      <text class="report-title">{{report.title}}</text>
+      <text class="report-date" wx:if="{{report.date || report.created_at}}">
+        {{report.date || report.created_at}}
+      </text>
+    </view>
+    <view class="report-content">
+      <rich-text nodes="{{report.content}}"></rich-text>
+    </view>
+    <button class="share-btn" bindtap="shareReport">📤 转发给好友</button>
+  </view>
+</view>

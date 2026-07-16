@@ -1,0 +1,57 @@
+/* pages/cs/cs.wxss */
+page {
+  background: #f5f6f8;
+}
+.container {
+  padding: 16px;
+  background: #f5f6f8;
+  min-height: 100vh;
+}
+.header-bar {
+  margin-bottom: 16px;
+}
+.page-title {
+  font-size: 22px;
+  font-weight: bold;
+  color: #111;
+}
+.page-desc {
+  font-size: 13px;
+  color: #999;
+  margin-top: 4px;
+}
+.scenarios {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.cs-card {
+  width: 48%;
+  background: white;
+  border-radius: 12px;
+  padding: 20px 12px;
+  margin-bottom: 12px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.cs-card:active {
+  background: #f8f9ff;
+  transform: scale(0.97);
+}
+.cs-icon {
+  font-size: 36px;
+  display: block;
+}
+.cs-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #222;
+  margin-top: 6px;
+  display: block;
+}
+.cs-desc {
+  font-size: 11px;
+  color: #999;
+  margin-top: 4px;
+  display: block;
+}
