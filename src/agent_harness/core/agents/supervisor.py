@@ -32,7 +32,7 @@ WORKER_CAPABILITIES = {
 # ─── LLM call helper ───
 
 def _call_llm(messages: list[dict], system_prompt: str = "",
-              max_tokens: int = 4096) -> str:
+              max_tokens: int = 4096, timeout: int = 300) -> str:
     """Call LLM for supervisor reasoning."""
     import requests as req_lib
 
@@ -48,7 +48,7 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
         "thinking": {"type": "disabled"},
     }
     try:
-        resp = req_lib.post(LLAMA_API, json=payload, timeout=300)
+        resp = req_lib.post(LLAMA_API, json=payload, timeout=timeout)
         if resp.status_code == 200:
             data = resp.json()
             msg = data["choices"][0]["message"]

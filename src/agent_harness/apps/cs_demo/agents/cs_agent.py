@@ -210,6 +210,7 @@ def _call_cs_llm(message: str, intent: str, tool_data: str, context: str) -> str
         [{"role": "user", "content": user}],
         system_prompt=system,
         max_tokens=1024,
+        timeout=8,  # short timeout - fall back to template if LLM slow
     )
 
     # Fallback to template if LLM returns nothing
