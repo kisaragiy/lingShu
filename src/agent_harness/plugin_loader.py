@@ -31,14 +31,14 @@ def _ensure_dir():
     if not example.exists() and not list(_HARNESS_PLUGINS_DIR.glob("*.py")):
         example.write_text(
             '"""Example plugin — template for creating custom tools."""\n'
-            "from agent_harness.tools.registry import register_tool\n\n\n"
+            "from agent_harness.core.tools.registry import register_tool\n\n\n"
             "def _tool_my_echo(text: str) -> str:\n"
             '    """Echo the input text back."""\n'
             '    return "[echo] %s" % text\n\n\n'
-            "register_tool(\"my_echo\", _tool_my_echo, {\n"
+            'register_tool("my_echo", _tool_my_echo, {\n'
             '    "description": "回显输入文本（示例插件工具）",\n'
             '    "properties": {"text": "string"},\n'
-            "}, privilege=\"read-only\")\n"
+            '}, privilege="read-only")\n'
         )
 
 

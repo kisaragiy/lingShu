@@ -183,6 +183,12 @@ def main():
     print("  " + ("-" * 40))
     print("")
 
+    # ── Auto-setup LLM backend if not configured ──
+    from agent_harness.core.config import LLAMA_API
+    if not LLAMA_API:
+        from agent_harness.auto_setup import auto_setup
+        auto_setup()
+
     require_config()
     try:
         from agent_harness.core.config import print_config_warnings

@@ -11,6 +11,26 @@ import os
 import sys
 from pathlib import Path
 
+# ── Load .env file if present ──
+_env_path = Path(__file__).resolve()
+# 向上找 .env（从 core/config.py 到项目根目录）
+for _ in range(6):
+    _env_path = _env_path.parent
+    if (_env_path / ".env").exists():
+        _env_path = _env_path / ".env"
+        break
+if _env_path.exists() and _env_path.is_file():
+    with open(_env_path, encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line:
+                continue
+            _key, _val = _line.split("=", 1)
+            _key = _key.strip()
+            _val = _val.strip().strip("\"'")
+            if _key and _val and not os.environ.get(_key):
+                os.environ[_key] = _val
+
 # ─── LLM API endpoints ───
 # Must be configured via env vars or .env. No magic defaults — if unset,
 # the startup guard will print instructions and exit.
