@@ -39,8 +39,9 @@ page {
   transform: scale(0.97);
 }
 .cs-icon {
-  font-size: 36px;
+  font-size: 28px;
   display: block;
+  line-height: 1.2;
 }
 .cs-name {
   font-size: 15px;

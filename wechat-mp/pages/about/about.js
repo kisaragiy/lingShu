@@ -6,7 +6,7 @@ Page({
     version: '1.0.0',
     developerName: 'kisaragiy',
     githubUrl: 'https://github.com/kisaragiy/lingShu',
-    wechatId: 'kisaragiy'
+    wechatId: 'RT2965783750'
   },
 
   copyText(e) {

@@ -149,11 +149,15 @@ Page({
       ? '你是一个调研助手。请用中文回复，帮助用户搜索和分析信息。'
       : '你是一个有用的AI助手。请用中文回复。'
 
-    // 从messages中提取用户的对话历史（不包括最后一条占位消息和欢迎消息）
+    // 从messages中提取用户的对话历史（排除欢迎消息和正在加载的占位）
     const msgs = this.data.messages
-    const conversationMsgs = msgs.slice(1, -1) // 跳过欢迎和占位
-      .filter(m => m.content && m.content !== '')
-      .map(m => ({ role: m.role, content: m.content }))
+    const conversationMsgs = []
+    for (let i = 1; i < msgs.length - 1; i++) {
+      const m = msgs[i]
+      if (m && m.content && m.content !== '' && m.role !== 'system') {
+        conversationMsgs.push({ role: m.role, content: m.content })
+      }
+    }
 
     wx.request({
       url: `${baseUrl}/v1/chat/completions`,
@@ -176,9 +180,16 @@ Page({
       success: (res) => {
         if (res.data && res.data.choices && res.data.choices[0]) {
           const reply = res.data.choices[0].message.content
-          this.appendAssistantReply(reply)
+          // 检查是否是后端错误
+          if (reply && (reply.startsWith('[HarnessError]') || reply.startsWith('[LLM]'))) {
+            this.appendAssistantReply('服务暂时不可用，请确保后端 LLM 服务已启动。\\n可在设置页修改 API 地址后重试。')
+          } else {
+            this.appendAssistantReply(reply)
+          }
         } else if (res.data && res.data.reply) {
           this.appendAssistantReply(res.data.reply)
+        } else if (res.data && res.data.error) {
+          this.appendAssistantReply('服务返回错误：' + res.data.error)
         } else {
           this.appendAssistantReply('抱歉，我没有理解你的问题，请重新描述一下。')
         }
