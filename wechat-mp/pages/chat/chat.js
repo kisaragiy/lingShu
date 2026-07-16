@@ -143,8 +143,6 @@ Page({
     const mode = this.data.mode
 
     // 构造带历史的消息列表
-    const historyMessages = []
-    // 跳过第一条欢迎消息，加上系统提示
     const systemPrompt = mode === 'research'
       ? '你是一个调研助手。请用中文回复，帮助用户搜索和分析信息。'
       : '你是一个有用的AI助手。请用中文回复。'
@@ -162,7 +160,7 @@ Page({
     wx.request({
       url: `${baseUrl}/v1/chat/completions`,
       method: 'POST',
-      timeout: 30000,
+      timeout: 10000,  // 10s timeout, avoid long hang
       header: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${app.globalData.apiToken}`,
@@ -180,23 +178,25 @@ Page({
       success: (res) => {
         if (res.data && res.data.choices && res.data.choices[0]) {
           const reply = res.data.choices[0].message.content
-          // 检查是否是后端错误
           if (reply && (reply.startsWith('[HarnessError]') || reply.startsWith('[LLM]'))) {
-            this.appendAssistantReply('服务暂时不可用，请确保后端 LLM 服务已启动。\\n可在设置页修改 API 地址后重试。')
+            // LLM 不可用，回退到 CS API
+            this.callCS(text)
           } else {
             this.appendAssistantReply(reply)
           }
         } else if (res.data && res.data.reply) {
           this.appendAssistantReply(res.data.reply)
         } else if (res.data && res.data.error) {
-          this.appendAssistantReply('服务返回错误：' + res.data.error)
+          // LLM 不可用，回退到 CS API
+          this.callCS(text)
         } else {
           this.appendAssistantReply('抱歉，我没有理解你的问题，请重新描述一下。')
         }
       },
       fail: (err) => {
         console.error('API call failed:', err)
-        this.appendAssistantReply('连接失败，请检查网络或到设置页确认 API 地址是否正确。')
+        // 网络错误或超时，回退到 CS API
+        this.callCS(text)
       },
       complete: () => {
         this.setData({ loading: false })
