@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.67.1 — 2026-07-17
+
+### Fixed — LLM 配置修复
+- 🐛 **graph_multi.py 导入路径** — `agent_log` 和 `supervisor` 的 import 路径修复（代码分层后未更新）
+- 🐛 **环境变量名错误** — `MODEL_LLAMA` 改为 `HARNESS_MODEL_LLAMA`，使 Ollama 配置生效
+- ✅ **Ollama qwen3.5:9b 对接验证通过** — 多 Agent 管线全链路可用
+
 ## v0.67.0 — 2026-07-17
 
 ### Fixed — 对话连接问题彻底修复

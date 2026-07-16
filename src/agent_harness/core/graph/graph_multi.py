@@ -182,8 +182,8 @@ def supervisor_finalize(state: SupervisorState) -> dict:
     )
 
     # Use LLM to craft final response
-    from .agent_log import log_event
-    from .agents.supervisor import _call_llm
+    from ..agent_log import log_event
+    from ..agents.supervisor import _call_llm
 
     # Log finalize start
     log_event(state.get("session_id", "unknown"), "finalize", {
