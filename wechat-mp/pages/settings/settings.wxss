@@ -4,6 +4,7 @@ page {
 }
 .container {
   padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   background: #f5f6f8;
   min-height: 100vh;
 }
@@ -44,6 +45,10 @@ page {
   font-size: 14px;
   box-sizing: border-box;
   border: 1px solid #eee;
+  transition: border-color 0.2s;
+}
+.input:focus {
+  border-color: #2563eb;
 }
 .save-btn {
   width: 100%;

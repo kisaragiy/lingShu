@@ -4,6 +4,7 @@ page {
 }
 .container {
   padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   background: #f5f6f8;
   min-height: 100vh;
 }
@@ -33,6 +34,7 @@ page {
   margin-bottom: 12px;
   text-align: center;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  box-sizing: border-box;
 }
 .cs-card:active {
   background: #f8f9ff;

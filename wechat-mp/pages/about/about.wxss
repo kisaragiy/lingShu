@@ -4,6 +4,7 @@ page {
 }
 .container {
   padding: 30px 16px;
+  padding-bottom: calc(30px + env(safe-area-inset-bottom, 0px));
   background: #f5f6f8;
   min-height: 100vh;
   display: flex;

@@ -4,6 +4,7 @@ page {
 }
 .container {
   padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   background: #f5f6f8;
   min-height: 100vh;
 }
@@ -80,6 +81,7 @@ page {
   align-items: center;
   padding: 16px;
   border-bottom: 1px solid #f0f0f0;
+  transition: background 0.15s;
 }
 .menu-item:last-child {
   border-bottom: none;

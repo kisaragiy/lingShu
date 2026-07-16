@@ -4,6 +4,7 @@ page {
 }
 .container {
   padding: 20px 16px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   background: #f5f6f8;
   min-height: 100vh;
 }

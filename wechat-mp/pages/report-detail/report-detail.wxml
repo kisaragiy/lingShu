@@ -25,6 +25,6 @@
     <view class="report-content">
       <rich-text nodes="{{report.content}}"></rich-text>
     </view>
-    <button class="share-btn" bindtap="shareReport">📤 转发给好友</button>
+    <button class="share-btn" open-type="share">📤 转发给好友</button>
   </view>
 </view>

@@ -20,6 +20,10 @@ Page({
   },
 
   loadReport(id) {
+    // id may come from onLoad (string) or from bindtap event
+    if (typeof id !== 'string' && typeof id !== 'number') {
+      id = this.data.id
+    }
     this.setData({ loading: true, error: false })
     wx.request({
       url: app.globalData.apiBase + '/v1/reports/' + id,
@@ -53,11 +57,5 @@ Page({
         path: '/pages/report-detail/report-detail?id=' + this.data.id
       }
     }
-  },
-
-  shareReport() {
-    wx.shareAppMessage({
-      title: this.data.report.title || '灵枢调研报告'
-    })
   }
 })

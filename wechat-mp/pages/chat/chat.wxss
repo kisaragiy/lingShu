@@ -161,6 +161,7 @@ page {
 .input-area {
   display: flex;
   padding: 12px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   background: white;
   border-top: 1px solid #eee;
   align-items: center;

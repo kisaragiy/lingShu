@@ -4,6 +4,7 @@ page {
 }
 .container {
   padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   background: #f5f6f8;
   min-height: 100vh;
 }
@@ -79,7 +80,7 @@ page {
 .share-btn {
   width: 100%;
   margin-top: 16px;
-  background: #07c160;
+  background: #2563eb;
   color: white;
   border-radius: 20px;
   font-size: 15px;
@@ -87,4 +88,8 @@ page {
   display: flex;
   align-items: center;
   justify-content: center;
+  border: none;
+}
+.share-btn:active {
+  background: #1d4ed8;
 }
