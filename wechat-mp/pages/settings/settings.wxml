@@ -5,9 +5,9 @@
 
     <view class="field">
       <text class="label">服务器地址</text>
-      <input class="input" placeholder="http://127.0.0.1:8765"
+      <input class="input" placeholder="http://192.168.31.182:8788"
         value="{{apiBase}}" bindinput="onApiBaseInput"/>
-      <text class="field-hint">例如：http://192.168.1.100:8765</text>
+      <text class="field-hint">真机调试：填电脑局域网 IP + :8788</text>
     </view>
 
     <view class="field">
@@ -23,7 +23,8 @@
   <view class="section tips-section">
     <view class="section-title">说明</view>
     <text class="tip-text">• 健康检查路径：/health</text>
-    <text class="tip-text">• API 路径前缀：/v1/（例如 /v1/chat/completions）</text>
+    <text class="tip-text">• 真机调试：电脑运行「开启手机预览.bat」</text>
+    <text class="tip-text">• 手机和电脑必须在同一 WiFi 下</text>
     <text class="tip-text">• Token 可在服务端 api_token.txt 中查看</text>
     <text class="tip-text">• 修改配置后请保存并测试连接</text>
   </view>

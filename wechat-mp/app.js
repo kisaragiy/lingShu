@@ -1,7 +1,7 @@
 // app.js
 App({
   globalData: {
-    apiBase: 'http://127.0.0.1:8765',  // TODO: 替换为实际部署地址
+    apiBase: 'http://127.0.0.1:8788',  // 主服务端口，真机调试改为电脑局域网 IP
     apiToken: 'dev-token-placeholder',
     userInfo: null,
     chatMode: 'normal'  // normal | research | cs
