@@ -23,7 +23,7 @@ Page({
       method: 'GET',
       timeout: 3000,
       header: {
-        'X-API-Token': app.globalData.apiToken
+        'Authorization': 'Bearer ' + app.globalData.token
       },
       success: () => this.setData({ connected: true, checking: false }),
       fail: () => {
@@ -34,13 +34,12 @@ Page({
             url: fallbackPort + '/health',
             method: 'GET',
             timeout: 3000,
-            header: { 'X-API-Token': app.globalData.apiToken },
+            header: { 'Authorization': 'Bearer ' + app.globalData.token },
             success: () => {
               // Auto-fix the apiBase for future requests
               app.globalData.apiBase = fallbackPort
               wx.setStorageSync('lingShu_settings', {
-                apiBase: fallbackPort,
-                apiToken: app.globalData.apiToken
+                apiBase: fallbackPort
               })
               this.setData({ connected: true, checking: false })
             },

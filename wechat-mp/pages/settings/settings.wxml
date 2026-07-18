@@ -1,7 +1,7 @@
 <!-- pages/settings/settings.wxml -->
 <view class="container">
   <view class="section">
-    <view class="section-title">API 配置</view>
+    <view class="section-title">服务器配置</view>
 
     <view class="field">
       <text class="label">服务器地址</text>
@@ -10,22 +10,34 @@
       <text class="field-hint">真机调试：填电脑局域网 IP + :8788</text>
     </view>
 
-    <view class="field">
-      <text class="label">API Token</text>
-      <input class="input" placeholder="输入 API Key"
-        value="{{apiToken}}" bindinput="onApiTokenInput"/>
-    </view>
-
     <button class="save-btn" bindtap="saveSettings">保存配置</button>
     <button class="test-btn" bindtap="testConnection">测试连接</button>
   </view>
 
+  <view class="section">
+    <view class="section-title">当前用户</view>
+
+    <view class="field">
+      <text class="label">用户 ID</text>
+      <text class="value">{{userId}}</text>
+    </view>
+    <view class="field">
+      <text class="label">用户名</text>
+      <text class="value">{{username}}</text>
+    </view>
+    <view class="field">
+      <text class="label">登录方式</text>
+      <text class="value">{{loginTime}}</text>
+    </view>
+
+    <button class="relogin-btn" bindtap="reLogin">🔄 重新登录</button>
+  </view>
+
   <view class="section tips-section">
     <view class="section-title">说明</view>
-    <text class="tip-text">• 健康检查路径：/health</text>
-    <text class="tip-text">• 真机调试：电脑运行「开启手机预览.bat」</text>
-    <text class="tip-text">• 手机和电脑必须在同一 WiFi 下</text>
-    <text class="tip-text">• Token 可在服务端 api_token.txt 中查看</text>
-    <text class="tip-text">• 修改配置后请保存并测试连接</text>
+    <text class="tip-text">• 小程序使用自动登录，无需手动输入 API Token</text>
+    <text class="tip-text">• 首次打开会自动注册设备并登录</text>
+    <text class="tip-text">• 系统会自动为每个设备分配独立用户 ID</text>
+    <text class="tip-text">• 各设备之间的数据相互隔离</text>
   </view>
 </view>

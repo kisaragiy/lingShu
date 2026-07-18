@@ -17,7 +17,7 @@ Page({
       url: base + '/health',
       timeout: 5000,
       header: {
-        'X-API-Token': app.globalData.apiToken
+        'Authorization': 'Bearer ' + app.globalData.token
       },
       success: () => this.setData({ connected: true }),
       fail: () => this.setData({ connected: false })

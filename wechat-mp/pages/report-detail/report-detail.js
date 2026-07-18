@@ -28,8 +28,7 @@ Page({
     wx.request({
       url: app.globalData.apiBase + '/v1/reports/' + id,
       header: {
-        'Authorization': 'Bearer ' + app.globalData.apiToken,
-        'X-API-Token': app.globalData.apiToken
+        'Authorization': 'Bearer ' + app.globalData.token
       },
       success: (res) => {
         let report = null

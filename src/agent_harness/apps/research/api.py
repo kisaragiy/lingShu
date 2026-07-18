@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import queue
+import secrets
 import threading
 import time
 import uuid
@@ -79,7 +80,7 @@ def _check_rate_limit(ip: str) -> bool:
 
 _AUTH_EXEMPT_PREFIXES = ("/health",)
 _AUTH_EXEMPT_EXACT = ("/", "/setup", "/dashboard")
-_AUTH_EXEMPT_V1 = ("/v1/auth/login", "/v1/auth/refresh", "/v1/auth/setup-admin", "/v1/setup/config")
+_AUTH_EXEMPT_V1 = ("/v1/auth/login", "/v1/auth/mp-login", "/v1/auth/refresh", "/v1/auth/setup-admin", "/v1/setup/config")
 
 # ─── Token optimization: conversation window ───
 MAX_HISTORY_ROUNDS = int(os.environ.get("HARNESS_MAX_HISTORY", "8"))
@@ -869,6 +870,42 @@ async def kb_query(q: str = "", collection: str = "default", top_k: int = 5):
 
 
 # ─── Auth API ───
+
+@router.post("/v1/auth/mp-login")
+async def mp_login(request: Request):
+    """Mini Program auto-login. Creates user on first visit.
+
+    Body: {"device_id": "uuid-from-miniprogram", "code": "wx.login-code"} (code currently unused)
+    Returns: {"token": "jwt...", "user_id": "...", "is_new": true/false}
+    """
+    body = await request.json()
+    device_id = (body.get("device_id", "") or "").strip()
+    if not device_id:
+        return JSONResponse({"error": "device_id required"}, status_code=400)
+
+    # Check if user exists by device_id (stored as username)
+    user = _auth_db.get_user_by_username(device_id)
+    is_new = False
+    if not user:
+        _auth_db.create_user(device_id, secrets.token_hex(16), role="user", display_name=device_id[:12])
+        user = _auth_db.get_user_by_username(device_id)
+        is_new = True
+
+    access_token = _auth_jwt.create_access_token(user["id"], device_id[:8], user["role"])
+    refresh_token = _auth_jwt.create_refresh_token(user["id"], device_id[:8], user["role"])
+
+    import time as _t
+    _auth_db.save_session(_auth_jwt.verify_token(access_token)["jti"], user["id"], int(_t.time()) + 8 * 3600)
+    _auth_db.save_session(_auth_jwt.verify_token(refresh_token, expected_type="refresh")["jti"], user["id"], int(_t.time()) + 30 * 86400, token_type="refresh")
+
+    return {
+        "token": access_token,
+        "refresh_token": refresh_token,
+        "user_id": user["id"],
+        "is_new": is_new,
+        "username": device_id[:8],
+    }
+
 
 @router.get("/v1/auth/login")
 async def login_form():

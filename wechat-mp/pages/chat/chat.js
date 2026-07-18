@@ -168,8 +168,7 @@ Page({
       timeout: 10000,  // 10s timeout, avoid long hang
       header: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${app.globalData.apiToken}`,
-        'X-API-Token': app.globalData.apiToken
+        'Authorization': `Bearer ${app.globalData.token}`
       },
       data: {
         model: 'default',
@@ -219,8 +218,7 @@ Page({
       timeout: 30000,
       header: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${app.globalData.apiToken}`,
-        'X-API-Token': app.globalData.apiToken
+        'Authorization': `Bearer ${app.globalData.token}`
       },
       data: {
         message: text,
