@@ -16,15 +16,19 @@ Page({
   onLoad(options) {
     // 检查是否有模式切换
     const mode = options.mode || app.globalData.chatMode || 'normal'
-    const scene = options.scene || ''
-    this.initChat(mode, scene)
+    const scene = options.scene || app.globalData.csScene || ''
+    // 消费掉 scene，避免重复触发
+    app.globalData.csScene = ''
+    this.initChat(mode, scene)}
   },
 
   onShow() {
     // 如果 globalData 中的 chatMode 变了，同步切换
     const mode = app.globalData.chatMode || 'normal'
+    const scene = app.globalData.csScene || ''
     if (mode !== this.data.mode) {
-      this.initChat(mode, '')
+      app.globalData.csScene = ''  // 消费掉
+      this.initChat(mode, scene)
     }
   },
 
@@ -71,6 +75,7 @@ Page({
       const sceneMessages = {
         presales: '我想了解产品信息',
         order: '帮我查一下我的订单',
+        logistics: '查一下物流信息',
         coupon: '最近有什么优惠活动吗',
         aftersale: '我要申请售后',
         address: '我要修改收货地址',

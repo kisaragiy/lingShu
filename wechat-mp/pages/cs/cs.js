@@ -15,9 +15,11 @@ Page({
 
   startCS(e) {
     const id = e.currentTarget.dataset.id
+    // Store pending CS scene in globalData before switching tab
     app.globalData.chatMode = 'cs'
-    wx.navigateTo({
-      url: '/pages/chat/chat?mode=cs&scene=' + id
+    app.globalData.csScene = id
+    wx.switchTab({
+      url: '/pages/chat/chat'
     })
   }
 })
