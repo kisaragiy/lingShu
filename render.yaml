@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: lingshu
+    runtime: python
+    region: oregon  # 美国西部，国内访问相对较快
+    buildCommand: pip install -e .
+    startCommand: python start_prod.py
+    envVars:
+      - key: HARNESS_API_HOST
+        value: 0.0.0.0
+      - key: HARNESS_DISABLE_AUTH
+        value: "1"
+      - key: HARNESS_DISABLE_RATE_LIMIT
+        value: "1"
+      - key: HARNESS_LLAMA_API
+        value: ""
+      - key: HARNESS_CLOUD_KEY
+        value: ""
+    healthCheckPath: /health
