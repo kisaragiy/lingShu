@@ -44,6 +44,8 @@ app.add_middleware(
 async def _api_auth_middleware(request: Request, call_next):
     from agent_harness.core.config import DISABLE_AUTH
     if DISABLE_AUTH:
+        # Demo mode: set a default guest user
+        request.state.user = {"id": "guest", "username": "访客", "role": "admin"}
         return await call_next(request)
 
     client_ip = request.client.host if request.client else "127.0.0.1"
@@ -131,6 +133,10 @@ async def serve_frontend():
     if index.exists():
         html = index.read_text("utf-8")
         needs_admin = _auth_db.needs_initial_admin()
+        # Skip admin requirement in demo mode (DISABLE_AUTH)
+        from agent_harness.core.config import DISABLE_AUTH
+        if DISABLE_AUTH:
+            needs_admin = False
         token_script = (
             '<script>'
             'window.__API_TOKEN__="{}";'

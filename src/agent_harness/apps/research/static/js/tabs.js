@@ -58,7 +58,8 @@ async function doSetupAdmin() {
     // Auto login after creation
     await authLogin(username, password);
     toast('管理员已创建，欢迎使用灵枢！', 'ok');
-    init();  // Re-init (will go to setup wizard now)
+    // Reload to refresh server-side __NEEDS_ADMIN__ flag
+    setTimeout(() => window.location.reload(), 1000);
   } catch(e) {
     errEl.textContent = e.message;
     errEl.style.display = 'block';
