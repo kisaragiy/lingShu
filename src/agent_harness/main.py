@@ -184,12 +184,16 @@ def main():
     print("")
 
     # ── Auto-setup LLM backend if not configured ──
-    from agent_harness.core.config import LLAMA_API
-    if not LLAMA_API:
+    from agent_harness.core.config import LLAMA_API, DISABLE_AUTH
+    if not LLAMA_API and not DISABLE_AUTH:
         from agent_harness.auto_setup import auto_setup
         auto_setup()
 
-    require_config()
+    if not LLAMA_API and DISABLE_AUTH:
+        # Demo mode: skip LLM check, server will use template fallbacks
+        pass
+    else:
+        require_config()
     try:
         from agent_harness.core.config import print_config_warnings
         print_config_warnings()
