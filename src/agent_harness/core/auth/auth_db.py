@@ -48,12 +48,13 @@ _thread_local = None  # threading.local set during init
 
 
 def _get_conn() -> sqlite3.Connection:
+    global _DB_INITIALIZED
+    global _thread_local
     """Get a SQLite connection for the current thread (per-thread, WAL mode).
 
     Each thread gets its own connection — safe for concurrent reads/writes
     with WAL mode. Connections are cached in threading.local.
     """
-    global _thread_local
     if _thread_local is None:
         _thread_local = threading.local()
 
@@ -64,6 +65,9 @@ def _get_conn() -> sqlite3.Connection:
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=5000")  # 5s retry on busy
         _thread_local.conn = conn
+        if not _DB_INITIALIZED:
+            _DB_INITIALIZED = True
+            _init_schema()
     return _thread_local.conn
 
 
