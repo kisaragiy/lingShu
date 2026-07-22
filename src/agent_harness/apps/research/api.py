@@ -366,6 +366,28 @@ async def chat_completions(req: ChatRequest, request: Request):
             break
     if not last_user_msg:
         return JSONResponse({"error": "No user message found"}, status_code=400)
+
+    # ── Demo mode: no LLM backend → use CS agent fallback ──
+    from agent_harness.core.config import LLAMA_API, CLOUD_API_KEY
+    if not LLAMA_API and not CLOUD_API_KEY:
+        from agent_harness.apps.cs_demo.agents.cs_agent import run_cs_agent
+        from agent_harness.apps.cs_demo.tools.customer_service import classify_cs_intent
+        result = run_cs_agent(last_user_msg)
+        reply = result.get("reply", "")
+        intent = result.get("intent", classify_cs_intent(last_user_msg))
+        from agent_harness.apps.cs_demo.api import _get_cs_quick_replies
+        quick = _get_cs_quick_replies(intent)
+        if req.stream:
+            async def _demo_stream():
+                yield "data: " + json.dumps({"choices": [{"delta": {"role": "assistant", "content": reply}}]}) + "\n\n"
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(_demo_stream(), media_type="text/event-stream")
+        return JSONResponse({
+            "id": "chatcmpl-" + str(int(time.time())),
+            "object": "chat.completion", "model": req.model,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": reply}, "finish_reason": "stop"}],
+        })
+
     last_user_idx = -1
     for i in range(len(req.messages) - 1, -1, -1):
         if req.messages[i].get("role") == "user":
