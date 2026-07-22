@@ -437,10 +437,24 @@ a:hover { text-decoration: underline; }
 @media (max-width: 900px) {
   .history-panel { display: none; }
   .intro-panel { display: none; }
-  .app-header { padding: 0 12px; }
+  .app-header { padding: 0 12px; height: 48px; }
+  .app-header .logo { font-size: 16px; }
+  .app-header .header-right { gap: 4px; }
+  .app-header .header-right .btn { padding: 4px 8px; font-size: 12px; }
   .chat-messages { padding: 12px; }
   .chat-input-bar { padding: 12px; }
   .chat-bubble { max-width: 92%; font-size: 13px; }
+  .chat-input { font-size: 14px; } /* prevent iOS zoom on focus */
+  .send-btn { min-width: 56px; font-size: 13px; }
+}
+@media (max-width: 600px) {
+  .app-body { flex-direction: column; }
+  .chat-messages { padding: 8px; }
+  .chat-bubble { max-width: 95%; font-size: 13px; padding: 10px 14px; }
+  .chat-input-bar { padding: 8px 12px; gap: 6px; }
+  .chat-input { padding: 8px 12px; }
+  .scenario-cards { display: flex; flex-direction: column; gap: 8px; }
+  .scenario-card { width: 100%; margin: 0; }
 }
 @media (max-width: 768px) {
   .intro-panel, .history-panel { display: none; }
