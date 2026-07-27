@@ -14,6 +14,7 @@ from agent_harness.core.auth import auth_jwt as _auth_jwt
 from agent_harness.core.config import require_config
 from agent_harness.core.exceptions import register_error_handlers, AppError
 from agent_harness.core.health import run_health_checks, get_cached_report
+from agent_harness.core.tasks import register_task_routes
 from agent_harness.apps.research.api import router as research_router, HOST, PORT, _API_TOKEN, _check_rate_limit, _RATE_LIMIT_WINDOW, _RATE_LIMIT_MAX, _AUTH_EXEMPT_PREFIXES, _AUTH_EXEMPT_EXACT, _AUTH_EXEMPT_V1
 from agent_harness.apps.cs_demo.api import router as cs_demo_router
 from agent_harness.apps.knowledge_qa.api import router as knowledge_qa_router
@@ -54,6 +55,9 @@ async def health_check():
     report = get_cached_report()
     status_code = 200 if report.status != "down" else 503
     return JSONResponse(content=report.to_dict(), status_code=status_code)
+
+# ── 任务队列路由 ──
+register_task_routes(app)
 
 app.add_middleware(
     CORSMiddleware,

@@ -1,19 +1,19 @@
-"""Configuration — LLM endpoints, thresholds, paths.
+"""
+Configuration — LLM endpoints, thresholds, paths.
 
 Security: DO NOT hardcode credentials here. All secrets must come from
 environment variables or .env file. See .env.example for required vars.
-
-IMPORTANT: The startup script WILL EXIT with an error if critical config
-is missing. This is intentional — it prevents casual copiers from running
-the app without understanding what they're doing.
 """
 import os
 import sys
 from pathlib import Path
+from typing import Optional
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Load .env file if present ──
 _env_path = Path(__file__).resolve()
-# 向上找 .env（从 core/config.py 到项目根目录）
 for _ in range(6):
     _env_path = _env_path.parent
     if (_env_path / ".env").exists():
@@ -31,89 +31,91 @@ if _env_path.exists() and _env_path.is_file():
             if _key and _val and not os.environ.get(_key):
                 os.environ[_key] = _val
 
-# ─── LLM API endpoints ───
-# Must be configured via env vars or .env. No magic defaults — if unset,
-# the startup guard will print instructions and exit.
-LLAMA_API = os.environ.get("HARNESS_LLAMA_API", "")
-OLLAMA_API = os.environ.get("HARNESS_OLLAMA_API", "")
-DEEPSEEK_API = os.environ.get("HARNESS_DEEPSEEK_API", "")
-CLOUD_API_DIRECT = os.environ.get("HARNESS_CLOUD_API", "")
-CLOUD_API_KEY = os.environ.get("HARNESS_CLOUD_KEY", "")
 
-# ─── Model names ───
-MODEL_LLAMA = os.environ.get("HARNESS_MODEL_LLAMA", "deepseek-v4")
-MODEL_DEEPSEEK = os.environ.get("HARNESS_MODEL_DEEPSEEK", "deepseek-v4-pro")
+class Settings(BaseSettings):
+    """集中配置 — 带 Pydantic 类型验证。来源：.env > 环境变量 > 默认值。"""
 
-# ─── Paths ───
+    model_config = SettingsConfigDict(
+        env_prefix="HARNESS_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # ── LLM API ──
+    llama_api: str = Field(default="", description="llama.cpp API 地址")
+    ollama_api: str = Field(default="", description="Ollama API 地址")
+    deepseek_api: str = Field(default="", description="DeepSeek API 地址")
+    cloud_api: str = Field(default="", description="API 聚合地址")
+    cloud_key: str = Field(default="", description="云端 API Key")
+
+    # ── Model names ──
+    model_llama: str = Field(default="deepseek-v4")
+    model_deepseek: str = Field(default="deepseek-v4-pro")
+
+    # ── Orchestration ──
+    max_retries: int = Field(default=2, ge=0, le=10)
+    max_iterations: int = Field(default=10, ge=1, le=100)
+    max_tokens: int = Field(default=100000, ge=1000, le=1_000_000)
+    max_time: int = Field(default=600, ge=30, le=3600)
+    max_no_progress: int = Field(default=5, ge=1, le=20)
+
+    # ── Multi-agent ──
+    max_workers: int = Field(default=3, ge=1, le=10)
+    supervisor_rounds: int = Field(default=3, ge=1, le=10)
+
+    # ── Auth ──
+    disable_auth: bool = Field(default=False)
+
+    # ── Paths ──
+    memory_dir: Optional[str] = None
+    skills_dir: Optional[str] = None
+
+    def check(self) -> None:
+        """启动时校验——至少一个 LLM 后端已配置。"""
+        configured = []
+        if self.llama_api:
+            configured.append(f"llama.cpp ({self.llama_api})")
+        if self.deepseek_api:
+            configured.append(f"DeepSeek ({self.deepseek_api})")
+        if self.cloud_api:
+            configured.append(f"云 API ({self.cloud_api})")
+        if not configured:
+            print("=" * 60)
+            print("❌ 未配置任何 LLM 后端！")
+            print()
+            print("请设置以下环境变量之一（或在 .env 中）：")
+            print("  HARNESS_LLAMA_API=http://127.0.0.1:8080/v1")
+            print("  HARNESS_DEEPSEEK_API=https://api.deepseek.com/v1")
+            print("  HARNESS_CLOUD_API=<你的 API 代理地址>")
+            print("=" * 60)
+            sys.exit(1)
+        print(f"✅ 配置校验通过 — {len(configured)} 个 LLM 后端")
+
+
+# ── 实例化配置 ──
+_settings = Settings()
+
+LLAMA_API = _settings.llama_api
+OLLAMA_API = _settings.ollama_api
+DEEPSEEK_API = _settings.deepseek_api
+CLOUD_API_DIRECT = _settings.cloud_api
+CLOUD_API_KEY = _settings.cloud_key
+MODEL_LLAMA = _settings.model_llama
+MODEL_DEEPSEEK = _settings.model_deepseek
+MAX_RETRIES = _settings.max_retries
+MAX_ITERATIONS = _settings.max_iterations
+MAX_TOKENS_PER_TASK = _settings.max_tokens
+MAX_WALL_TIME = _settings.max_time
+MAX_NO_PROGRESS = _settings.max_no_progress
+MAX_WORKER_CONCURRENCY = _settings.max_workers
+SUPERVISOR_MAX_ROUNDS = _settings.supervisor_rounds
+DISABLE_AUTH = _settings.disable_auth
 HARNESS_DIR = Path(__file__).resolve().parent
-MEMORY_DIR = Path(os.environ.get("HARNESS_MEMORY_DIR", HARNESS_DIR.parent.parent / "memory"))
-SKILLS_DIR = Path(os.environ.get("HARNESS_SKILLS_DIR", HARNESS_DIR.parent.parent / "skills"))
+MEMORY_DIR = Path(_settings.memory_dir or HARNESS_DIR.parent.parent / "memory")
+SKILLS_DIR = Path(_settings.skills_dir or HARNESS_DIR.parent.parent / "skills")
 
-# ─── Orchestration limits ───
-MAX_RETRIES = int(os.environ.get("HARNESS_MAX_RETRIES", "2"))
-MAX_ITERATIONS = int(os.environ.get("HARNESS_MAX_ITERATIONS", "10"))
-MAX_TOKENS_PER_TASK = int(os.environ.get("HARNESS_MAX_TOKENS", "100000"))
-MAX_WALL_TIME = int(os.environ.get("HARNESS_MAX_TIME", "600"))
-MAX_NO_PROGRESS = int(os.environ.get("HARNESS_MAX_NO_PROGRESS", "5"))
-
-# ─── Multi-agent settings ───
-MAX_WORKER_CONCURRENCY = int(os.environ.get("HARNESS_MAX_WORKERS", "3"))
-SUPERVISOR_MAX_ROUNDS = int(os.environ.get("HARNESS_SUPERVISOR_ROUNDS", "3"))
-
-# ─── Auth bypass (opt-in, not default) ───
-# Set HARNESS_DISABLE_AUTH=1 to allow unauthenticated local-only API access.
-# By default, all /v1/* endpoints require JWT or X-API-Key.
-DISABLE_AUTH = os.environ.get("HARNESS_DISABLE_AUTH", "").lower() in ("1", "true", "yes")
-
-
-# ═══════════════════════════════════════════
-# STARTUP GUARD — fatal if config incomplete
-# ═══════════════════════════════════════════
 
 def require_config() -> None:
-    """Check critical config at startup. Exits with error + instructions if missing.
-
-    This is the first line of defense against casual copiers: without reading
-    the docs and setting up at least one LLM backend, the app won't start.
-    """
-    errors: list[str] = []
-
-    # At least one LLM backend must be configured
-    backends = [
-        ("HARNESS_LLAMA_API (本地 llama.cpp)", LLAMA_API),
-        ("HARNESS_DEEPSEEK_API (云端)", DEEPSEEK_API),
-        ("HARNESS_CLOUD_API (API 聚合)", CLOUD_API_DIRECT),
-    ]
-    configured = [name for name, val in backends if val]
-    if not configured:
-        errors.append(
-            "未配置任何 LLM 后端！\n"
-            "请至少设置一个后端地址：\n"
-            "  export HARNESS_LLAMA_API=http://127.0.0.1:8081/v1/chat/completions\n"
-            "  export HARNESS_DEEPSEEK_API=https://api.deepseek.com/v1/chat/completions\n"
-            "或复制 .env.example 为 .env 并编辑：\n"
-            "  cp .env.example .env\n"
-        )
-
-    # Cloud API key: warn if using DeepSeek/cloud without a key
-    if DEEPSEEK_API and not CLOUD_API_KEY:
-        errors.append(
-            "设置了 HARNESS_DEEPSEEK_API 但未设置 HARNESS_CLOUD_KEY。\n"
-            "   export HARNESS_CLOUD_KEY=sk-xxx\n"
-        )
-
-    if not errors:
-        return
-
-    # ─── Fatal: print error + setup guide ───
-    border = "=" * 60
-    print(f"\n{border}", file=sys.stderr)
-    print("  ❌ 灵枢 (LingShu Agent) — 配置不完整", file=sys.stderr)
-    print(f"  {border}", file=sys.stderr)
-    for e in errors:
-        for line in e.strip().split("\n"):
-            print(f"  {line}", file=sys.stderr)
-    print(f"  {border}", file=sys.stderr)
-    print("  配置完成后重新启动。", file=sys.stderr)
-    print(f"  {border}\n", file=sys.stderr)
-    sys.exit(1)
+    """兼容旧接口。"""
+    _settings.check()
