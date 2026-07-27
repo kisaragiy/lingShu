@@ -12,6 +12,8 @@ from agent_harness.core.auth import auth_db as _auth_db
 from agent_harness.core.auth.api_security import validate_token
 from agent_harness.core.auth import auth_jwt as _auth_jwt
 from agent_harness.core.config import require_config
+from agent_harness.core.exceptions import register_error_handlers, AppError
+from agent_harness.core.health import run_health_checks, get_cached_report
 from agent_harness.apps.research.api import router as research_router, HOST, PORT, _API_TOKEN, _check_rate_limit, _RATE_LIMIT_WINDOW, _RATE_LIMIT_MAX, _AUTH_EXEMPT_PREFIXES, _AUTH_EXEMPT_EXACT, _AUTH_EXEMPT_V1
 from agent_harness.apps.cs_demo.api import router as cs_demo_router
 from agent_harness.apps.knowledge_qa.api import router as knowledge_qa_router
@@ -24,6 +26,34 @@ app = FastAPI(
     description="OpenAI-compatible API for Agent Harness — single & multi-agent modes",
     openapi_url=("/openapi.json" if os.environ.get("HARNESS_ENABLE_DOCS") else None),
 )
+
+# 注册异常处理器
+register_error_handlers(app)
+
+# 启动时运行健康检查
+@app.on_event("startup")
+async def _startup_health():
+    report = run_health_checks()
+    logger = app.state.logger if hasattr(app.state, "logger") else None
+    print(f"\n{'='*48}")
+    print(f"灵枢 v{__version__} 启动自检")
+    print(f"{'='*48}")
+    for c in report.checks:
+        icon = {"up": "✅", "degraded": "⚠️", "down": "❌"}.get(c.status, "❓")
+        print(f"  {icon} {c.name}: {c.detail}")
+    print(f"{'='*48}")
+    overall_icon = {"healthy": "✅", "degraded": "⚠️", "down": "❌"}.get(report.status, "❓")
+    print(f"状态: {overall_icon} {report.status}")
+
+
+# ── /health 端点 ──
+
+@app.get("/health", tags=["系统"])
+async def health_check():
+    """系统健康状态 — 轮询依赖状态"""
+    report = get_cached_report()
+    status_code = 200 if report.status != "down" else 503
+    return JSONResponse(content=report.to_dict(), status_code=status_code)
 
 app.add_middleware(
     CORSMiddleware,

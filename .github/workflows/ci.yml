@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [master, main]
   pull_request:
-    branches: [ master ]
+    branches: [master, main]
 
 jobs:
   test:
@@ -14,19 +14,20 @@ jobs:
         python-version: ["3.11"]
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pytest pytest-timeout httpx requests
-        pip install -e .
+      - name: Install dependencies
+        run: uv sync
 
-    - name: Test
-      run: |
-        pytest tests/ -v -x --timeout=30 -m "not integration"
+      - name: Run tests
+        run: uv run pytest -x -q tests/ -v --tb=short
+
+      - name: Version consistency check
+        run: |
+          PKG_VER=$(grep -m1 '__version__' src/agent_harness/__init__.py | sed 's/.*"//;s/".*//')
+          echo "Version: $PKG_VER"
