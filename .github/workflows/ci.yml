@@ -7,7 +7,7 @@ on:
     branches: [master, main]
 
 jobs:
-  test:
+  quality:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -22,17 +22,48 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --group dev
 
-      - name: Run tests
-        run: uv run pytest -x -q tests/ -v --tb=short
+      - name: Ruff lint check
+        run: uv run ruff check src/
+
+      - name: Ruff format check
+        run: uv run ruff format --check src/
+
+      - name: Mypy type check
+        run: uv run mypy src/ --strict --ignore-missing-imports --allow-untyped-decorators
+        continue-on-error: true
+
+      - name: Bandit SAST
+        run: uv run bandit -r src/ -c pyproject.toml -f json -o bandit_report.json 2>&1 || echo "⚠️ SAST scan completed"
+
+      - name: Run tests with coverage
+        run: uv run pytest tests/ -q --cov=src/agent_harness --cov-report=term --cov-fail-under=70
+
+      - name: Mutation testing (core modules)
+        run: |
+          uv run mutmut run --paths src/agent_harness/core/tools/web.py src/agent_harness/core/safety/ --runner "python -m pytest -x -q" 2>&1 | tail -20 || echo "⚠️ Mutation test completed, review results"
+        continue-on-error: true
 
       - name: Security audit (pip-audit)
         run: |
-          uv pip install pip-audit
           uv run pip-audit --strict --progress-spinner=off 2>&1 || echo "⚠️ 有已知漏洞依赖，建议修复"
 
       - name: Version consistency check
         run: |
-          PKG_VER=$(grep -m1 '__version__' src/agent_harness/__init__.py | sed 's/.*"//;s/".*//')
+          PKG_VER=$(grep -m1 '__version__' src/agent_harness/__init__.py 2>/dev/null | sed 's/.*"//;s/".*//')
           echo "Version: $PKG_VER"
+
+      - name: Docker security scan (Trivy)
+        if: github.event_name == 'push'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'docker.io/library/agent-harness:latest'
+          format: 'table'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '0'
+        continue-on-error: true
+
+      - name: Secret leak scan (truffleHog)
+        run: |
+          uv run trufflehog filesystem --no-verification . 2>&1 || echo "⚠️ 发现潜在密钥泄漏，请手动检查"
