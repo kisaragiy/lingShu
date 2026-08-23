@@ -1,0 +1,38 @@
+name: Deploy
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Build Docker image
+        run: docker build -t agent-harness:${{ env.VERSION }} .
+
+      - name: Save image
+        run: docker save agent-harness:${{ env.VERSION }} | gzip > agent-harness-${{ env.VERSION }}.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-harness-${{ env.VERSION }}
+          path: agent-harness-${{ env.VERSION }}.tar.gz
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/agent-harness
+            docker compose pull
+            docker compose up -d --build
+            docker system prune -f
