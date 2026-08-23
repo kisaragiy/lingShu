@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.28.0 — 2026-08-19
+
+### Added — 安全护栏（WorkBuddy P0 权限双层架构移植）
+
+灵感来自 WorkBuddy（腾讯云桌面 AI agent）的权限安全设计。新增 `core/safety/` 模块：
+
+- **会话安全模式双模式** — `default`（沙箱优先，危险操作需确认） / `full`（全权+全量审计），持久化持久化+切换审计
+- **危险操作确认矩阵** — 按参数分类检测，不再是单纯工具级分级：
+  - 路径逃逸（`..` 试图离开工作区）
+  - 敏感路径写（系统目录 `/etc/` `/windows/`、密钥文件 `.env` `.pem` 等）
+  - 批量删除（通配符、目录递归、多文件参数）
+  - 脚本执行（`code_execute` 等）
+  - 外部发送（QQ/微信/消息等不可逆外部影响）
+  - 网络访问（非白名单域名）
+- **写前自动备份** — 覆盖写已有文件时自动存 `.bak` 副本到 `~/.agent-harness/backup/`
+- **删除保护** — 文件删除走回收站 `~/.agent-harness/trash/`，可恢复
+- **操作确认流** — 被护栏拦截的操作返回 `confirm_code`，用户确认后一次性放行
+- **API 端点** — `GET/POST /v1/safety/mode`、`POST /v1/safety/confirm`
+- 接入 `call_tool` 统一入口（`registry.py`）和 `file_write` 工具
+- 27 个单元测试 + 全量回归 0 回归破坏
+
+### Fixed
+- `file_write` 追加/覆盖模式参数解析修复
+- `disable_auth` 配置字段支持字符串布尔值（`"true"`/`"***"` 等）
+
 ## v0.67.2 — 2026-07-17
 
 ### Fixed — CS API 超时修复
