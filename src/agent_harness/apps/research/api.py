@@ -9,7 +9,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -78,7 +78,7 @@ def _check_rate_limit(ip: str) -> bool:
                 del _rate_limit_store[k]
     return True
 
-_AUTH_EXEMPT_PREFIXES = ("/health",)
+_AUTH_EXEMPT_PREFIXES = ("/health", "/metrics", "/admin")
 _AUTH_EXEMPT_EXACT = ("/", "/setup", "/dashboard")
 _AUTH_EXEMPT_V1 = ("/v1/auth/login", "/v1/auth/mp-login", "/v1/auth/refresh", "/v1/auth/setup-admin", "/v1/setup/config")
 
@@ -675,6 +675,63 @@ async def formalize_report(request: Request):
         owner_id=owner_id,
     )
     return {**meta, "html": html[:500] + "..."}
+
+
+# ─── Audit Logs API ───
+
+
+@router.get("/v1/audit/logs")
+async def get_audit_logs(
+    action: str = "",
+    limit: int = Query(50, ge=1, le=500),
+):
+    """查询审计日志"""
+    from agent_harness.core.audit import query_audit
+    logs = query_audit(action=action, limit=limit)
+    return {"logs": logs, "count": len(logs)}
+
+
+# ─── Safety API (权限双层架构) ───
+
+
+@router.get("/v1/safety/mode")
+async def get_safety_mode(request: Request):
+    """查询当前安全模式 + 待确认操作列表"""
+    from agent_harness.core.safety import get_mode, pending_operations
+    user = getattr(request.state, "user", None) or {}
+    return {
+        "mode": get_mode(),
+        "pending": pending_operations(limit=10),
+        "operator": user.get("username", "unknown"),
+    }
+
+
+@router.post("/v1/safety/mode")
+async def set_safety_mode(request: Request):
+    """切换安全模式: {"mode": "default" | "full"}"""
+    body = await request.json()
+    mode = (body or {}).get("mode", "")
+    from agent_harness.core.safety import set_mode
+    user = getattr(request.state, "user", None) or {}
+    result = set_mode(mode, source="api", operator=user.get("username", "unknown"))
+    if not result.get("ok"):
+        return JSONResponse({"error": result["error"]}, status_code=400)
+    return result
+
+
+@router.post("/v1/safety/confirm")
+async def confirm_safety_operation(request: Request):
+    """确认一次被护栏拦截的操作: {"code": "ab12cd34"}"""
+    body = await request.json()
+    code = (body or {}).get("code", "")
+    if not code:
+        return JSONResponse({"error": "缺少确认码 code"}, status_code=400)
+    from agent_harness.core.safety import confirm_operation
+    user = getattr(request.state, "user", None) or {}
+    result = confirm_operation(code, operator=user.get("username", "unknown"))
+    if not result.get("ok"):
+        return JSONResponse({"error": result["error"]}, status_code=404)
+    return result
 
 
 # ─── Sessions API ───
@@ -1350,3 +1407,44 @@ async def scheduler_delete_task(task_id: str):
 @router.get("/v1/plugins/loaded")
 async def plugin_list():
     return {"plugins": _plugin_list(), "count": len(_plugin_list())}
+
+@router.post("/v1/knowledge/import")
+async def kb_import_memory(request: Request):
+    """跨产品记忆导入 — 从外部 AI 文本提取知识点并存入知识库"""
+    body = await request.json()
+    text = (body or {}).get("text", "")
+    source = (body or {}).get("source", "")
+    collection = (body or {}).get("collection", "memory")
+    if not text:
+        return JSONResponse({"error": "缺少 text 参数"}, status_code=400)
+    try:
+        from agent_harness.core.tools.misc import _tool_memory_import
+        result = _tool_memory_import(text, source=source, collection=collection)
+        return JSONResponse(content=json.loads(result))
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+@router.post("/v1/skills/generate")
+async def skill_generate(request: Request):
+    """对话式 Skill 生成器 — NL 描述 → Skill.md → 安装"""
+    body = await request.json()
+    description = (body or {}).get("description", "").strip()
+    name = (body or {}).get("name", "").strip() or None
+    if not description:
+        return JSONResponse({"error": "缺少 description 参数"}, status_code=400)
+    try:
+        from agent_harness.core.tools.skill_generator import generate_skill
+        result = generate_skill(description, name=name)
+        return JSONResponse(content=result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.get("/v1/skills/generate/templates")
+async def skill_templates():
+    """列出可用的 Skill 模板"""
+    return {"templates": [
+        {"id": "search", "name": "搜索技能", "desc": "集成搜索 API 并返回结构化结果"},
+        {"id": "analysis", "name": "分析技能", "desc": "对输入数据执行分析并生成报告"},
+        {"id": "automation", "name": "自动化技能", "desc": "执行多步自动化操作"},
+        {"id": "custom", "name": "自定义", "desc": "从零定义"},
+    ]}
+

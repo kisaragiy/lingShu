@@ -82,6 +82,24 @@ def call_tool(name: str, **kwargs) -> dict:
             "data": None,
         }
 
+    # 危险操作确认矩阵（参数级）：default 模式命中风险规则 → 需确认
+    try:
+        from ..safety import check_operation, is_full_access
+        full_access = is_full_access()
+        op_check = check_operation(name, kwargs, operator=source,
+                                   require_confirm=not full_access)
+        if not op_check.get("ok"):
+            return {
+                "success": False,
+                "error": (f"[需要确认] 操作被安全护栏拦截: {op_check['reason']} "
+                          f"(确认码: {op_check['confirm_code']}，"
+                          f"确认后重放此调用)"),
+                "data": {"confirm_code": op_check["confirm_code"],
+                         "risk": op_check.get("risk", "")},
+            }
+    except ImportError:
+        pass  # safety 模块不可用时降级为无护栏（向后兼容）
+
     # 记录 irreversible 审计日志
     if priv == "irreversible":
         log_audit(name, source, kwargs)

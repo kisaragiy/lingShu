@@ -449,6 +449,7 @@ const DASH_TABS = [
   { id: 'chat',    icon: '💬',  label: '对话' },
   { id: 'reports', icon: '📄',  label: '报告' },
   { id: 'status',  icon: '📊',  label: '服务' },
+  { id: 'orchestrate', icon: '🕸️', label: '编排' },
   { id: 'knowledge', icon: '📚', label: '知识库' },
   { id: 'mcp',     icon: '🔌',  label: '工具' },
   { id: 'sessions', icon: '🗂️', label: '会话管理' },
@@ -528,12 +529,13 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-          <span class="sidebar-version">v0.42.0</span>
-        </div>
-        <div class="status-bar" id="status-bar">
-          <span class="status-dot" id="health-dot"></span>
-          <span id="health-text">检查中...</span>
-        </div>
+                  <span class="sidebar-version">v0.42.0</span>
+                </div>
+                <div class="status-bar" id="status-bar">
+                  <span class="status-dot" id="health-dot"></span>
+                  <span id="health-text">检查中...</span>
+                  <span id="safety-badge" style="margin-left:auto"></span>
+                </div>
       </div>
 
       <!-- Main content -->
@@ -974,6 +976,12 @@ async function renderDashSettings() {
   html += '</div>';
   el.innerHTML = html;
 }
+
+// ─── 安全护栏面板（在设置页最后渲染） ───
+if (typeof renderSafetyPanel === 'function') {
+  try { renderSafetyPanel(); } catch(e) { console.warn('safety panel error:', e); }
+}
+
 
 async function saveSettings() {
   const config = {
