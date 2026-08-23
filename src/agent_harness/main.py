@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +14,7 @@ from agent_harness.core.auth import auth_jwt as _auth_jwt
 from agent_harness.core.config import require_config
 from agent_harness.core.exceptions import register_error_handlers, AppError
 from agent_harness.core.health import run_health_checks, get_cached_report
+from agent_harness.core.metrics import metrics_middleware, metrics_endpoint
 from agent_harness.core.tasks import register_task_routes
 from agent_harness.apps.research.api import router as research_router, HOST, PORT, _API_TOKEN, _check_rate_limit, _RATE_LIMIT_WINDOW, _RATE_LIMIT_MAX, _AUTH_EXEMPT_PREFIXES, _AUTH_EXEMPT_EXACT, _AUTH_EXEMPT_V1
 from agent_harness.apps.cs_demo.api import router as cs_demo_router
@@ -55,6 +56,31 @@ async def health_check():
     report = get_cached_report()
     status_code = 200 if report.status != "down" else 503
     return JSONResponse(content=report.to_dict(), status_code=status_code)
+
+# ── /metrics 端点 ──
+
+@app.get("/metrics", tags=["系统"])
+async def metrics():
+    """Prometheus 指标暴露端点"""
+    return await metrics_endpoint()
+
+# ── 注册中间件 ──
+
+@app.middleware("http")
+async def _metrics_middleware_wrapper(request: Request, call_next):
+    return await metrics_middleware(request, call_next)
+
+@app.middleware("http")
+async def _logging_middleware(request: Request, call_next):
+    """注入 request_id 到日志上下文。"""
+    import uuid
+    request.state.request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())[:8]
+    from agent_harness.core.logging import get_logger
+    logger = get_logger()
+    resp = await call_next(request)
+    logger.info("request", method=request.method, path=request.url.path,
+                status=resp.status_code, rid=request.state.request_id)
+    return resp
 
 # ── 任务队列路由 ──
 register_task_routes(app)
@@ -190,6 +216,43 @@ async def serve_frontend():
                 html = html.replace("<body>", "<body>" + banner)
         return HTMLResponse(html)
     return JSONResponse({"message": "灵枢 API 运行中"}, status_code=200)
+
+
+ADMIN_STATIC_DIR = Path(__file__).resolve().parent / "static" / "admin"
+
+@app.get("/admin/health", include_in_schema=False)
+async def serve_admin_dashboard():
+    """系统管理面板 — 健康状态仪表板"""
+    index = ADMIN_STATIC_DIR / "index.html"
+    if index.exists():
+        return HTMLResponse(index.read_text("utf-8"))
+    return JSONResponse({"error": "not found"}, status_code=404)
+
+
+# ── WebSocket 实时推送 ──
+
+_ws_clients: set[WebSocket] = set()
+
+@app.websocket("/ws/health")
+async def ws_health(websocket: WebSocket):
+    """WebSocket — 系统状态实时推送（每 5 秒推送一次状态）"""
+    await websocket.accept()
+    _ws_clients.add(websocket)
+    try:
+        import asyncio
+        while True:
+            report = get_cached_report()
+            await websocket.send_json(report.to_dict())
+            await asyncio.sleep(5)
+            # 接收 ping 保持连接
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
+            except asyncio.TimeoutError:
+                pass
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        _ws_clients.discard(websocket)
 
 
 # ─── Include both app routers ───

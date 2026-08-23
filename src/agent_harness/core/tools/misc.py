@@ -48,6 +48,12 @@ def _tool_file_write(path: str, content: str, mode: str = "append") -> str:
     if parent:
         os.makedirs(parent, exist_ok=True)
     write_mode = "w" if mode in ("overwrite", "w", "write") else "a"
+    # 写前自动备份：覆盖写已有文件时先留副本（安全护栏）
+    try:
+        from ..safety import backup_before_write
+        backup_before_write(full, mode=write_mode)
+    except ImportError:
+        pass
     with open(full, write_mode, encoding="utf-8") as f:
         f.write(content)
     return f"已写入 {path} ({len(content)} 字符, mode={'overwrite' if write_mode == 'w' else 'append'})"
@@ -359,3 +365,81 @@ register_tool("stock_alert_condition", _mk_stock_tool("stock_alert_condition"), 
     "description": "条件预警（涨跌幅/成交量异动）",
     "properties": {"symbol": "string", "condition": "string"},
 }, privilege="read-only")
+
+
+# ==================== memory_import — 跨产品记忆导入 ====================
+_MEMORY_IMPORT_PROMPT = """你是一个知识提取器。用户提供了来自其他 AI 产品的对话/输出文本，请提取有价值的、可复用的知识点。
+
+提取规则:
+1. 输出纯 JSON，格式: {"source": "推断的来源", "summary": "一句话摘要", "points": [{"topic": "...", "content": "...", "tags": [...]}]}
+2. 每条 topic 10字以内，content 30-100字（保留关键细节）
+3. 只提取有实际信息量的点（事实、步骤、配置、参数、结论），过滤寒暄/客套/不完整片段
+4. 如果输入无价值，返回 {"points": []}
+5. 不加任何额外文字，只输出 JSON
+
+用户的文本:
+---
+{text}
+---
+"""
+
+def _tool_memory_import(text: str, source: str = "", collection: str = "memory") -> str:
+    """从其他 AI 产品的对话文本中提取知识点并存入知识库"""
+    if not text or not text.strip():
+        return json.dumps({"ok": False, "error": "文本为空"}, ensure_ascii=False)
+    try:
+        prompt = _MEMORY_IMPORT_PROMPT.format(text=text[:6000])
+        raw, _ = call_llama([{"role": "user", "content": prompt}],
+                            system_prompt="你是知识提取器，只输出 JSON，不加解释。")
+    except Exception as e:
+        return json.dumps({"ok": False, "error": f"LLM 提取失败: {e}"}, ensure_ascii=False)
+    # 解析 JSON
+    import re
+    parsed = None
+    for m in [re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw, re.DOTALL),
+              re.search(r'(\{.*?\})', raw, re.DOTALL)]:
+        if m:
+            try:
+                parsed = json.loads(m.group(1))
+                break
+            except json.JSONDecodeError:
+                continue
+    if not parsed or 'points' not in parsed:
+        return json.dumps({"ok": False, "error": "LLM 返回格式异常"}, ensure_ascii=False)
+    points = parsed.get('points', [])
+    if not points:
+        return json.dumps({"ok": True, "points_count": 0, "inserted": 0,
+                           "summary": parsed.get('summary', '未提取到知识点'),
+                           "source": source or parsed.get('source', '未知')}, ensure_ascii=False)
+    # 存入 RAG
+    from .rag_store import index as rag_index
+    inserted = 0
+    errors = []
+    for pt in points:
+        topic = (pt.get('topic') or '').strip()
+        c = (pt.get('content') or '').strip()
+        tags = pt.get('tags', [])
+        if not topic or not c:
+            continue
+        chunk = f"## {topic}\n\n{c}\n\n来源: {source or parsed.get('source', '未知')}\n标签: {', '.join(tags[:5])}"
+        try:
+            result = rag_index(chunk, source=f'memory-import/{source or parsed.get("source", "未知")}', collection=collection)
+            if result.get('indexed_chunks', 0) > 0:
+                inserted += 1
+            else:
+                errors.append(f'{topic}: 索引返回 0')
+        except Exception as e:
+            errors.append(f'{topic}: {e}')
+    result = {"ok": True, "points_count": len(points), "inserted": inserted,
+              "summary": parsed.get("summary", f'提取了 {len(points)} 条知识点'),
+              "topics": [p.get("topic", "") for p in points if p.get("topic")],
+              "source": source or parsed.get("source", "未知"),
+              "collection": collection}
+    if errors:
+        result['errors'] = errors[:3]
+    return json.dumps(result, ensure_ascii=False)
+
+register_tool("memory_import", _tool_memory_import, {
+    "description": "从其他 AI 产品(ChatGPT/DeepSeek/Claude/通用)的对话文本中提取知识点并存入知识库。参数: text=原始文本, source=来源, collection=目标集合",
+    "properties": {"text": "string", "source": "string", "collection": "string"},
+}, privilege="reversible")

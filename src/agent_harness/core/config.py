@@ -67,6 +67,21 @@ class Settings(BaseSettings):
     # ── Auth ──
     disable_auth: bool = Field(default=False)
 
+    @field_validator("disable_auth", mode="before")
+    @classmethod
+    def coerce_bool(cls, v: object) -> bool:
+        """Coerce string values like '***', 'true', 'false' to bool."""
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            v_lower = v.strip().lower()
+            if v_lower in ("true", "1", "yes", "on"):
+                return True
+            if v_lower in ("false", "0", "no", "off", "", "***"):
+                return False
+            return bool(v)
+        return bool(v)
+
     # ── Paths ──
     memory_dir: Optional[str] = None
     skills_dir: Optional[str] = None

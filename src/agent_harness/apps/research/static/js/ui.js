@@ -126,6 +126,7 @@ function switchTab(tab) {
   const content = document.getElementById('dash-content');
   if (tab === 'chat') renderDashChat();
   else if (tab === 'status') renderDashStatus();
+  else if (tab === 'orchestrate') renderOrchestrate();
   else if (tab === 'knowledge') renderDashKnowledge();
   else if (tab === 'sessions') renderDashSessions();
   else if (tab === 'settings') renderDashSettings();
@@ -153,6 +154,10 @@ async function updateHealthBar() {
   } catch(e) {
     dot.className = 'status-dot fail';
     text.textContent = 'API 离线';
+  }
+  // 更新安全模式徽标（安全护栏）
+  if (typeof updateSafetyBadge === 'function') {
+    try { updateSafetyBadge(); } catch(e) {}
   }
 }
 
