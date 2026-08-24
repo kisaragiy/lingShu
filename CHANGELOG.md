@@ -1,29 +1,38 @@
 # Changelog
 
-## v0.28.0 — 2026-08-19
+## v0.75.0 — 2026-08-21
 
-### Added — 安全护栏（WorkBuddy P0 权限双层架构移植）
+### Added — 重试机制 + 预算控制 + 安全审计
+- 🔁 Agent 重试机制(失败自动重试,带退避)
+- 💰 预算控制(token/成本软限制)
+- 🔒 安全审计(操作全量审计追踪)
 
-灵感来自 WorkBuddy（腾讯云桌面 AI agent）的权限安全设计。新增 `core/safety/` 模块：
+## v0.74.0 — 2026-08-20
 
-- **会话安全模式双模式** — `default`（沙箱优先，危险操作需确认） / `full`（全权+全量审计），持久化持久化+切换审计
-- **危险操作确认矩阵** — 按参数分类检测，不再是单纯工具级分级：
-  - 路径逃逸（`..` 试图离开工作区）
-  - 敏感路径写（系统目录 `/etc/` `/windows/`、密钥文件 `.env` `.pem` 等）
-  - 批量删除（通配符、目录递归、多文件参数）
-  - 脚本执行（`code_execute` 等）
-  - 外部发送（QQ/微信/消息等不可逆外部影响）
-  - 网络访问（非白名单域名）
-- **写前自动备份** — 覆盖写已有文件时自动存 `.bak` 副本到 `~/.agent-harness/backup/`
-- **删除保护** — 文件删除走回收站 `~/.agent-harness/trash/`，可恢复
-- **操作确认流** — 被护栏拦截的操作返回 `confirm_code`，用户确认后一次性放行
-- **API 端点** — `GET/POST /v1/safety/mode`、`POST /v1/safety/confirm`
-- 接入 `call_tool` 统一入口（`registry.py`）和 `file_write` 工具
-- 27 个单元测试 + 全量回归 0 回归破坏
+### Added — P1-P3 保底能力补全
+- 补齐核心保底能力,覆盖 P1-P3 优先级链路
 
-### Fixed
-- `file_write` 追加/覆盖模式参数解析修复
-- `disable_auth` 配置字段支持字符串布尔值（`"true"`/`"***"` 等）
+## v0.72.0 — 2026-08-20
+
+### Added — Cloud Demo 适配
+- ⏱️ CS 超时 2s + 模板降级
+- 🎬 Demo 横幅展示
+
+## v0.71.0 — 2026-08-20
+
+### Added — Render 部署配置
+- 📦 render.yaml + start_prod.py 线上部署就绪
+
+## v0.69.0 — 2026-08-19
+
+### Added — 小程序多用户 + JWT 自动登录
+- 👥 多用户支持
+- 🔑 JWT 自动登录
+
+## v0.68.0 — 2026-08-19
+
+### Fixed — CS 场景全链路修复
+- ✅ switchTab + logistics + 参数传递 修复
 
 ## v0.67.2 — 2026-07-17
 
@@ -369,6 +378,31 @@
 - `agents/cs_agent.py` — 规则引擎式客服 Agent（v1）
 - `tools/customer_service.py` — Mock 数据（4 条订单、工单系统、FAQ 知识库）
 - `POST /v1/cs/chat` API + 会话持久化
+
+## v0.28.0 — 2026-08-19
+
+### Added — 安全护栏（WorkBuddy P0 权限双层架构移植）
+
+灵感来自 WorkBuddy（腾讯云桌面 AI agent）的权限安全设计。新增 `core/safety/` 模块：
+
+- **会话安全模式双模式** — `default`（沙箱优先，危险操作需确认） / `full`（全权+全量审计），持久化持久化+切换审计
+- **危险操作确认矩阵** — 按参数分类检测，不再是单纯工具级分级：
+  - 路径逃逸（`..` 试图离开工作区）
+  - 敏感路径写（系统目录 `/etc/` `/windows/`、密钥文件 `.env` `.pem` 等）
+  - 批量删除（通配符、目录递归、多文件参数）
+  - 脚本执行（`code_execute` 等）
+  - 外部发送（QQ/微信/消息等不可逆外部影响）
+  - 网络访问（非白名单域名）
+- **写前自动备份** — 覆盖写已有文件时自动存 `.bak` 副本到 `~/.agent-harness/backup/`
+- **删除保护** — 文件删除走回收站 `~/.agent-harness/trash/`，可恢复
+- **操作确认流** — 被护栏拦截的操作返回 `confirm_code`，用户确认后一次性放行
+- **API 端点** — `GET/POST /v1/safety/mode`、`POST /v1/safety/confirm`
+- 接入 `call_tool` 统一入口（`registry.py`）和 `file_write` 工具
+- 27 个单元测试 + 全量回归 0 回归破坏
+
+### Fixed
+- `file_write` 追加/覆盖模式参数解析修复
+- `disable_auth` 配置字段支持字符串布尔值（`"true"`/`"***"` 等）
 
 ## v0.21.0 — 2026-07-09
 
