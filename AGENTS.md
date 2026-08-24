@@ -191,6 +191,7 @@ v0.28  **安全护栏（WorkBuddy P0 移植）**:
   - 定时任务（已实现的 agent_cron 代码，需重新接入）
   - 第三方插件系统（已实现的 plugin_loader 代码，需重新接入）
   - 前端拆模块（1500 行 index.html 逐步分离）
+  - 知识管道（docs/knowledge-pipeline/：防复现规则库 v1 + guardian 拦截器，A 路线真实场景，独立资产）
 ```
 
 ---
