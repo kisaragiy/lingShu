@@ -14,6 +14,22 @@ import sys
 RULES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge-rules-v1.md")
 RULES_FILE_V2 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge-rules-v2.md")
 
+# 规则号 -> 来源 daily（用于检索返回时标注 provenance，不靠手改每个文件）
+# v1 整体来自 08-21；v2 来自 08-14(API/GPU/训练) + 08-15(记忆治理/后端)
+RULE_SOURCE_MAP = {
+    "R-01": "daily/2026-08-21.md", "R-02": "daily/2026-08-21.md",
+    "R-03": "daily/2026-08-21.md", "R-04": "daily/2026-08-21.md",
+    "R-05": "daily/2026-08-21.md", "R-06": "daily/2026-08-21.md",
+    "R-07": "daily/2026-08-21.md", "R-08": "daily/2026-08-21.md",
+    "R-09": "daily/2026-08-21.md", "R-10": "daily/2026-08-21.md",
+    "R-11": "daily/2026-08-14.md", "R-12": "daily/2026-08-14.md",
+    "R-13": "daily/2026-08-14.md", "R-14": "daily/2026-08-14.md",
+    "R-15": "daily/2026-08-14.md", "R-16": "daily/2026-08-14.md",
+    "R-17": "daily/2026-08-15.md", "R-18": "daily/2026-08-15.md",
+    "R-19": "daily/2026-08-15.md", "R-20": "daily/2026-08-15.md",
+    "R-21": "daily/2026-08-14.md",
+}
+
 # 触发条件 -> 规则号 (关键词匹配，命中即返回该规则)
 # 注意：同一 key 只能出现一次，且需合并 v1(01-10)+v2(11-21) 所有相关规则，不能覆盖丢失
 TRIGGER_MAP = {
@@ -44,7 +60,8 @@ TRIGGER_MAP = {
 
 
 def load_rules():
-    """解析 v1 + v2 规则文件，合并所有规则条目。文件缺失时返回空 dict（不崩）。"""
+    """解析 v1 + v2 规则文件，合并所有规则条目为结构化 dict。
+    返回 {rule_id: {rule_id, trigger, lesson, block_hint, source}}。文件缺失时返回空 dict（不崩）。"""
     rules = {}
     for fpath in (RULES_FILE, RULES_FILE_V2):
         if not os.path.exists(fpath):
@@ -56,20 +73,96 @@ def load_rules():
             if not m:
                 continue
             rid = m.group(1)
-            lesson = ""
-            hint = ""
-            lm = re.search(r"lesson:\s*(.+)", block)
-            hm = re.search(r"block_hint:\s*(.+)", block)
-            if lm:
-                lesson = lm.group(1).strip()
-            if hm:
-                hint = hm.group(1).strip()
-            rules[rid] = (lesson, hint)
+            # 标题 = 规则号后面的描述
+            title_m = re.search(r"规则 (R-\d+)\s*([^\n]*)", block)
+            title = (title_m.group(2).strip() if title_m else "")
+            # 提取各字段（支持 - field: 格式）
+            def get_field(field_name):
+                m = re.search(r"^-\s+%s:\s*(.+)$" % field_name, block, re.MULTILINE)
+                return m.group(1).strip() if m else ""
+            trigger = get_field("trigger")
+            lesson = get_field("lesson")
+            hint = get_field("block_hint")
+            # 规则文件内若有 source 字段优先，否则用映射
+            src = get_field("source") or RULE_SOURCE_MAP.get(rid, "")
+            rules[rid] = {
+                "rule_id": rid,
+                "title": title,
+                "trigger": trigger,
+                "lesson": lesson,
+                "block_hint": hint,
+                "source": src,
+                "haystack": "%s %s %s %s" % (title, trigger, lesson, hint),
+            }
     return rules
+
+
+def search_rules(query: str, top_k: int = 3):
+    """检索层：自然语言 query → 打分排序 → 返回 top 相关规则 + 来源。
+    中文无空格分词难，用"规则关键词→query 反向匹配"：把每条规则的 trigger/title/lesson 切成语义词，
+    统计有多少个词同时出现在 query 里（覆盖率打分）。零外部依赖。
+    返回 [{"rule_id","title","score","trigger","lesson","block_hint","source"}]。
+    """
+    rules = load_rules()
+    if not rules:
+        return []
+    query_l = query.lower()
+    # 高频通用停用词，避免"怎么办/了/的"这类虚词干扰
+    stopwords = {"怎么", "怎么办", "什么", "如何", "这个", "那个", "一下", "了", "的", "吗",
+                 "呢", "啊", "吧", "在", "是", "用", "有", "for", "the", "a", "to", "and", "of"}
+
+    scored = []
+    for rid, r in rules.items():
+        # 从规则的 trigger/title 提取关键特征词（中文按字+双字组合，英文按词）
+        feature_tokens = extract_feature_tokens(r["title"] + " " + r["trigger"] + " " + r["lesson"])
+        hits = 0
+        for ft in feature_tokens:
+            if ft in stopwords or len(ft) < 2:
+                continue
+            if ft in query_l:
+                hits += 1
+        if hits == 0:
+            continue
+        # 覆盖率 = 规则侧被 query 命中的特征词占比（侧重规则哪些词被问到了）
+        score = hits / max(len(feature_tokens), 1)
+        # bonus：query 显式提到 rule_id（如 "R-11"）→ 强相关
+        bonus = 0.5 if rid.lower() in query_l else 0
+        scored.append((round(score + bonus, 3), rid))
+
+    scored.sort(reverse=True, key=lambda x: (x[0], x[1]))
+    results = []
+    for score, rid in scored[:top_k]:
+        r = rules[rid]
+        results.append({
+            "rule_id": rid,
+            "title": r["title"],
+            "score": score,
+            "trigger": r["trigger"],
+            "lesson": r["lesson"],
+            "block_hint": r["block_hint"],
+            "source": r["source"],
+        })
+    return results
+
+
+def extract_feature_tokens(text):
+    """从规则文本提取特征词：英文按词拆分，中文按 2-gram 滑动窗口（兼顾 word-level）。"""
+    text = text.lower()
+    tokens = []
+    # 英文/ASCII 词
+    tokens += re.findall(r"[a-z][a-z0-9_+.-]{1,}", text)
+    # 中文 2-gram（滑动窗口，两个相邻字），捕获"显存""队列""静默"这类词
+    cjk = re.findall(r"[\u4e00-\u9fff]+", text)
+    for chunk in cjk:
+        for i in range(len(chunk) - 1):
+            tokens.append(chunk[i:i + 2])
+    return tokens
 
 
 def guard(actions: str):
     rules = load_rules()
+    if not rules:
+        return {"ok": True, "action": actions, "match": "无规则库可用", "warnings": []}
     lower = actions.lower()
     matched = []
     for kw, rids in TRIGGER_MAP.items():
@@ -81,11 +174,13 @@ def guard(actions: str):
         return {"ok": True, "action": actions, "match": "无匹配规则", "warnings": []}
     warnings = []
     for rid in matched:
-        lesson, hint = rules.get(rid, ("", ""))
+        r = rules.get(rid, {})
         warnings.append({
             "rule": rid,
-            "lesson": lesson,
-            "block_hint": hint,
+            "title": r.get("title", ""),
+            "lesson": r.get("lesson", ""),
+            "block_hint": r.get("block_hint", ""),
+            "source": r.get("source", ""),
         })
     return {"ok": False, "action": actions, "match": "命中 %d 条防复现规则" % len(matched), "warnings": warnings}
 
@@ -94,7 +189,16 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--list":
         rules = load_rules()
         for rid in sorted(rules):
-            print("%s: %s" % (rid, rules[rid][0][:60]))
+            print("%s: %s" % (rid, rules[rid]["title"]))
+    elif len(sys.argv) > 2 and sys.argv[1] == "--search":
+        results = search_rules(" ".join(sys.argv[2:]), top_k=3)
+        if not results:
+            print("无相关规则")
+        else:
+            for r in results:
+                print("[%s] (score=%.2f, %s) %s" % (r["rule_id"], r["score"], r["source"], r["title"]))
+                print("    教训: %s" % r["lesson"][:90])
+                print("    拦截: %s" % r["block_hint"][:90])
     elif len(sys.argv) > 1:
         print(json.dumps(guard(" ".join(sys.argv[1:])), ensure_ascii=False, indent=2))
     else:
