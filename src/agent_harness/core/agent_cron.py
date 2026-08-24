@@ -213,6 +213,10 @@ class AgentScheduler:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
 
+    def list_tasks(self) -> list[dict]:
+        """List all scheduled tasks (instance method, mirrors module-level list_tasks)."""
+        return list_tasks()
+
     def _loop(self):
         """Main scheduling loop."""
         while not self._stop_event.is_set():
