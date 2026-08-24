@@ -96,3 +96,41 @@ def test_load_rules_has_title_and_source():
         assert r.get("rule_id"), "%s 缺 rule_id" % rid
         assert r.get("source"), "%s 缺 source" % rid
         assert "lesson" in r and "block_hint" in r
+
+
+def test_load_rules_has_career():
+    """求职线规则 R-22~30 应全部加载"""
+    rules = guardian.load_rules()
+    assert len(rules) >= 30, "应有至少30条规则(含求职线), 实际%d" % len(rules)
+    for i in range(22, 31):
+        assert "R-%d" % i in rules, "缺求职线 R-%d" % i
+
+
+def test_guard_career_platform():
+    """简历写平台/PWA → 触发 R-22 产品暗示"""
+    r = guardian.guard("写简历: AI智能体编排平台")
+    assert "R-22" in [w["rule"] for w in r["warnings"]]
+
+
+def test_guard_career_greet():
+    """群发模板招呼语 → 触发 R-25 招呼语定制"""
+    r = guardian.guard("群发模板招呼语")
+    assert "R-25" in [w["rule"] for w in r["warnings"]]
+
+
+def test_guard_career_mainline():
+    """做系统工具建设替代主线 → 触发 R-28"""
+    r = guardian.guard("今天先做系统工具建设")
+    assert "R-28" in [w["rule"] for w in r["warnings"]]
+
+
+def test_search_career_greet():
+    """自然语言'招呼语怎么写' → 检索命中 R-25"""
+    res = guardian.search_rules("招呼语怎么写", 2)
+    assert any(r["rule_id"] == "R-25" for r in res), "应命中 R-25"
+
+
+def test_search_career_competition():
+    """'AI岗竞争大' → 检索命中 R-26 岗位错配"""
+    res = guardian.search_rules("应聘AI岗竞争大", 2)
+    assert any(r["rule_id"] == "R-26" for r in res), "应命中 R-26"

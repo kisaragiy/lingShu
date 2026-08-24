@@ -13,6 +13,7 @@ import sys
 
 RULES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge-rules-v1.md")
 RULES_FILE_V2 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge-rules-v2.md")
+RULES_FILE_CAREER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge-rules-career.md")
 
 # 规则号 -> 来源 daily（用于检索返回时标注 provenance，不靠手改每个文件）
 # v1 整体来自 08-21；v2 来自 08-14(API/GPU/训练) + 08-15(记忆治理/后端)
@@ -28,6 +29,16 @@ RULE_SOURCE_MAP = {
     "R-17": "daily/2026-08-15.md", "R-18": "daily/2026-08-15.md",
     "R-19": "daily/2026-08-15.md", "R-20": "daily/2026-08-15.md",
     "R-21": "daily/2026-08-14.md",
+    # v3 求职线 (R-22~30)
+    "R-22": "resume-builder skill + daily/2026-08-23.md",
+    "R-23": "resume-builder skill + daily/2026-08-21.md",
+    "R-24": "resume-builder skill",
+    "R-25": "boss-job-search skill + resume-builder skill",
+    "R-26": "boss-job-search skill + lingshu-market-alignment.md",
+    "R-27": "daily/2026-08-21.md + boss-job-search skill",
+    "R-28": "daily/2026-08-23.md + action-plan-20260823.md",
+    "R-29": "action-plan-20260823.md",
+    "R-30": "action-plan-20260823.md + 求职全流程(fact_store)",
 }
 
 # 触发条件 -> 规则号 (关键词匹配，命中即返回该规则)
@@ -56,14 +67,25 @@ TRIGGER_MAP = {
     "date": ["R-19"], "时间": ["R-19"],
     "搜索": ["R-20"], "searxng": ["R-20"], "websocket": ["R-20"], "docker": ["R-20"],
     "patch": ["R-21"], "替换": ["R-21"], "删": ["R-21"], "select": ["R-21"],
+    # 求职线 (R-22~30)
+    "简历": ["R-22", "R-23", "R-24", "R-29"], "投": ["R-25", "R-26", "R-27"],
+    "平台": ["R-22"], "产品": ["R-22"], "上线": ["R-22"], "apk": ["R-22"], "pwa": ["R-22"],
+    "行代码": ["R-23"], "测试数": ["R-23"], "证伪": ["R-23"], "数字": ["R-23"],
+    "角色名": ["R-24"], "hr": ["R-24"], "应届": ["R-27"], "规模": ["R-27"],
+    "招呼": ["R-25"], "群发": ["R-25"], "模板": ["R-25", "R-29"], "投递": ["R-25", "R-26", "R-30"],
+    "ai应用开发": ["R-26"], "错配": ["R-26"], "搜索词": ["R-26"], "竞争对手": ["R-26"],
+    "训练师": ["R-27"], "标注": ["R-27"], "数据清洗": ["R-27"], "50": ["R-27"],
+    "系统工具": ["R-28"], "建筑": ["R-28"], "替代": ["R-28"], "主线": ["R-28"],
+    "路径": ["R-29"], "源文件": ["R-29"], "模板": ["R-29"],
+    "跟踪表": ["R-30"], "记录": ["R-30"], "下一步": ["R-30"], "复盘": ["R-30"],
 }
 
 
 def load_rules():
-    """解析 v1 + v2 规则文件，合并所有规则条目为结构化 dict。
+    """解析 v1 + v2 + career 规则文件，合并所有规则条目为结构化 dict。
     返回 {rule_id: {rule_id, trigger, lesson, block_hint, source}}。文件缺失时返回空 dict（不崩）。"""
     rules = {}
-    for fpath in (RULES_FILE, RULES_FILE_V2):
+    for fpath in (RULES_FILE, RULES_FILE_V2, RULES_FILE_CAREER):
         if not os.path.exists(fpath):
             continue
         with open(fpath, encoding="utf-8") as f:
