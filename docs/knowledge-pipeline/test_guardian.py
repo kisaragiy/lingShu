@@ -54,8 +54,49 @@ def test_action_missing_rules_file():
 
 
 def test_load_rules_parses_all_known():
-    """规则文件应能解析出全部 10 条规则（数据完整性，防止改动漏）"""
+    """规则文件应能解析出全部 v1+v2 规则（数据完整性，防止改动漏）"""
     rules = guardian.load_rules()
     expected = {"R-01", "R-02", "R-03", "R-04", "R-05",
-                "R-06", "R-07", "R-08", "R-09", "R-10"}
-    assert expected.issubset(set(rules.keys())), "缺少规则: %s" % (expected - set(rules))
+                "R-06", "R-07", "R-08", "R-09", "R-10",
+                "R-11", "R-12", "R-13", "R-14", "R-15",
+                "R-16", "R-17", "R-18", "R-19", "R-20", "R-21"}
+    missing = expected - set(rules.keys())
+    assert not missing, "缺少规则: %s" % missing
+
+
+def test_v2_gpu_parallel():
+    """v2: 并行跑生成+VLM → 命中 R-11"""
+    r = guardian.guard("并行跑 ComfyUI 生成和 VLM 评分")
+    assert "R-11" in [w["rule"] for w in r["warnings"]]
+
+
+def test_v2_queue_zombie():
+    """v2: 队列拥堵 → 命中 R-13"""
+    r = guardian.guard("ComfyUI 队列堵了有僵尸任务")
+    assert "R-13" in [w["rule"] for w in r["warnings"]]
+
+
+def test_v2_silent_failure():
+    """v2: 静默失败管线 → 命中 R-14"""
+    r = guardian.guard("这个管线会不会静默失败")
+    assert "R-14" in [w["rule"] for w in r["warnings"]]
+
+
+def test_v2_doc_code_drift():
+    """v2: 文档说完成但代码没实现 → 命中 R-16"""
+    r = guardian.guard("文档说完成了但代码没实现")
+    assert "R-16" in [w["rule"] for w in r["warnings"]]
+
+
+def test_v2_readfile_binary():
+    """v2: read_file 误报 binary → 命中 R-18"""
+    r = guardian.guard("read_file 报 binary")
+    assert "R-18" in [w["rule"] for w in r["warnings"]]
+
+
+def test_no_key_conflict_lost():
+    """k 关键：同一 key 不应因 v2 覆盖而丢失 v1 规则（如 gpu 应同时有 R-07/R-11/R-12）"""
+    r = guardian.guard("gpu 显存不够")
+    rids = [w["rule"] for w in r["warnings"]]
+    assert "R-07" in rids, "v1 的 R-07 被覆盖丢了"
+    assert "R-11" in rids and "R-12" in rids
