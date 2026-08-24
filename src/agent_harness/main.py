@@ -318,16 +318,19 @@ def main():
         sched.start()
         _scheduler_count = len(sched.list_tasks() if hasattr(sched, 'list_tasks') else [])
         print(f"  定时任务: {_scheduler_count} 个")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  ⚠️  定时任务启动失败: {type(e).__name__}: {e}")
 
     try:
         from agent_harness.plugin_loader import load_plugins
         plugins = load_plugins()
         _plugin_count = len(plugins)
         print(f"  插件:     {_plugin_count} 个（{sum(1 for p in plugins if p.get('success'))} 成功）")
-    except Exception:
-        pass
+        for p in plugins:
+            if not p.get('success'):
+                print(f"    ⚠️  插件载入失败 [{p.get('name')}]: {p.get('error')}")
+    except Exception as e:
+        print(f"  ⚠️  插件加载失败: {type(e).__name__}: {e}")
 
     _workers = int(os.environ.get("HARNESS_WORKERS", "1"))
     uvicorn.run(
