@@ -1077,15 +1077,15 @@ async def setup_initial_admin(request: Request):
 # ─── API Token Management ───
 
 @router.get("/v1/auth/token")
-async def get_api_token():
-    return {"token": _API_TOKEN, "hint": "Set X-API-Key: *** header on all /v1/* requests (admin-level access)"}
+async def get_api_token(request: Request):
+    return {"token": "******", "hint": "Token 不会通过 API 返回。服务端内部令牌，仅供已授权的服务端客户端使用。"}
 
 
 @router.post("/v1/auth/reset")
-async def regenerate_api_token():
+async def regenerate_api_token(request: Request):
     global _API_TOKEN
     _API_TOKEN = _reset_token()
-    return {"token": _API_TOKEN, "status": "regenerated", "warning": "所有使用旧 token 的客户端需要更新"}
+    return {"status": "regenerated", "warning": "所有使用旧 token 的客户端需要更新"}
 
 
 # ─── Admin API ───
