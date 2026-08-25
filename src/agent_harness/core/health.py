@@ -31,6 +31,24 @@ class CheckResult:
     required: bool = False  # True = 必须可用，否则视为 down
 
 
+import re as _re
+
+_IP_RE = _re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+
+
+def sanitize_detail(detail: str) -> str:
+    """脱敏健康检查 detail —— 抹掉内网 IP/端口/主机，防 /health 泄露网络拓扑。"""
+    if not detail:
+        return detail
+    # 先抹掉 IP:PORT 组合(整个 host:port)
+    text = _re.sub(r'(?:\d{1,3}\.){3}\d{1,3}:\d+', '[internal-host]', detail)
+    # 再抹掉裸 IP 地址(无端口)
+    text = _IP_RE.sub("[internal-host]", text)
+    # 抹掉裸露的 host=port 形式
+    text = _re.sub(r'\(\S*?(?:host|address)\s*=\s*[^)]+\)', '', text)
+    return text
+
+
 @dataclass
 class HealthReport:
     """完整的健康状态报告"""
@@ -49,7 +67,7 @@ class HealthReport:
                 {
                     "name": c.name,
                     "status": c.status,
-                    "detail": c.detail,
+                    "detail": sanitize_detail(c.detail),
                     "latency_ms": round(c.latency_ms, 1),
                     "required": c.required,
                 }

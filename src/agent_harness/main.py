@@ -199,11 +199,10 @@ async def serve_frontend():
             needs_admin = False
         token_script = (
             '<script>'
-            'window.__API_TOKEN__="{}";'
             'window.__NEEDS_ADMIN__={};'
             'window.__VERSION__="{}";'
             '</script>'
-        ).format(_API_TOKEN, "true" if needs_admin else "false", __version__)
+        ).format("true" if needs_admin else "false", __version__)
         if "</head>" in html:
             html = html.replace("</head>", token_script + "</head>")
         else:
