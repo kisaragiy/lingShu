@@ -117,23 +117,31 @@ def is_censored_content(text: str) -> bool:
 def _post_cloud(messages: list[dict], system_prompt: str = "",
                 max_tokens: int = 4096) -> tuple[str, int]:
     """Call cloud API."""
+    from ..config import get_llm_config
+    cfg = get_llm_config()
+    api_url = cfg["api_url"]
+    api_key = cfg["api_key"]
+    model = cfg["model"] or MODEL_DEEPSEEK
     payload = {
-        "model": MODEL_DEEPSEEK,
+        "model": model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "max_tokens": max_tokens,
         "temperature": 0.7,
         "stream": False,
     }
     # Check cache for cloud calls
-    cache_key = _llm_cache_key(MODEL_DEEPSEEK, payload["messages"], system_prompt, 0.7)
+    cache_key = _llm_cache_key(model, payload["messages"], system_prompt, 0.7)
     cached = _llm_cache_get(cache_key)
     if cached:
         return cached
+    if not api_url or not api_key:
+        print("[LLM] _post_cloud: 未配置云端 api_url/api_key，降级到本地 LLM", file=sys.stderr)
+        return call_llama(messages, system_prompt=system_prompt, max_tokens=max_tokens)
     try:
         resp = _session.post(
-            DEEPSEEK_API,
+            api_url,
             json=payload,
-            headers={"Authorization": f"Bearer {CLOUD_API_KEY}"} if CLOUD_API_KEY else {},
+            headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
             timeout=120,
         )
         if resp.status_code == 200:
