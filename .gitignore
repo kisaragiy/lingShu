@@ -18,6 +18,13 @@ eval_report.json
 comic_output/
 *.json
 uv.lock
+# 公开仓库边界: 逆向/加密分析脚本与运行时数据不出仓库
+reference/
+src/data/
+# 一次性脚本/临时文件
+tmp_*.py
+fix_*.py
+do_*.py
 api_token.txt
 jwt_secret.txt
 *.key

@@ -1251,3 +1251,42 @@ async function adminDeleteUser(userId, username) {
     await adminRefreshUsers();
   } catch(e) { toast('删除失败: ' + e.message, 'err'); }
 }
+
+// ─── 跨产品记忆导入 ───
+async function doMemoryImport() {
+  const text = document.getElementById('import-text');
+  const result = document.getElementById('import-result');
+  const sourceEl = document.getElementById('import-source');
+  const collectionEl = document.getElementById('import-collection');
+  if (!text || !text.value.trim()) { if (result) result.innerHTML = '<span style="color:var(--danger)">⚠️ 请先粘贴文本</span>'; return; }
+  const spinner = document.getElementById('import-spinner');
+  if (spinner) spinner.classList.remove('hidden');
+  if (result) result.innerHTML = '<span class="spinner"></span> 提取中...';
+  try {
+    const r = await fetch('/v1/knowledge/import', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: text.value, source: sourceEl ? sourceEl.value : '', collection: collectionEl ? collectionEl.value : 'memory'}),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      let html = '<div style="background:var(--bg-success);padding:12px;border-radius:8px">' +
+        '<div style="font-weight:600;margin-bottom:4px">✅ 导入完成</div>' +
+        '<div class="text-sm">提取 ' + (data.points_count || 0) + ' 条知识点 · 已索引 ' + (data.inserted || 0) + ' 条</div>' +
+        '<div class="text-sm text-muted">来源: ' + escHtml(data.source || '未知') + '</div>';
+      if (data.summary) html += '<div class="text-sm" style="margin-top:4px">📌 ' + escHtml(data.summary) + '</div>';
+      if (data.topics && data.topics.length > 0) {
+        html += '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">' +
+          data.topics.map(t => '<span style="background:var(--accent-bg);padding:2px 8px;border-radius:4px;font-size:11px">' + escHtml(t) + '</span>').join('') + '</div>';
+      }
+      html += '</div>';
+      result.innerHTML = html;
+      text.value = '';
+      if (typeof renderCollections === 'function') renderCollections();
+    } else {
+      result.innerHTML = '<div style="color:var(--danger)">❌ ' + escHtml(data.error || '导入失败') + '</div>';
+    }
+  } catch(e) {
+    result.innerHTML = '<div style="color:var(--danger)">❌ 请求失败: ' + escHtml(e.message) + '</div>';
+  }
+  if (spinner) spinner.classList.add('hidden');
+}
