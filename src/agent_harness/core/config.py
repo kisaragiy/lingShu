@@ -134,3 +134,39 @@ SKILLS_DIR = Path(_settings.skills_dir or HARNESS_DIR.parent.parent / "skills")
 def require_config() -> None:
     """兼容旧接口。"""
     _settings.check()
+
+
+def get_llm_config() -> dict:
+    """运行时动态读取 LLM 配置 —— 优先读 config.json(用户运行时填的)，回退环境变量常量。
+
+    解决"设置页填 key 但 LLM 调用不读它"的脱节：llm.py 用本函数而非 import 快照常量，
+    使 /v1/setup/config 保存的 api_url/api_key/model 能在下次请求即时生效（无需重启）。
+    返回: {"api_url": str, "api_key": str, "model": str}
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    # 1) 优先 config.json (用户运行时配置)
+    config_path = _Path(os.environ.get(
+        "HARNESS_CONFIG_DIR",
+        os.path.expanduser("~/.agent-harness"),
+    )) / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, encoding="utf-8") as _f:
+                cfg = _json.load(_f)
+            llm = cfg.get("llm", {})
+            url = llm.get("api_url") or ""
+            key = llm.get("api_key") or ""
+            model = llm.get("model") or ""
+            if url:  # config.json 有明确 api_url 时优先
+                return {"api_url": url, "api_key": key, "model": model}
+        except (_json.JSONDecodeError, OSError):
+            pass
+
+    # 2) 回退环境变量常量 (启动配置)
+    return {
+        "api_url": DEEPSEEK_API or LLAMA_API,
+        "api_key": CLOUD_API_KEY,
+        "model": MODEL_DEEPSEEK or MODEL_LLAMA,
+    }

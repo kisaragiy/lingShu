@@ -70,6 +70,14 @@ def save_config(config: dict) -> dict:
     _ensure_dir()
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
+    # 同步 LLM 配置到环境变量,使其他读环境变量的路径(如 workers.py)也能运行时生效
+    llm = config.get("llm", {})
+    if llm.get("api_url"):
+        os.environ["HARNESS_LLAMA_API"] = llm["api_url"]
+    if llm.get("api_key"):
+        os.environ["HARNESS_CLOUD_KEY"] = llm["api_key"]
+    if llm.get("model"):
+        os.environ["HARNESS_MODEL_LLAMA"] = llm["model"]
     return config
 
 
