@@ -12,6 +12,7 @@ services:
         value: "1"
       - key: HARNESS_DISABLE_RATE_LIMIT
         value: "1"
-      - key: HARNESS_LLAMA_API
-        value: "http://127.0.0.1:9999/v1/chat/completions"
+      # 不预设 LLM 地址: 运行时由前端 /v1/setup/config 或环境变量配置。
+      # 招聘方/用户可自配 api_url/api_key(用自己的额度), 不烧部署者成本。
+      # 未配置时降级为模板示例(Demo Mode)。
     healthCheckPath: /health
