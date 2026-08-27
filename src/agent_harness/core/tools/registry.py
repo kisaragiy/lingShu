@@ -45,12 +45,50 @@ def _capture_error_screenshot(tool_name: str, kwargs: dict, error: str):
         pass
 
 
+# ─── 三阶瀑布 pipeline（dsh 映射）：pre/execute/post，每阶可插拔横切钩子 ───
+# dsh: tools/pre-execute → execute → post-execute，每阶可拦截/改写/短路。
+# 这里 call_tool 被结构化为三阶段，PRE/POST 提供注册横切钩子的 seam
+#（权限/规范化是默认 pre；超时在 execute；校验/缓存/截断/审计可作 post 钩子注入）。
+
+PRE_HOOKS: list = []   # 前置横切：在默认权限/规范化之前运行，返回 block_dict 可拦截
+POST_HOOKS: list = []  # 后置横切：结果变换/缓存/截断/审计
+
+
+def register_pre_hook(fn) -> None:
+    """注册一个 PRE 阶段钩子 `fn(name, kwargs) -> block_dict|None`。
+
+    block_dict 非 None 时短路——直接作为调用结果返回，不再执行工具。
+    这是 dsh "每阶可拦截" 的 pre 注入点。
+    """
+    PRE_HOOKS.append(fn)
+
+
+def register_post_hook(fn) -> None:
+    """注册一个 POST 阶段钩子 `fn(name, result, kwargs) -> result`。
+
+    用于注入结果变换（缓存/截断/审计标注）等横切关注点。
+    """
+    POST_HOOKS.append(fn)
+
+
+def _default_post(name: str, result: dict, kwargs: dict) -> dict:
+    """默认 POST：结构不变。校验由调用方 validate_result 自主完成，
+    此处是注射点；保持默认行为不变。"""
+    return result
+
+
 # ─── 工具调用（含参数别名规范化）───
 
 def call_tool(name: str, **kwargs) -> dict:
     """调用已注册工具的通用入口，带参数别名规范化和权限检查"""
     if name not in TOOL_REGISTRY:
         return {"success": False, "error": f"工具不存在: {name}", "data": None}
+
+    # ── PRE stage: 注册的横切钩子可先拦截（dsh "每阶可短路"） ──
+    for hook in PRE_HOOKS:
+        block = hook(name, kwargs)
+        if block is not None:
+            return block
 
     # 权限检查
     try:
@@ -311,12 +349,17 @@ def call_tool(name: str, **kwargs) -> dict:
             result = call_with_timeout(TOOL_REGISTRY[name]["func"], kwargs, timeout)
         else:
             result = TOOL_REGISTRY[name]["func"](**kwargs)
-        return {"success": True, "error": None, "data": result}
+        result = {"success": True, "error": None, "data": result}
     except TimeoutError as e:
-        return {"success": False, "error": str(e), "data": None}
+        result = {"success": False, "error": str(e), "data": None}
     except Exception as e:
         _capture_error_screenshot(name, kwargs, str(e))
-        return {"success": False, "error": str(e), "data": None}
+        result = {"success": False, "error": str(e), "data": None}
+
+    # ── POST stage: 注册的横切钩子 + 默认（校验/缓存/截断） ──
+    for hook in POST_HOOKS:
+        result = hook(name, result, kwargs)
+    return _default_post(name, result, kwargs)
 
 
 # ─── 验证器 ───
