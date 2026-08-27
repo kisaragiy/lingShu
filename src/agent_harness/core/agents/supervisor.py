@@ -31,9 +31,13 @@ WORKER_CAPABILITIES = {
 
 # ─── LLM call helper ───
 
-def _call_llm(messages: list[dict], system_prompt: str = "",
-              max_tokens: int = 4096, timeout: int = 300) -> str:
-    """Call LLM for supervisor reasoning."""
+def _call_llm_full(messages: list[dict], system_prompt: str = "",
+                   max_tokens: int = 4096, timeout: int = 300) -> tuple[str, str]:
+    """Call LLM, return (content, finish_reason).
+
+    dsh P0: 捕获 finish_reason 以识别 max_tokens 截断(length)，
+    供 sticky 逻辑区分「截断但实质内容」vs「真正空返回」。
+    """
     import requests as req_lib
 
     payload = {
@@ -51,12 +55,24 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
         resp = req_lib.post(LLAMA_API, json=payload, timeout=timeout)
         if resp.status_code == 200:
             data = resp.json()
-            msg = data["choices"][0]["message"]
+            choice = data["choices"][0]
+            msg = choice["message"]
+            finish_reason = str(choice.get("finish_reason", ""))
             content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
-            return content
-        return ""
+            return content, finish_reason
+        return "", ""
     except Exception:
-        return ""
+        return "", "error"
+
+
+def _call_llm(messages: list[dict], system_prompt: str = "",
+              max_tokens: int = 4096, timeout: int = 300) -> str:
+    """Call LLM for supervisor reasoning (returns content only)."""
+    content, _ = _call_llm_full(
+        messages, system_prompt=system_prompt,
+        max_tokens=max_tokens, timeout=timeout,
+    )
+    return content
 
 
 # ─── Fallback plan (LLM unreachable) ───
@@ -118,6 +134,21 @@ def _fallback_plan(user_request: str) -> dict:
 def supervisor_analyze(state: SupervisorState) -> dict:
     """Analyze request and determine which workers to assign."""
     request = state["request"]
+
+    # ─── dsh P0: 空决策短路 — 无有效输入不烧模型调用 ───
+    if not request or not request.strip():
+        print("[Supervisor] 空请求，跳过 LLM 调用", file=sys.stderr)
+        return {
+            "task_type": "mixed",
+            "workers_assigned": [],
+            "worker_tasks": {},
+            "worker_results": {},
+            "worker_errors": {},
+            "round": state.get("round", 0) + 1,
+            "all_done": True,
+            "final_output": "⚠️ 空请求，未执行任何操作。",
+            "trace_steps": [{"step": "supervisor_analyze_shortcircuit", "empty_request": True}],
+        }
 
     workers_desc = "\n".join(
         f"- {name}: {info['description']}"
@@ -208,6 +239,13 @@ def supervisor_collect(state: SupervisorState) -> dict:
 
     worker_results = state.get("worker_results", {})
     workers_assigned = state.get("workers_assigned", [])
+
+    # ─── dsh P0: 空决策短路 — 无 worker 不再调 verify LLM ───
+    if not workers_assigned:
+        return {
+            "all_done": True,
+            "final_output": state.get("final_output", "⚠️ 空请求，无可用 Worker"),
+        }
 
     # Check if all workers completed successfully
     all_complete = all(
