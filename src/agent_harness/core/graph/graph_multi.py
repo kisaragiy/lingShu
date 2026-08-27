@@ -18,6 +18,7 @@ Architecture:
 """
 
 import concurrent.futures
+import sys
 import time
 import uuid
 from typing import Any, Literal
@@ -176,6 +177,15 @@ def supervisor_finalize(state: SupervisorState) -> dict:
     print("\n[Supervisor] 生成最终回复...")
 
     worker_results = state.get("worker_results", {})
+
+    # ─── dsh P0: 空决策短路 — 无结果不调 LLM 生成报告 ───
+    if not worker_results:
+        print("[Supervisor] 无 Worker 结果，跳过报告生成", file=sys.stderr)
+        return {
+            "final_output": state.get("final_output", "⚠️ 无可用结果，未生成报告。"),
+            "trace_steps": [{"step": "finalize_shortcircuit", "no_results": True}],
+        }
+
     combined = "\n\n".join(
         "### {}\n{}".format(w, r.get('output', '无结果')[:2000])
         for w, r in worker_results.items()
@@ -183,7 +193,7 @@ def supervisor_finalize(state: SupervisorState) -> dict:
 
     # Use LLM to craft final response
     from ..agent_log import log_event
-    from ..agents.supervisor import _call_llm
+    from ..agents.supervisor import _call_llm_full
 
     # Log finalize start
     log_event(state.get("session_id", "unknown"), "finalize", {
@@ -218,26 +228,28 @@ def supervisor_finalize(state: SupervisorState) -> dict:
         "   [来源 1] 标题 - URL (访问日期: YYYY-MM-DD)\n"
         "6. 总字数 1000-2000 字"
     )
-    final = _call_llm(
+    final, fin_reason = _call_llm_full(
         [{"role": "user", "content": f"用户请求: {state['request']}\n\nWorker 结果:\n{combined}"}],
         system_prompt=system,
         max_tokens=4096,
     )
-    # Empty output handling: try once more with simpler prompt
-    if not final or len(final.strip()) < 20:
-        print("[Supervisor] LLM 返回空结果，尝试降级回复...")
-        final = _call_llm(
+    # ─── dsh P0 sticky: max_tokens 截断(length) ≠ 失败 — 保留已生成内容，避免浪费性重试 ───
+    if fin_reason == "length" and final and len(final.strip()) >= 20:
+        print("[Supervisor] max_tokens 触顶，保留截断回答", file=sys.stderr)
+    elif not final or len(final.strip()) < 20:
+        print("[Supervisor] LLM 返回空结果，尝试降级回复...", file=sys.stderr)
+        final, _ = _call_llm_full(
             [{"role": "user", "content": f"用户请求: {state['request']}\n\n请根据以下信息直接回答:\n{combined[:3000]}"}],
             system_prompt="简洁、直接地回答用户的问题。用中文。",
             max_tokens=1024,
         )
     # Second fallback: just return worker results directly
     if not final or len(final.strip()) < 20:
-        print("[Supervisor] LLM 再次返回空，直接输出 Worker 结果")
+        print("[Supervisor] LLM 再次返回空，直接输出 Worker 结果", file=sys.stderr)
         final = combined[:2000]
     if not final:
         final = "[无法生成回复] 搜索到了一些信息但未能整理成回复，请重试。"
-        print("[Supervisor] 最终降级: 搜索链路异常")
+        print("[Supervisor] 最终降级: 搜索链路异常", file=sys.stderr)
 
     # Build summary
     total_elapsed = sum(
