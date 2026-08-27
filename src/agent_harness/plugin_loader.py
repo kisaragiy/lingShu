@@ -22,6 +22,8 @@ _HARNESS_PLUGINS_DIR = Path(os.environ.get(
     str(Path.home() / ".agent-harness" / "plugins"),
 ))
 _loaded_plugins: list[dict] = []
+# 能力缝 Provider 归属: plugin_name -> [tool_names provided]
+_plugin_tool_map: dict[str, list[str]] = {}
 
 
 def _ensure_dir():
@@ -45,12 +47,18 @@ def _ensure_dir():
 def load_plugins() -> list[dict]:
     """Load all plugins from the plugins directory.
 
+    能力缝：核心不做任何"特权"——只做能力注册/发现；插件作为 Provider 自助
+    register_tool() 注册能力。加载时 diff TOOL_REGISTRY 归属每个插件提供的工具。
+
     Returns:
-        List of {name, file, success, error?}
+        List of {name, file, success, error?, tools?}
     """
-    global _loaded_plugins
+    global _loaded_plugins, _plugin_tool_map
     _loaded_plugins = []
+    _plugin_tool_map = {}
     _ensure_dir()
+
+    from agent_harness.core.tools.registry import TOOL_REGISTRY
 
     for pyfile in sorted(_HARNESS_PLUGINS_DIR.glob("*.py")):
         if pyfile.name.startswith("_"):
@@ -63,6 +71,9 @@ def load_plugins() -> list[dict]:
             if plugin_dir not in sys.path:
                 sys.path.insert(0, plugin_dir)
 
+            # 快照加载前的能力集 → diff 出该插件提供的工具（Provider 归属）
+            before = set(TOOL_REGISTRY.keys())
+
             spec = importlib.util.spec_from_file_location(pyfile.stem, str(pyfile))
             if spec is None or spec.loader is None:
                 info["error"] = "无法加载 spec"
@@ -72,6 +83,11 @@ def load_plugins() -> list[dict]:
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             info["success"] = True
+
+            after = set(TOOL_REGISTRY.keys())
+            provided = sorted(after - before)
+            _plugin_tool_map[pyfile.stem] = provided
+            info["tools"] = provided
 
         except Exception as e:
             info["error"] = f"{type(e).__name__}: {str(e)}"
@@ -87,12 +103,14 @@ def list_plugins() -> list[dict]:
     return _loaded_plugins.copy()
 
 
-def get_plugin_tools() -> list[str]:
-    """Get tool names contributed by plugins.
+def get_plugin_tool_map() -> dict[str, list[str]]:
+    """Return provider attribution: plugin_name -> [tool_names].
 
-    Assumes plugins call register_tool(), which adds to TOOL_REGISTRY.
-    We can't track which tool came from which plugin directly,
-    but the registry timestamp can give us a hint.
+    能力缝三角色的 Provider 侧——调用方/前端可看到"哪个插件提供哪些能力"。
     """
-    from agent_harness.core.tools.registry import TOOL_REGISTRY
-    return list(TOOL_REGISTRY.keys())
+    return {k: list(v) for k, v in _plugin_tool_map.items()}
+
+
+def get_plugin_tools() -> list[str]:
+    """Get tool names contributed by plugins (provider-attributed)."""
+    return sorted({t for tools in _plugin_tool_map.values() for t in tools})

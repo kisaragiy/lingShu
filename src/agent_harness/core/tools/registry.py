@@ -305,8 +305,15 @@ def call_tool(name: str, **kwargs) -> dict:
                 break
 
     try:
-        result = TOOL_REGISTRY[name]["func"](**kwargs)
+        from .timeout import call_with_timeout, get_timeout
+        timeout = get_timeout(name)
+        if timeout and timeout > 0:
+            result = call_with_timeout(TOOL_REGISTRY[name]["func"], kwargs, timeout)
+        else:
+            result = TOOL_REGISTRY[name]["func"](**kwargs)
         return {"success": True, "error": None, "data": result}
+    except TimeoutError as e:
+        return {"success": False, "error": str(e), "data": None}
     except Exception as e:
         _capture_error_screenshot(name, kwargs, str(e))
         return {"success": False, "error": str(e), "data": None}
