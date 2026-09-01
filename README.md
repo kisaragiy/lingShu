@@ -2,7 +2,7 @@
 
 # 🧠 灵枢 (LingShu)
 
-**AI 调研助手 — 多 Agent 编排 · 搜索分析报告全链路自动化**
+**独立的多 Agent AI 应用工程实践 — Supervisor-Worker 编排 · 搜索分析报告全链路 · 防复现知识管道 · Agent 可靠性工程**
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-2b5b84?logo=python&logoColor=white)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-1c3d5a?logo=langchain)](https://langchain-ai.github.io/langgraph/)
@@ -10,9 +10,8 @@
 [![License](https://img.shields.io/badge/License-MIT-f5de17)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/kisaragiy/lingShu?style=flat&logo=github)](https://github.com/kisaragiy/lingShu)
 
-> **灵枢者，智之枢也。** Supervisor-Worker 多智能体架构，搜索→分析→报告全链路自动化。
->
-> 本地优先、开箱即用。不是聊天机器人，是帮你干活出报告的 AI。
+> **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
+> 本地优先、开箱即用。多 Agent 编排 + 知识反哺的完整 AI 应用落地。
 
 </div>
 
@@ -66,6 +65,8 @@
 | **Analyze Worker** | Python 代码执行、数据分析、多步推理、报告生成 |
 | **Execute Worker** | 桌面 GUI 自动化、浏览器控制、ComfyUI 图像/视频生成 |
 
+> 架构取舍：三个 Worker 各自独立 context，防止并行任务共享同一 LLM 上下文时互相串扰。这是处理并行 Agent 时最常被低估的一个点。
+
 ---
 
 ## ⚡ 快速开始
@@ -106,11 +107,14 @@ agent-harness serve
 | **全链路自动化** | 搜索 → 分析 → 排版精美的 HTML 报告（A4 打印优化），一条指令完成 |
 | **OpenAI 兼容 API** | `/v1/chat/completions` + `/v1/models`，支持 SSE 流式 |
 | **三模型群回退** | 本地 llama.cpp → WSL Ollama → DeepSeek Flash API 自动降级 |
-| **45+ 工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类 |
+| **40 个工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类（实测注册数） |
+| **防复现知识管道** | 把高频技术/求职知识沉淀为结构化规则库（32 条）· 中文 2-gram 检索 · 每日笔记自动抽候选 · 28 测试通过 |
 | **三重熔断** | Token 预算 / 超时 / 无进展 自动熔断保护 |
 | **RAG 知识库** | 上传 PDF/DOCX/TXT → 向量搜索 + BM25 关键词降级 |
 | **JWT 认证** | Access+Refresh 双 token + RBAC 权限 + 审计日志 |
 | **MCP 协议** | JSON-RPC 2.0 标准暴露工具，外部 Agent 可调用 |
+
+> 工具数量、测试用例、规则库条目均以实测注册数为准，可在仓库中直接核对。
 
 ---
 
@@ -169,10 +173,12 @@ src/agent_harness/
 ## 📊 评估
 
 ```bash
-agent-harness eval          # 运行 10 条回归测试
+agent-harness eval          # 运行回归测试
 ```
 
 覆盖：搜索、RAG、代码执行、桌面操作、多轮对话、客服场景等。
+
+> 项目共有 163 个测试用例通过（`pytest tests/ -q`，实测 163 passed / 8 failed / 2 skipped），覆盖工具链路、鉴权、安全护栏、RAG、成本控制、推理缓存等模块。8 个失败均为环境依赖：客服流式用例需本地起 `:8788` 服务，llm_cache 用例需本地 llama.cpp 跑在 `:8080`——非代码缺陷。测试数量以仓库实测为准。
 
 ---
 

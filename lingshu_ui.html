@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>灵枢 · Agent 编排控制台</title>
+<style>
+:root{
+  --ink-0:#050a12; --ink-1:#08111d; --ink-2:#0b1626; --ink-3:#101c30;
+  --line:#1b2a40; --line-2:#24364f;
+  --txt:#e6edf6; --txt-2:#9fb0c6; --txt-3:#6b7d95;
+  --cyan:#38e0d8; --cyan-2:#2aa0ff; --blue:#3d7bff; --blue-soft:rgba(61,123,255,.14);
+  --cyan-soft:rgba(56,224,216,.12); --green:#3ddc97; --green-soft:rgba(61,220,151,.12);
+  --amber:#f0b343; --amber-soft:rgba(240,179,67,.14); --red:#f0686a; --red-soft:rgba(240,104,106,.14);
+  --rail-w:236px;
+  --r:10px; --r-sm:6px;
+  --sans:'Noto Sans SC','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+  --mono:'JetBrains Mono','SFMono-Regular',Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ink-1);color:var(--txt);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{margin:0;font-weight:600}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+::selection{background:var(--cyan-2);color:#fff}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+/* 背景氛围 */
+.ambient{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.amb-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(56,224,216,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(56,224,216,.05) 1px,transparent 1px);background-size:44px 44px}
+.amb-glow{position:absolute;width:520px;height:520px;border-radius:50%;filter:blur(120px);opacity:.16;background:radial-gradient(circle,#2aa0ff,#38e0d8)}
+.amb-glow.g1{top:-120px;left:20%}
+.amb-glow.g2{bottom:-160px;right:5%;opacity:.12;background:radial-gradient(circle,#3d7bff,#55e8ff)}
+.amb-vig{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,transparent 40%,rgba(0,0,0,.35))}
+/* shell */
+.shell{position:relative;z-index:1;display:flex;min-height:100vh}
+/* rail */
+.rail{width:var(--rail-w);flex:0 0 var(--rail-w);background:linear-gradient(180deg,var(--ink-0),#060c16 80%);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.brand{display:flex;align-items:center;gap:11px;padding:20px 18px 16px;border-bottom:1px solid var(--line)}
+.brand-mark{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#2aa0ff,#38e0d8);display:grid;place-items:center;color:#04121f;font-weight:700;font-size:17px;font-family:var(--mono)}
+.brand-txt{line-height:1.2}
+.brand-txt b{font-size:17px;letter-spacing:.06em;color:#fff;display:block}
+.brand-txt span{font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--txt-3);text-transform:uppercase}
+.nav{flex:1;overflow-y:auto;padding:14px 10px}
+.nav-lbl{font-size:10px;letter-spacing:.16em;color:var(--txt-3);padding:6px 12px 8px;font-family:var(--mono);text-transform:uppercase}
+.nav-i{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:var(--r-sm);color:var(--txt-2);font-size:13.5px;margin-bottom:2px;position:relative;transition:.16s}
+.nav-i:hover{background:var(--ink-3);color:#fff}
+.nav-i.on{background:var(--cyan-soft);color:#fff;font-weight:500}
+.nav-i.on::before{content:"";position:absolute;left:-10px;top:9px;bottom:9px;width:2px;background:var(--cyan);border-radius:0 2px 2px 0}
+.nav-i svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;opacity:.85;flex:0 0 16px}
+.nav-i .b{margin-left:auto;font-family:var(--mono);font-size:10px;padding:1px 6px;border-radius:20px}
+.rail-foot{border-top:1px solid var(--line);padding:12px}
+.env{display:flex;gap:4px;background:var(--ink-0);border:1px solid var(--line);border-radius:var(--r-sm);padding:3px;margin-bottom:10px}
+.env button{flex:1;border:0;background:none;color:var(--txt-3);font-size:11.5px;padding:5px 4px;border-radius:4px;transition:.16s}
+.env button.on{background:var(--cyan-soft);color:var(--cyan);font-weight:600}
+.me{display:flex;align-items:center;gap:10px;padding:8px 8px;border-radius:var(--r-sm)}
+.me .avatar{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#3d7bff,#38e0d8);display:grid;place-items:center;color:#04121f;font-weight:700;font-size:13px}
+.me .who{line-height:1.25}
+.me .who b{font-size:12.5px;color:#fff;display:block}
+.me .who span{font-size:11px;color:var(--txt-3)}
+/* main */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{position:sticky;top:0;z-index:20;background:rgba(8,17,29,.82);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 24px;height:60px}
+.crumbs{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt-3);white-space:nowrap}
+.crumbs b{color:var(--txt);font-weight:500}
+.crumbs .sep{opacity:.5}
+.search{flex:1;max-width:320px;display:flex;align-items:center;gap:8px;background:var(--ink-0);border:1px solid var(--line);border-radius:var(--r-sm);padding:7px 10px;color:var(--txt-3)}
+.search span{flex:1;font-size:12.5px}
+.head-tools{margin-left:auto;display:flex;align-items:center;gap:10px}
+.icon-btn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);display:grid;place-items:center;color:var(--txt-2)}
+.icon-btn:hover{border-color:var(--cyan-2);color:#fff}
+.icon-btn .dot{position:absolute;top:7px;right:7px;width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+/* content */
+.content{padding:24px;flex:1;max-width:1400px;width:100%}
+/* onboarding banner */
+.banner{background:linear-gradient(135deg,rgba(56,224,216,.10),rgba(61,123,255,.10));border:1px solid var(--cyan-soft);border-radius:var(--r);padding:16px 18px;margin-bottom:22px;display:flex;align-items:center;gap:14px}
+.banner .b-icon{width:38px;height:38px;border-radius:10px;background:var(--cyan-soft);display:grid;place-items:center;color:var(--cyan)}
+.banner .b-txt b{color:#fff}
+.banner .b-txt span{color:var(--txt-2);font-size:12.5px;display:block;margin-top:2px}
+.banner .b-steps{margin-left:auto;display:flex;gap:8px;align-items:center}
+.b-steps .step{font-size:11px;color:var(--txt-2);padding:4px 10px;border:1px solid var(--line);border-radius:20px}
+.b-steps .step.on{background:var(--cyan-soft);color:var(--cyan);border-color:var(--cyan-soft)}
+.banner .b-close{margin-left:12px;color:var(--txt-3)}
+/* kpi */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+.kpi{background:linear-gradient(180deg,var(--ink-2),var(--ink-1));border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;position:relative;overflow:hidden}
+.kpi::after{content:"";position:absolute;top:0;right:0;width:90px;height:90px;border-radius:50%;filter:blur(28px);opacity:.14}
+.kpi.c-cyan::after{background:var(--cyan)}
+.kpi.c-blue::after{background:var(--blue)}
+.kpi.c-green::after{background:var(--green)}
+.kpi.c-amber::after{background:var(--amber)}
+.kpi .k-lbl{font-size:12px;color:var(--txt-3);display:flex;align-items:center;gap:6px}
+.kpi .k-val{font-family:var(--mono);font-size:26px;font-weight:600;color:#fff;margin-top:8px;letter-spacing:-.01em}
+.kpi .k-val small{font-size:13px;color:var(--txt-3);font-weight:400;margin-left:4px}
+.kpi .k-foot{font-size:11px;color:var(--txt-3);margin-top:6px}
+.kpi .k-foot .up{color:var(--green)}
+.kpi .k-foot .dn{color:var(--red)}
+/* panels */
+.grid{display:grid;grid-template-columns:1.7fr 1fr;gap:14px;margin-bottom:22px}
+.panel{background:linear-gradient(180deg,var(--ink-2),var(--ink-1));border:1px solid var(--line);border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
+.p-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.p-head h3{font-size:14px;color:#fff}
+.p-head .eyebrow{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--txt-3);text-transform:uppercase;display:block}
+.p-head .right{margin-left:auto;display:flex;gap:8px}
+.p-body{padding:18px;flex:1}
+/* DAG */
+.dag{position:relative;height:300px;border:1px solid var(--line);border-radius:var(--r-sm);background:radial-gradient(ellipse at 50% 30%,rgba(56,224,216,.05),transparent 70%);overflow:hidden}
+.cluster{position:absolute;border:1px solid var(--line-2);border-radius:10px;background:rgba(11,22,38,.5);padding:8px}
+.lane-lbl{position:absolute;font-family:var(--mono);font-size:9px;color:var(--txt-3);letter-spacing:.1em;text-transform:uppercase}
+.node{position:absolute;border-radius:9px;background:var(--ink-3);border:1px solid var(--line-2);padding:7px 11px;min-width:96px;font-size:12px}
+.node .n-name{font-weight:600;color:#fff;display:block}
+.node .n-sub{font-family:var(--mono);font-size:9.5px;color:var(--txt-3);display:block;margin-top:2px}
+.node.highlight{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan-soft),0 0 18px rgba(56,224,216,.2)}
+.node.ok{border-color:rgba(61,220,151,.4)}
+.node.running{border-color:rgba(56,224,216,.5);animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 var(--cyan-soft)}50%{box-shadow:0 0 0 6px var(--cyan-soft)}}
+.node .dot{position:absolute;top:8px;right:8px;width:7px;height:7px;border-radius:50%}
+.dot.ok{background:var(--green);box-shadow:0 0 8px var(--green)}
+.dot.run{background:var(--cyan);box-shadow:0 0 8px var(--cyan);animation:blink 1s infinite}
+.dot.err{background:var(--red);box-shadow:0 0 8px var(--red)}
+@keyframes blink{50%{opacity:.4}}
+/* inspector side */
+.inspector .ins-top{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.inspector .chip{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--txt-2)}
+.chip.cyan{color:var(--cyan);border-color:var(--cyan-soft);background:var(--cyan-soft)}
+.ins-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.k-val.min{font-size:18px;margin-top:4px}
+.k-val.sm{font-size:20px}
+.ins-code{font-family:var(--mono);font-size:11px;background:var(--ink-0);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px;color:var(--txt-2);white-space:pre-wrap;line-height:1.7}
+.ins-code b{color:var(--cyan)}
+.ins-btns{display:flex;gap:8px;margin-top:14px}
+.btn{flex:1;padding:8px;border-radius:var(--r-sm);border:1px solid var(--line);color:var(--txt-2);font-size:12.5px;text-align:center;transition:.16s}
+.btn:hover{border-color:var(--cyan-2);color:#fff}
+.btn.primary{background:linear-gradient(135deg,#2aa0ff,#38e0d8);color:#04121f;border:0;font-weight:600}
+.btn.primary:hover{filter:brightness(1.1)}
+/* table */
+.log-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.log-tbl th{text-align:left;font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--txt-3);text-transform:uppercase;padding:8px 10px;border-bottom:1px solid var(--line)}
+.log-tbl td{padding:9px 10px;border-bottom:1px solid var(--line);color:var(--txt-2)}
+.log-tbl tr:hover td{background:var(--ink-3);color:var(--txt)}
+.tag{font-size:10.5px;padding:2px 8px;border-radius:20px}
+.tag.ok{background:var(--green-soft);color:var(--green)}
+.tag.run{background:var(--cyan-soft);color:var(--cyan)}
+.tag.err{background:var(--red-soft);color:var(--red)}
+.tag.amber{background:var(--amber-soft);color:var(--amber)}
+/* model routing */
+.mods{display:flex;flex-direction:column;gap:10px}
+.mod{display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--ink-0);border:1px solid var(--line);border-radius:var(--r-sm)}
+.mod .m-name{font-family:var(--mono);font-size:12.5px;color:#fff;min-width:150px}
+.mod .m-bar{flex:1;height:6px;border-radius:4px;background:var(--ink-3);overflow:hidden}
+.mod .m-bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#2aa0ff,#38e0d8)}
+.mod .m-val{font-family:var(--mono);font-size:11px;color:var(--txt-3)}
+.mod .dot.ok,.mod .dot.run{position:static;width:8px;height:8px}
+/* clusters layout for dag */
+.dag .cl1{left:20px;top:70px;width:120px}
+.dag .cl2{left:200px;top:60px;width:170px}
+.dag .cl3{left:440px;top:60px;width:170px}
+.dag .cl4{left:690px;top:80px;width:130px}
+.edge{position:absolute;height:1px;background:var(--cyan);opacity:.5;transform-origin:0 0}
+.edge-flow{position:absolute;height:2px;background:linear-gradient(90deg,transparent,var(--cyan));filter:drop-shadow(0 0 4px var(--cyan));animation:dash 1.2s linear infinite}
+@keyframes dash{to{opacity:.2}}
+.foot-note{padding:10px 18px;color:var(--txt-3);font-size:11.5px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="ambient"><div class="amb-grid"></div><div class="amb-glow g1"></div><div class="amb-glow g2"></div><div class="amb-vig"></div></div>
+
+<div class="shell">
+  <!-- rail -->
+  <aside class="rail">
+    <div class="brand">
+      <div class="brand-mark">枢</div>
+      <div class="brand-txt"><b>灵枢</b><span>Agent 编排控制台</span></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-lbl">工作台</div>
+      <a class="nav-i on" href="#"><svg viewBox="0 0 24 24"><path d="M4 13h6V4H4zm10 7h6v-9h-6zM4 20h6v-3H4zm10-13h6V4h-6z"/></svg>运行总览<span class="b" style="color:var(--cyan)">24</span></a>
+      <a class="nav-i" href="#"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M7 7l4 9M17 7l-4 9M8.5 6h7"/></svg>Agent 编排</a>
+      <a class="nav-i" href="#"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>任务队列<span class="b" style="color:var(--amber)">3</span></a>
+      <a class="nav-i" href="#"><svg viewBox="0 0 24 24"><path d="M4 17l5-5 4 3 7-8"/><circle cx="4" cy="20" r="1"/></svg>模型路由</a>
+      <div class="nav-lbl">系统</div>
+      <a class="nav-i" href="#"><svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.3 2.3M16.1 16.1l2.3 2.3M18.4 5.6l-2.3 2.3M7.9 16.1l-2.3 2.3"/><circle cx="12" cy="12" r="3"/></svg>成本估算</a>
+      <a class="nav-i" href="#"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M5 19l2-2"/></svg>设置</a>
+    </nav>
+    <div class="rail-foot">
+      <div class="env"><button class="on">dev</button><button>prod</button></div>
+      <div class="me"><div class="avatar">Z</div><div class="who"><b>张伟强</b><span>开发者</span></div></div>
+    </div>
+  </aside>
+
+  <!-- main -->
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs">工作台 <span class="sep">/</span> <b>运行总览</b></div>
+      <div class="search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><span>搜索任务 / Agent / 模型…</span></div>
+      <div class="head-tools">
+        <div class="icon-btn" style="position:relative"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg><span class="dot"></span></div>
+        <div class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 5V3M12 21v-2M5 12H3M21 12h-2M6.6 6.6L5.2 5.2M18.8 18.8l-1.4-1.4M17.4 6.6l1.4-1.4M5.2 18.8l1.4-1.4"/></svg></div>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- onboarding banner -->
+      <div class="banner">
+        <div class="b-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+        <div class="b-txt"><b>欢迎使用灵枢 Agent 编排控制台</b><span>在这里查看 Agent 运行状态、追踪任务队列、监控模型路由与成本。左侧导航切换各功能面板。</span></div>
+        <div class="b-steps"><span class="step on">1 了解总览</span><span class="step">2 配置模型</span><span class="step">3 编排 Agent</span></div>
+        <button class="b-close" title="收起">✕</button>
+      </div>
+
+      <!-- kpis -->
+      <div class="kpis">
+        <div class="kpi c-cyan"><div class="k-lbl">运行中 Agent</div><div class="k-val">18<small>/ 24</small></div><div class="k-foot"><span class="up">▲ 4</span> 较昨日</div></div>
+        <div class="kpi c-blue"><div class="k-lbl">今日任务量</div><div class="k-val">1,284<small>件</small></div><div class="k-foot"><span class="up">▲ 12.4%</span> 处理中 96</div></div>
+        <div class="kpi c-green"><div class="k-lbl">今日 Token 成本</div><div class="k-val">¥8.4<small>元</small></div><div class="k-foot"><span class="up">▼ 6%</span> 预算内</div></div>
+        <div class="kpi c-amber"><div class="k-lbl">平均任务耗时</div><div class="k-val">42<small>秒</small></div><div class="k-foot"><span class="dn">▼ 3s</span> 有 2 个慢任务</div></div>
+      </div>
+
+      <!-- dag + inspector -->
+      <div class="grid">
+        <div class="panel">
+          <div class="p-head"><div><span class="eyebrow">Agent 编排</span><h3>任务执行流 · 实时</h3></div><div class="right"><span class="chip cyan">运行中</span></div></div>
+          <div class="p-body">
+            <div class="dag" id="dag">
+              <div class="cl1 cluster"><div class="lane-lbl">入口</div>
+                <div class="node highlight running" style="left:14px;top:30px"><span class="dot run"></span><span class="n-name">意图分析</span><span class="n-sub">LLM 路由</span></div>
+              </div>
+              <div class="cl2 cluster"><div class="lane-lbl">任务拆解</div>
+                <div class="node ok" style="left:14px;top:34px"><span class="dot ok"></span><span class="n-name">拆解器</span><span class="n-sub">LangGraph</span></div>
+              </div>
+              <div class="cl3 cluster"><div class="lane-lbl">并行 Worker</div>
+                <div class="node running" style="left:6px;top:22px"><span class="dot run"></span><span class="n-name">W-1 搜索</span><span class="n-sub">SearXNG</span></div>
+                <div class="node ok" style="left:6px;top:64px"><span class="dot ok"></span><span class="n-name">W-2 推理</span><span class="n-sub">qwen3.5</span></div>
+                <div class="node" style="left:6px;top:106px"><span class="dot err"></span><span class="n-name">W-3 图像</span><span class="n-sub">ComfyUI</span></div>
+              </div>
+              <div class="cl4 cluster"><div class="lane-lbl">验收</div>
+                <div class="node ok" style="left:14px;top:34px"><span class="dot ok"></span><span class="n-name">结果验收</span><span class="n-sub">Replan</span></div>
+              </div>
+              <div class="edge" style="left:150px;top:140px;width:56px;transform:rotate(0deg)"></div>
+              <div class="edge-flow" style="left:384px;top:112px;width:48px"></div>
+              <div class="edge-flow" style="left:384px;top:140px;width:48px"></div>
+              <div class="edge" style="left:618px;top:140px;width:66px"></div>
+            </div>
+            <div class="foot-note">总览 · Supervisor-Worker 编排 · 入口→拆解→并行 Worker→结果验收→多轮 Replan</div>
+          </div>
+        </div>
+
+        <div class="panel inspector">
+          <div class="p-head"><div><span class="eyebrow">Inspector · 选中</span><h3>Agent 详情</h3></div><div class="right"><span class="chip cyan">W-1 搜索</span></div></div>
+          <div class="p-body">
+            <div class="ins-grid">
+              <div class="kpi"><div class="k-lbl">状态</div><div class="k-val sm" style="color:var(--cyan)">运行中</div></div>
+              <div class="kpi"><div class="k-lbl">工具</div><div class="k-val sm">6</div></div>
+              <div class="kpi"><div class="k-lbl">调用次数</div><div class="k-val min">128</div></div>
+              <div class="kpi"><div class="k-lbl">成功率</div><div class="k-val min" style="color:var(--green)">96%</div></div>
+            </div>
+            <div class="ins-code">tool: SearXNG.search(q=<b>"AI Agent 市场"</b>)<br>status: <b style="color:var(--green)">200</b> · 620ms<br>→ 3 条结果<br><span style="color:var(--txt-3)"># tokens: 1,204 · ¥0.0008</span></div>
+            <div class="ins-btns"><button class="btn">重试</button><button class="btn">中断</button><button class="btn primary">重新编排</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- model routing + log -->
+      <div class="grid">
+        <div class="panel">
+          <div class="p-head"><div><span class="eyebrow">模型路由</span><h3>多模型状态</h3></div></div>
+          <div class="p-body mods">
+            <div class="mod"><span class="dot run"></span><span class="m-name">qwen3.5:9b (本地)</span><div class="m-bar"><i style="width:72%"></i></div><span class="m-val">72% · 1.2k 次</span></div>
+            <div class="mod"><span class="dot ok"></span><span class="m-name">qwen3.8-flash (百炼)</span><div class="m-bar"><i style="width:48%"></i></div><span class="m-val">48% · 3.4k 次</span></div>
+            <div class="mod"><span class="dot ok"></span><span class="m-name">deepseek (云端)</span><div class="m-bar"><i style="width:61%"></i></div><span class="m-val">61% · 8.9k 次</span></div>
+            <div class="mod"><span class="dot err"></span><span class="m-name">flux (ComfyUI)</span><div class="m-bar"><i style="width:12%;background:var(--red)"></i></div><span class="m-val">12% · 慢</span></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="p-head"><div><span class="eyebrow">最近任务</span><h3>日志</h3></div><div class="right"><button class="btn" style="padding:5px 12px">查看全部</button></div></div>
+          <div class="p-body" style="padding:0">
+            <table class="log-tbl">
+              <thead><tr><th>任务</th><th>模型</th><th>状态</th><th>耗时</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">#A-1042 调研</td><td class="mono">qwen3.8-flash</td><td><span class="tag ok">完成</span></td><td class="mono">38s</td></tr>
+                <tr><td class="mono">#A-1041 客服</td><td class="mono">qwen3.5:9b</td><td><span class="tag run">进行</span></td><td class="mono">52s</td></tr>
+                <tr><td class="mono">#A-1040 图像</td><td class="mono">flux</td><td><span class="tag err">失败</span></td><td class="mono">超时</td></tr>
+                <tr><td class="mono">#A-1039 摘要</td><td class="mono">deepseek</td><td><span class="tag ok">完成</span></td><td class="mono">12s</td></tr>
+                <tr><td class="mono">#A-1038 搜索</td><td class="mono">qwen3.8-flash</td><td><span class="tag amber">重试</span></td><td class="mono">31s</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+<script>
+// 首次引导 banner 关闭（localStorage）
+document.querySelector('.b-close').addEventListener('click', () => {
+  document.querySelector('.banner').style.display = 'none';
+});
+// 侧边导航 active 切换
+document.querySelectorAll('.nav-i').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    document.querySelectorAll('.nav-i').forEach(x => x.classList.remove('on'));
+    a.classList.add('on');
+  });
+});
+</script>
+</body>
+</html>
