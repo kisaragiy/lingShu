@@ -15,6 +15,7 @@ from langgraph.graph import END, StateGraph
 from ..agents.supervisor import WORKER_CAPABILITIES
 from ..config import LLAMA_API, MODEL_LLAMA
 from ..pipeline.cancel import is_cancelled
+from ..pipeline.llm import ledger_bump
 from ..pipeline.state import WorkerResult, WorkerState
 from ..tools.registry import TOOL_REGISTRY, call_tool, validate_result
 
@@ -111,8 +112,10 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
     try:
         resp = req_lib.post(api_url, json=payload, timeout=300 if not use_local else 30)
         if resp.status_code == 200:
-            msg = resp.json()["choices"][0]["message"]
+            data = resp.json()
+            msg = data["choices"][0]["message"]
             content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
+            ledger_bump(data.get("usage", {}).get("total_tokens", 0))
             return content
         return ""
     except Exception:

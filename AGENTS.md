@@ -185,7 +185,8 @@ v0.28  **安全护栏（WorkBuddy P0 移植）**:
          ├── 写前自动备份(覆盖写存.bak副本)
          ├── 删除保护(文件走回收站 ~/.agent-harness/trash/)
          └── API: GET/POST /v1/safety/mode, POST /v1/safety/confirm
---- 以上为当前已发布 (v0.75.0) ---
+v0.75.1 三重熔断接线硬化 — LLM token 总账(三调用点)喂熔断器 + route 熔断短路 finalize(运行中能拦住) + retry 从孤儿变实装 + graph.py 补熔断器初始化 + 9 测试证明真触发
+--- 以上为当前已发布 (v0.75.1) ---
 
 版本节奏（慢，参考群星 DLC 式）:
   v0.19.1  → 小修补
