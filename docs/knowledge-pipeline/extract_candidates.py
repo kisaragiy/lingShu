@@ -16,14 +16,23 @@ import os
 import re
 import sys
 
-# 信号词：出现在 daily 行里，可判定为"坑/教训/发现"的候选
-SIGNAL_PATTERNS = [
-    r"坑", r"教训", r"踩", r"根因", r"修复", r"发现", r"问题", r"失败", r"报错",
-    r"错误", r"bug", r"Bug", r"排坑", r"踩坑", r"注意", r"⚠️", r"铁律", r"教训闭环",
+# 强信号词：出现即代表"坑/教训/失败"，权重 1.0
+STRONG_SIGNALS = [
+    r"坑", r"教训", r"踩", r"根因", r"失败", r"报错", r"错误", r"bug", r"Bug",
+    r"排坑", r"踩坑", r"⚠️", r"铁律", r"教训闭环",
 ]
-
-# 弱信号：单独出现不算强候选（避免把正常记录当坑）
+# 弱信号词：正常记录也可能有"发现/问题/注意/修复"，单独出现不算强坑，权重 0.5
 WEAK_SIGNALS = {r"发现", r"问题", r"注意", r"修复"}
+SIGNAL_PATTERNS = STRONG_SIGNALS + sorted(WEAK_SIGNALS)
+
+
+def _line_signal_weight(line: str) -> float:
+    """计算一行的信号权重：命中强信号 = 1.0；仅命中弱信号 = 0.5；无 = 0.0。"""
+    if any(re.search(p, line) for p in STRONG_SIGNALS):
+        return 1.0
+    if any(re.search(p, line) for p in WEAK_SIGNALS):
+        return 0.5
+    return 0.0
 
 DAILY_DIR = os.path.expanduser("~/knowledge/daily")
 
@@ -55,27 +64,28 @@ def extract_candidates(daily_file, min_signals=2):
     sections = parse_daily_file(daily_file)
     candidates = []
     for sec_title, lines in sections:
-        # 找出该节里有信号词的行
+        # 按加权信号抽候选：强信号行=1.0，仅弱信号行=0.5（正常记录不误当坑）
         signal_lines = []
+        score = 0.0
         for ln in lines:
-            for pat in SIGNAL_PATTERNS:
-                if re.search(pat, ln):
-                    # 弱信号若仅出现一次不算强
-                    signal_lines.append(ln)
-                    break
-        if len(signal_lines) >= min_signals:
+            w = _line_signal_weight(ln)
+            if w > 0:
+                signal_lines.append(ln)
+                score += w
+        if score >= min_signals:
             # 提炼：节标题 + 关键信号行
             candidate = {
                 "section": sec_title,
                 "source": os.path.basename(daily_file),
                 "signal_lines": signal_lines[:8],
                 "signal_count": len(signal_lines),
+                "signal_score": round(score, 1),
             }
             candidates.append(candidate)
     return candidates
 
 
-def gen_report(all_candidates):
+def gen_report(all_candidates, min_signals: float = 2.0):
     """生成候选清单报告（markdown，供人工确认合并）。"""
     lines = [
         "# 灵枢知识管道 — 候选规则清单（待人工确认）",
@@ -90,7 +100,8 @@ def gen_report(all_candidates):
     for c in all_candidates:
         lines.append("## [%s] %s" % (c["source"], c["section"]))
         lines.append("")
-        lines.append("- **信号数**: %d（≥2 才算强候选）" % c["signal_count"])
+        lines.append("- **信号分**: %.1f（阈值 ≥%.0f；强信号行=1.0，弱=0.5）· 信号行 %d 条"
+                     % (c["signal_score"], min_signals, c["signal_count"]))
         lines.append("- **关键行**:")
         for sl in c["signal_lines"][:5]:
             lines.append("  - `%s`" % sl.strip()[:100])
@@ -124,7 +135,7 @@ def main():
         cands = extract_candidates(fname, args.min_signals)
         all_candidates.extend(cands)
 
-    report = gen_report(all_candidates)
+    report = gen_report(all_candidates, min_signals=args.min_signals)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(report)

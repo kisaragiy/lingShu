@@ -14,6 +14,7 @@ import sys
 RULES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge-rules-v1.md")
 RULES_FILE_V2 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge-rules-v2.md")
 RULES_FILE_CAREER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge-rules-career.md")
+RULES_FILE_V4 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge-rules-v4.md")
 
 # 规则号 -> 来源 daily（用于检索返回时标注 provenance，不靠手改每个文件）
 # v1 整体来自 08-21；v2 来自 08-14(API/GPU/训练) + 08-15(记忆治理/后端)
@@ -39,6 +40,12 @@ RULE_SOURCE_MAP = {
     "R-28": "daily/2026-08-23.md + action-plan-20260823.md",
     "R-29": "action-plan-20260823.md",
     "R-30": "action-plan-20260823.md + 求职全流程(fact_store)",
+    # v4 工程可靠性线 (R-31~35)
+    "R-31": "docs/architecture-review-day1-20260904.md + 灵枢 v0.75.1",
+    "R-32": "灵枢 v0.75.2（safety fail-closed 硬化）",
+    "R-33": "fact_store #666 修正 (2026-09-04)",
+    "R-34": "cost_ingest.py PRICES 盲点 (2026-09-04 实测)",
+    "R-35": "test_rev_utils 工件失败 (2026-09-04)",
 }
 
 # 触发条件 -> 规则号 (关键词匹配，命中即返回该规则)
@@ -78,6 +85,12 @@ TRIGGER_MAP = {
     "系统工具": ["R-28"], "建筑": ["R-28"], "替代": ["R-28"], "主线": ["R-28"],
     "路径": ["R-29"], "源文件": ["R-29"], "模板": ["R-29"],
     "跟踪表": ["R-30"], "记录": ["R-30"], "下一步": ["R-30"], "复盘": ["R-30"],
+    # v4 工程可靠性 (R-31~35)
+    "熔断": ["R-31"], "接线": ["R-31"], "从未调用": ["R-31"], "喂数据": ["R-31"],
+    "护栏": ["R-32"], "ImportError": ["R-32"], "静默降级": ["R-32"], "裸奔": ["R-32"],
+    "401": ["R-33"], "截断": ["R-33"], "delegation": ["R-33"], "额度": ["R-33"], "百炼": ["R-33"],
+    "费率": ["R-34"], "PRICES": ["R-34"], "漏算": ["R-34"], "看板": ["R-34"],
+    "worktree": ["R-35"], "工件": ["R-35"], "gitignore": ["R-35"], "环境依赖": ["R-35"],
 }
 
 
@@ -85,7 +98,7 @@ def load_rules():
     """解析 v1 + v2 + career 规则文件，合并所有规则条目为结构化 dict。
     返回 {rule_id: {rule_id, trigger, lesson, block_hint, source}}。文件缺失时返回空 dict（不崩）。"""
     rules = {}
-    for fpath in (RULES_FILE, RULES_FILE_V2, RULES_FILE_CAREER):
+    for fpath in (RULES_FILE, RULES_FILE_V2, RULES_FILE_CAREER, RULES_FILE_V4):
         if not os.path.exists(fpath):
             continue
         with open(fpath, encoding="utf-8") as f:
