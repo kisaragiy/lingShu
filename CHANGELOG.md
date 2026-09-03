@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.75.1 — 2026-09-04
+
+### Fixed — 三重熔断接线（Day 3-4 硬化）
+- 🔥 熔断器真正喂数据：LLM token 总账（llm/supervisor/worker 三调用点统一 bump）+ graph 每轮差值喂 `add_tokens` + 每 worker 输出喂 `record_output` → **token 预算 / 无进展检测从"从未触发"变真触发**
+- 🛑 熔断能在运行中拦住：`supervisor_route` 检测熔断即 finalize（原实现只在 invoke 结束后查一次，失控拦不住）
+- 🔁 retry.py 从孤儿变实装：`pipeline/llm.py` 的 POST 挂 `with_retry(3, 指数退避+抖动)`，全失败才降级/返回空
+- 🧪 新增 9 测试（tests/test_circuit_breaker_wiring.py）：token/无进展/重置/增量喂入/route finalize/重试成功/重试放弃/优雅空返回；全量 164 passed 零回归
+- 🐛 graph.py 单 Agent 路线补 `_circuit_breaker` 初始化（原从未实例化→熔断永久失效）
+
 ## v0.75.0 — 2026-08-21
 
 ### Added — 重试机制 + 预算控制 + 安全审计

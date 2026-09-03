@@ -8,6 +8,7 @@ from ..config import (
     SUPERVISOR_MAX_ROUNDS,
 )
 from ..pipeline.cancel import is_cancelled
+from ..pipeline.llm import ledger_bump
 from ..pipeline.state import SupervisorState
 
 # ─── Worker capability definitions ───
@@ -59,6 +60,7 @@ def _call_llm_full(messages: list[dict], system_prompt: str = "",
             msg = choice["message"]
             finish_reason = str(choice.get("finish_reason", ""))
             content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
+            ledger_bump(data.get("usage", {}).get("total_tokens", 0))
             return content, finish_reason
         return "", ""
     except Exception:

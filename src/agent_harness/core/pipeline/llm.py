@@ -19,9 +19,39 @@ from ..config import (
     MODEL_DEEPSEEK,
     MODEL_LLAMA,
 )
+from ..retry import with_retry
 
 # Re-export for tools/ compatibility
 WORKSPACE_DIR = os.path.normpath(os.path.join(str(HARNESS_DIR), "..", ".."))
+
+# ─── Token ledger (circuit-breaker feed) ───
+# All LLM call sites bump this on successful responses; the graph layer reads
+# deltas between rounds and feeds them into CircuitBreaker.add_tokens().
+_LLM_TOKEN_LEDGER: dict[str, int] = {"total": 0}
+
+
+def ledger_total() -> int:
+    """Current cumulative token count across all LLM call sites."""
+    return _LLM_TOKEN_LEDGER["total"]
+
+
+def ledger_bump(tokens: int) -> None:
+    """Record tokens consumed by a successful LLM call."""
+    if tokens and tokens > 0:
+        _LLM_TOKEN_LEDGER["total"] += tokens
+
+
+# ─── Retried HTTP POST (wire retry into the LLM path) ───
+@with_retry(
+    max_attempts=3,
+    base_delay=1.0,
+    max_delay=30.0,
+    retryable_exceptions=(req_lib.exceptions.RequestException, OSError, TimeoutError),
+)
+def _http_post(session, url, payload, headers=None, timeout=120):
+    """Single POST with exponential-backoff retry. Raises after attempts exhausted."""
+    return session.post(url, json=payload, headers=headers or {}, timeout=timeout)
+
 
 # Shared HTTP session
 _session = req_lib.Session()
@@ -76,7 +106,7 @@ def call_llama(messages: list[dict], system_prompt: str = "",
         "thinking": {"type": "disabled"},
     }
     try:
-        resp = _session.post(LLAMA_API, json=payload, timeout=300)
+        resp = _http_post(_session, LLAMA_API, payload, timeout=300)
         if resp.status_code == 200:
             data = resp.json()
             msg = data["choices"][0]["message"]
@@ -86,6 +116,7 @@ def call_llama(messages: list[dict], system_prompt: str = "",
                 # If content is empty, the model might still be generating
                 content = msg.get("reasoning_content", "")[-200:] or "(empty)"
             tokens = data.get("usage", {}).get("total_tokens", 0)
+            ledger_bump(tokens)
             if cache_key and content:
                 _llm_cache_set(cache_key, content, tokens)
             return content, tokens
@@ -138,9 +169,8 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
         print("[LLM] _post_cloud: 未配置云端 api_url/api_key，降级到本地 LLM", file=sys.stderr)
         return call_llama(messages, system_prompt=system_prompt, max_tokens=max_tokens)
     try:
-        resp = _session.post(
-            api_url,
-            json=payload,
+        resp = _http_post(
+            _session, api_url, payload,
             headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
             timeout=120,
         )
@@ -148,6 +178,7 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
             tokens = data.get("usage", {}).get("total_tokens", 0)
+            ledger_bump(tokens)
             if content:
                 _llm_cache_set(cache_key, content, tokens)
             return content, tokens

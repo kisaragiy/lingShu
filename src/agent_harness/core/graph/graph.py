@@ -12,6 +12,7 @@ from langgraph.graph import END, StateGraph
 
 from ..config import LLAMA_API, MAX_RETRIES, MODEL_LLAMA
 from ..pipeline.circuit_breaker import CircuitBreaker
+from ..pipeline.llm import ledger_bump
 from ..pipeline.state import HarnessState
 from ..tools.registry import TOOL_REGISTRY, call_tool, validate_result
 
@@ -31,8 +32,10 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
     try:
         resp = req_lib.post(LLAMA_API, json=payload, timeout=300)
         if resp.status_code == 200:
-            msg = resp.json()["choices"][0]["message"]
+            data = resp.json()
+            msg = data["choices"][0]["message"]
             content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
+            ledger_bump(data.get("usage", {}).get("total_tokens", 0))
             return content
         return ""
     except Exception:
@@ -115,7 +118,16 @@ def executor_node(state: HarnessState) -> dict:
     new_trace.append({"step": step["name"], "tool": tool_name,
                       "elapsed": round(elapsed, 2), "passed": validation["passed"]})
 
-    return {"results": new_results, "trace_steps": new_trace}
+    # Feed circuit breaker for no-progress detection (token/time handled by check).
+    new_errors = list(state.get("errors", []))
+    if cb is not None:
+        cb.record_output(f"{tool_name}:{str(result)[:100]}")
+        if cb.check()["tripped"]:
+            new_errors.append("[熔断] 已触发（token/超时/无进展）")
+            new_trace.append({"step": "circuit_breaker", "tripped": True,
+                              "reasons": cb.check()["reasons"]})
+
+    return {"results": new_results, "trace_steps": new_trace, "errors": new_errors}
 
 
 def router_node(state: HarnessState) -> Literal["advance", "corrector", "finalizer"]:
@@ -203,6 +215,7 @@ def run(request: str) -> str:
         "validator_fixes": [],
         "trace_id": "",
         "trace_steps": [],
+        "_circuit_breaker": CircuitBreaker(),
     }
     final = graph.invoke(state)
     return final.get("final_output", "")

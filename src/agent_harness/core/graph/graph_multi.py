@@ -38,6 +38,7 @@ from ..pipeline.cancel import (
     is_cancelled,
 )
 from ..pipeline.circuit_breaker import CircuitBreaker
+from ..pipeline.llm import ledger_total
 from ..pipeline.state import SupervisorState, WorkerResult
 from ..pipeline.tracing import TraceCollector
 
@@ -45,6 +46,35 @@ from ..pipeline.tracing import TraceCollector
 _trace_collector: TraceCollector | None = None
 # Module-level progress queue — set before graph invocation for SSE streaming
 _progress_queue = None
+
+
+# ─── Circuit-breaker feeding helpers ───
+# Token counts are accumulated in pipeline.llm's module ledger by every LLM call
+# site (supervisor / workers / llm.py). We feed the breaker with the delta since
+# the last feed so token-budget + no-progress detection actually fire mid-run.
+# The last-fed watermark is stashed on the breaker instance (fresh per run).
+
+def _feed_breaker_tokens(cb: CircuitBreaker) -> None:
+    """Feed cumulative LLM token delta into the breaker."""
+    cur = ledger_total()
+    prev = getattr(cb, "_ledger_total", 0)
+    delta = cur - prev
+    if delta > 0:
+        cb.add_tokens(delta)
+        cb._ledger_total = cur  # type: ignore[attr-defined]
+
+
+def _feed_breaker_output(cb: CircuitBreaker, wname: str, output: Any) -> None:
+    """Record a worker's output for no-progress detection."""
+    cb.record_output(f"{wname}:{str(output)[:100]}")
+
+
+def _breaker_tripped(cb: CircuitBreaker | None) -> bool:
+    """Feed any pending tokens then return whether the breaker has tripped."""
+    if cb is None:
+        return False
+    _feed_breaker_tokens(cb)
+    return bool(cb.check()["tripped"])
 
 
 def set_trace_collector(collector: TraceCollector):
@@ -142,6 +172,22 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
                 errors[wname] = [str(e)]
                 print(f"  ❌ {wname}: {e}")
 
+    # Feed circuit breaker with this round's tokens + per-worker outputs.
+    cb = state.get("circuit_breaker")  # type: ignore[union-attr]
+    if cb is not None:
+        _feed_breaker_tokens(cb)
+        for wname in workers_assigned:
+            out = results.get(wname, {}).get("output", "")
+            _feed_breaker_output(cb, wname, out)
+        if _breaker_tripped(cb):
+            print(f"[Supervisor] 🔥 熔断触发: {'; '.join(cb.check()['reasons'])}",
+                  file=sys.stderr)
+            if _progress_queue:
+                _progress_queue.put({
+                    "type": "progress",
+                    "content": "🔥 任务熔断（token 超预算/超时/无进展），提前收尾\n",
+                })
+
     # Collect trace steps
     all_traces = list(state.get("trace_steps", []))
     all_traces.append({
@@ -156,6 +202,7 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
         "worker_results": results,
         "worker_errors": errors,
         "trace_steps": all_traces,
+        "all_done": True if (cb is not None and cb.check()["tripped"]) else state.get("all_done", False),
     }
 
 
@@ -163,6 +210,10 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
 
 def supervisor_route(state: SupervisorState) -> Literal["replan", "finalize"]:
     """Decide whether to do another round or finalize."""
+    cb = state.get("circuit_breaker")  # type: ignore[union-attr]
+    if _breaker_tripped(cb):
+        print("[Supervisor] 🔥 熔断已触发，停止 Replan 提前收尾", file=sys.stderr)
+        return "finalize"
     if state.get("all_done"):
         return "finalize"
     if state.get("round", 0) >= SUPERVISOR_MAX_ROUNDS:
