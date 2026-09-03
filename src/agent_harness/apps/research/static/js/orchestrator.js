@@ -63,15 +63,18 @@ function _orchDrawGraph() {
   ORCH_NODES.forEach(n => {
     const d = document.createElement('div');
     d.id = 'on-' + n.id;
-    d.style.cssText = `position:absolute;left:${n.x}%;top:${n.y}%;transform:translate(-50%,-50%);min-width:130px;text-align:center;z-index:2;cursor:default`;
-    d.innerHTML = `<div style="display:inline-block;background:var(--bg-card,#fff);border:1px solid ${n.color}55;border-radius:8px;padding:8px 12px;box-shadow:0 1px 3px rgba(0,0,0,.08);min-width:130px">
-      <div style="display:flex;align-items:center;gap:6px;justify-content:center">
-        <span class="dot ${n.dot}" id="od-${n.id}" style="width:8px;height:8px;flex-shrink:0"></span>
-        <b style="font-size:13px">${n.name}</b>
+    d.style.cssText = `position:absolute;left:${n.x}%;top:${n.y}%;transform:translate(-50%,-50%);min-width:180px;text-align:center;z-index:2;cursor:default;transition:transform .2s ease, box-shadow .2s ease`;
+    d.innerHTML = `<div style="display:inline-block;background:var(--bg-card,#fff);border:1px solid var(--border,rgba(15,23,42,.07));border-left:3px solid ${n.color};border-radius:14px;padding:12px 16px;box-shadow:var(--shadow,0 1px 2px rgba(16,24,40,.04));backdrop-filter:blur(10px);min-width:180px;transition:box-shadow .2s, transform .2s">
+      <div style="display:flex;align-items:center;gap:8px;justify-content:flex-start">
+        <span class="dot ${n.dot}" id="od-${n.id}" style="width:9px;height:9px;flex-shrink:0"></span>
+        <b style="font-size:13px;font-weight:700">${n.name}</b>
+        <span style="margin-left:auto;font-size:10px;color:var(--text-muted,#94a3b8)">${n.dot==='dot-ok'?'● 在线':'○ 待命'}</span>
       </div>
-      <div style="font-size:11px;color:var(--text-muted,#888);margin-top:3px">${n.role}</div>
-      <div style="font-size:10px;color:var(--text-muted,#aaa);margin-top:2px" id="om-${n.id}">-</div>
+      <div style="font-size:11px;color:var(--text-muted,#888);margin-top:4px;text-align:left">${n.role}</div>
+      <div style="font-size:10px;color:var(--text-muted,#aaa);margin-top:2px;text-align:left" id="om-${n.id}">-</div>
     </div>`;
+    d.onmouseenter = () => { d.firstChild.style.transform = 'translateY(-3px)'; d.firstChild.style.boxShadow = 'var(--shadow-hover,0 8px 32px rgba(16,24,40,.10))'; };
+    d.onmouseleave = () => { d.firstChild.style.transform = ''; d.firstChild.style.boxShadow = 'var(--shadow,0 1px 2px rgba(16,24,40,.04))'; };
     area.appendChild(d);
   });
   _orchDrawEdges();
@@ -83,19 +86,33 @@ function _orchDrawEdges() {
   const ar = area.getBoundingClientRect();
   svg.setAttribute('viewBox', `0 0 ${ar.width} ${ar.height}`);
   const NS = 'http://www.w3.org/2000/svg';
+  // 为每个节点生成渐变色 id 供连线引用
+  const colorFor = { supervisor:'#6366f1', search:'#0ea5e9', analyze:'#14b8a6', execute:'#f59e0b', tools:'#8b5cf6', knowledge:'#64748b', llm:'#10b981' };
+  ORCH_NODES.forEach(n => {
+    if (svg.querySelector(`#grad-${n.id}`)) return;
+    const defs = document.createElementNS(NS, 'defs');
+    const g = document.createElementNS(NS, 'linearGradient');
+    g.setAttribute('id', `grad-${n.id}`);
+    const s1 = document.createElementNS(NS, 'stop'); s1.setAttribute('offset', '0%'); s1.setAttribute('stop-color', colorFor[n.id] || n.color); s1.setAttribute('stop-opacity', '0.5');
+    const s2 = document.createElementNS(NS, 'stop'); s2.setAttribute('offset', '100%'); s2.setAttribute('stop-color', colorFor[n.id] || n.color); s2.setAttribute('stop-opacity', '0.15');
+    g.appendChild(s1); g.appendChild(s2); defs.appendChild(g); svg.appendChild(defs);
+  });
   ORCH_EDGES.forEach(([a, b]) => {
     const na = document.getElementById('on-' + a), nb = document.getElementById('on-' + b);
     if (!na || !nb) return;
     const ra = na.getBoundingClientRect(), rb = nb.getBoundingClientRect();
-    const line = document.createElementNS(NS, 'line');
-    line.setAttribute('x1', ra.left - ar.left + ra.width / 2);
-    line.setAttribute('y1', ra.top - ar.top + ra.height / 2);
-    line.setAttribute('x2', rb.left - ar.left + rb.width / 2);
-    line.setAttribute('y2', rb.top - ar.top + rb.height / 2);
-    line.setAttribute('stroke', 'rgba(94,106,210,.4)');
-    line.setAttribute('stroke-width', '1.3');
-    line.setAttribute('stroke-dasharray', '5 4');
-    svg.appendChild(line);
+    const x1 = ra.left - ar.left + ra.width / 2, y1 = ra.top - ar.top + ra.height / 2;
+    const x2 = rb.left - ar.left + rb.width / 2, y2 = rb.top - ar.top + rb.height / 2;
+    // 贝塞尔曲线连接（SaaS 感）
+    const mx = (x1 + x2) / 2, my = Math.max(y1, y2) - 40;
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', `M ${x1} ${y1} C ${mx} ${my}, ${mx} ${my + 24}, ${x2} ${y2}`);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', `url(#grad-${a})`);
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('opacity', '0.4');
+    svg.appendChild(path);
   });
 }
 

@@ -1,27 +1,29 @@
-/* 灵枢 (LingShu) — White Theme */
+/* 灵枢 (LingShu) — White Theme (SaaS 商业感升级) */
 :root {
   --bg-primary: #ffffff;
-  --bg-secondary: #f5f6f8;
-  --bg-card: #ffffff;
-  --bg-hover: #f0f1f4;
-  --border: #e2e4e9;
-  --border-light: #eef0f3;
-  --text-primary: #1a1a2e;
-  --text-secondary: #6b7280;
-  --text-muted: #9ca3af;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
+  --bg-secondary: #f6f7fb;
+  --bg-card: rgba(255,255,255,0.85);
+  --bg-hover: #eef0f6;
+  --border: rgba(15,23,42,0.07);
+  --border-light: rgba(15,23,42,0.05);
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --accent: #6366f1;
+  --accent-hover: #4f46e5;
   --accent-light: #eef2ff;
+  --accent-2: #8b5cf6;
   --green: #22c55e;
   --red: #ef4444;
   --yellow: #f59e0b;
   --blue: #3b82f6;
-  --radius: 8px;
-  --radius-lg: 12px;
-  --shadow: 0 1px 3px rgba(0,0,0,0.06);
-  --shadow-hover: 0 4px 12px rgba(0,0,0,0.08);
+  --radius: 12px;
+  --radius-lg: 20px;
+  --shadow: 0 1px 2px rgba(16,24,40,0.04), 0 1px 3px rgba(16,24,40,0.06);
+  --shadow-hover: 0 8px 32px rgba(16,24,40,0.10), 0 2px 8px rgba(16,24,40,0.04);
   --sidebar-w: 260px;
   --header-h: 52px;
+  --grad: linear-gradient(135deg, var(--accent), var(--accent-2));
 }
 
 /* ─── Dark Mode ─── */
@@ -203,13 +205,13 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .sidebar-new-btn {
-  width: 100%; padding: 8px; border: none;
-  border-radius: 6px; background: var(--accent); color: #fff;
-  font-size: 12px; font-weight: 500; cursor: pointer;
+  width: 100%; padding: 10px; border: none;
+  border-radius: 11px; background: var(--grad); color: #fff;
+  font-size: 12.5px; font-weight: 600; cursor: pointer;
   display: flex; align-items: center; justify-content: center; gap: 6px;
-  transition: background .15s;
+  transition: all .15s; box-shadow: 0 6px 16px rgba(99,102,241,0.3);
 }
-.sidebar-new-btn:hover { background: var(--accent-hover); }
+.sidebar-new-btn:hover { filter: brightness(1.05); box-shadow: 0 8px 20px rgba(99,102,241,0.4); }
 
 .sidebar-list {
   flex: 1; overflow-y: auto;
@@ -297,16 +299,16 @@ body {
   flex-shrink: 0;
 }
 .main-tab {
-  padding: 8px 16px; border-radius: 6px 6px 0 0;
+  padding: 8px 16px; border-radius: 999px;
   font-size: 12px; font-weight: 500; cursor: pointer;
   color: var(--text-muted); border: 1px solid transparent;
-  border-bottom: none; transition: all .12s;
+  transition: all .12s;
   text-decoration: none; user-select: none;
 }
 .main-tab:hover { color: var(--text-primary); background: var(--bg-hover); }
 .main-tab.active {
-  color: var(--accent); background: var(--bg-secondary);
-  border-color: var(--border);
+  color: var(--accent); background: var(--accent-light);
+  border-color: rgba(99,102,241,0.15); font-weight: 600;
 }
 
 .main-content {
@@ -334,16 +336,19 @@ body {
 .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
 .chat-bubble {
-  max-width: 82%; padding: 10px 14px;
-  border-radius: 10px; font-size: 13px; line-height: 1.5;
+  max-width: 82%; padding: 12px 16px;
+  border-radius: 14px; font-size: 13px; line-height: 1.6;
+  box-shadow: var(--shadow);
 }
 .chat-bubble.user {
   align-self: flex-end;
-  background: var(--accent); color: #fff;
+  background: var(--grad); color: #fff;
+  border-top-right-radius: 4px;
 }
 .chat-bubble.assistant {
   align-self: flex-start;
   background: var(--bg-card); border: 1px solid var(--border);
+  border-top-left-radius: 4px;
 }
 .chat-bubble.system {
   align-self: center; background: var(--bg-hover);
@@ -401,8 +406,11 @@ body {
 .card {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 24px; margin-bottom: 16px;
+  box-shadow: var(--shadow); backdrop-filter: blur(10px);
+  transition: box-shadow .2s;
 }
-.card-title { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+.card:hover { box-shadow: var(--shadow-hover); }
+.card-title { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
 
 /* Buttons */
 .btn {
@@ -411,8 +419,8 @@ body {
   font-size: 13px; font-weight: 500; cursor: pointer;
   transition: all .12s; text-decoration: none;
 }
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary { background: var(--grad); color: #fff; box-shadow: 0 6px 16px rgba(99,102,241,0.3); }
+.btn-primary:hover { background: var(--grad); filter: brightness(1.05); box-shadow: 0 8px 20px rgba(99,102,241,0.4); }
 .btn-secondary { background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border); }
 .btn-secondary:hover { border-color: var(--accent); }
 .btn-success { background: var(--green); color: #fff; }

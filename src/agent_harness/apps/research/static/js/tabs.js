@@ -71,11 +71,11 @@ function renderLogin() {
   document.title = '灵枢 — 登录';
   document.getElementById('splash').classList.add('hidden');
   document.getElementById('app').innerHTML = `
-    <div class="container" style="max-width:420px;margin-top:100px">
-      <div class="card text-center" style="padding:48px">
-        <div style="font-size:48px;margin-bottom:8px">⚡</div>
-        <h2 style="margin-bottom:4px">灵枢</h2>
-        <div style="color:var(--accent);font-size:13px;margin-bottom:24px">LingShu Agent · AI 调研助手</div>
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(800px 600px at 20% 10%, rgba(99,102,241,0.15), transparent), radial-gradient(700px 500px at 85% 90%, rgba(139,92,246,0.12), transparent), var(--bg-secondary)">
+      <div class="card text-center" style="padding:52px 48px;width:400px;border-radius:28px">
+        <div style="width:64px;height:64px;margin:0 auto 18px;border-radius:20px;background:var(--grad);display:flex;align-items:center;justify-content:center;font-size:30px;color:#fff;box-shadow:0 10px 24px rgba(99,102,241,0.4)">⚡</div>
+        <h2 style="margin-bottom:4px;font-size:24px;letter-spacing:0.5px">灵枢</h2>
+        <div style="color:var(--text-secondary);font-size:12.5px;margin-bottom:28px;letter-spacing:0.4px">LingShu Agent · AI 调研助手</div>
         <div id="login-error" class="text-sm text-left" style="color:var(--danger);margin-bottom:12px;display:none"></div>
         <div class="form-group text-left">
           <label class="form-label">用户名</label>
@@ -87,7 +87,7 @@ function renderLogin() {
           <input class="form-input" id="login-password" type="password" placeholder="••••••" autocomplete="current-password"
             onkeydown="if(event.key==='Enter') doLogin()">
         </div>
-        <button class="btn btn-primary" onclick="doLogin()" id="login-btn" style="width:100%;font-size:16px;padding:14px">
+        <button class="btn btn-primary" onclick="doLogin()" id="login-btn" style="width:100%;font-size:16px;padding:14px;border-radius:12px">
           登录
         </button>
       </div>

@@ -20,9 +20,9 @@
 ## 🖥️ 效果
 
 <p align="center">
-  <img src="docs/screenshots/lingShu-dashboard.png" alt="灵枢主界面" width="700">
+  <img src="docs/screenshots/lingShu-orchestrate.png" alt="灵枢 Agent 编排拓扑界面" width="700">
   <br>
-  <em>搜索→分析→报告全链路，多 Agent 并行执行</em>
+  <em>Agent 编排拓扑（Supervisor-Worker · LangGraph 状态机 · 实时工具注册表）</em>
 </p>
 
 ---
@@ -107,8 +107,8 @@ agent-harness serve
 | **全链路自动化** | 搜索 → 分析 → 排版精美的 HTML 报告（A4 打印优化），一条指令完成 |
 | **OpenAI 兼容 API** | `/v1/chat/completions` + `/v1/models`，支持 SSE 流式 |
 | **三模型群回退** | 本地 llama.cpp → WSL Ollama → DeepSeek Flash API 自动降级 |
-| **40 个工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类（实测注册数） |
-| **防复现知识管道** | 把高频技术/求职知识沉淀为结构化规则库（32 条）· 中文 2-gram 检索 · 每日笔记自动抽候选 · 28 测试通过 |
+| **39 个工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类（实测注册数） |
+| **防复现知识管道** | 把高频技术/求职知识沉淀为结构化规则库（35 条）· 中文 2-gram 检索 · 每日笔记自动抽候选 · 38 测试通过 |
 | **三重熔断** | Token 预算 / 超时 / 无进展 自动熔断保护 |
 | **RAG 知识库** | 上传 PDF/DOCX/TXT → 向量搜索 + BM25 关键词降级 |
 | **JWT 认证** | Access+Refresh 双 token + RBAC 权限 + 审计日志 |
@@ -154,7 +154,7 @@ src/agent_harness/
 └── api_fastapi.py               # OpenAI 兼容 API 入口
 ```
 
-> 另有独立 Demo: [cs-agent-demo](https://github.com/kisaragiy/cs-agent-demo) — LLM 驱动客服系统（基于 lingShu-core）
+> 灵枢的 core 层解耦场景，apps/ 下已有智能客服、知识库问答、调研助手、模板四个独立场景。
 
 ---
 
@@ -178,7 +178,7 @@ agent-harness eval          # 运行回归测试
 
 覆盖：搜索、RAG、代码执行、桌面操作、多轮对话、客服场景等。
 
-> 项目共有 163 个测试用例通过（`pytest tests/ -q`，实测 163 passed / 8 failed / 2 skipped），覆盖工具链路、鉴权、安全护栏、RAG、成本控制、推理缓存等模块。8 个失败均为环境依赖：客服流式用例需本地起 `:8788` 服务，llm_cache 用例需本地 llama.cpp 跑在 `:8080`——非代码缺陷。测试数量以仓库实测为准。
+> 项目共有 175 个测试用例通过（`pytest tests/ -q`，实测 175 passed / 8 failed / 2 skipped），覆盖工具链路、鉴权、安全护栏、RAG、成本控制、推理缓存等模块。8 个失败均为环境依赖：客服流式用例需本地起 `:8788` 服务，llm_cache 用例需本地 llama.cpp 跑在 `:8080`——非代码缺陷。测试数量以仓库实测为准。
 
 ---
 
