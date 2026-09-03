@@ -229,3 +229,32 @@ class TestCallToolIntegration:
         r = call_tool("code_execute", code="print(1+1)", _source="harness")
         # 工具本身能跑（沙箱），只验证不被 risk 拦截
         assert "需要确认" not in (r.get("error") or "")
+
+
+# ─── fail-closed: 护栏模块不可用不得静默裸奔（Day 5 硬化） ───
+
+class TestFailClosed:
+    """护栏加载失败时必须 fail-closed，绝不静默放行危险操作。"""
+
+    def test_safety_unavailable_refuses_irreversible(self, monkeypatch):
+        import sys
+        monkeypatch.setitem(sys.modules, "agent_harness.core.safety", None)
+        from agent_harness.core.tools.registry import call_tool
+        r = call_tool("code_execute", code="print(1)", _source="harness")
+        assert not r["success"]
+        assert "安全护栏不可用" in r["error"]
+
+    def test_safety_unavailable_reversible_logs_but_allows(self, monkeypatch, caplog):
+        import sys
+        monkeypatch.setitem(sys.modules, "agent_harness.core.safety", None)
+        from agent_harness.core.tools.registry import call_tool
+        r = call_tool("datetime", _source="api")
+        assert r["success"]  # 可逆工具不被卡死
+        assert any("护栏失效" in m for m in caplog.messages)
+
+    def test_permission_unavailable_fails_closed(self, monkeypatch):
+        import sys
+        monkeypatch.setitem(sys.modules, "agent_harness.core.tools.permission", None)
+        from agent_harness.core.tools.registry import call_tool
+        with pytest.raises(RuntimeError, match="fail-closed"):
+            call_tool("datetime", _source="api")

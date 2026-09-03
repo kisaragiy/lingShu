@@ -186,7 +186,8 @@ v0.28  **安全护栏（WorkBuddy P0 移植）**:
          ├── 删除保护(文件走回收站 ~/.agent-harness/trash/)
          └── API: GET/POST /v1/safety/mode, POST /v1/safety/confirm
 v0.75.1 三重熔断接线硬化 — LLM token 总账(三调用点)喂熔断器 + route 熔断短路 finalize(运行中能拦住) + retry 从孤儿变实装 + graph.py 补熔断器初始化 + 9 测试证明真触发
---- 以上为当前已发布 (v0.75.1) ---
+v0.75.2 安全护栏 fail-closed — registry 两处 ImportError 不再静默裸奔：权限模块坏→抛错拒绝；safety 坏→不可逆拒+CRITICAL 日志；+3 测试(共30)
+--- 以上为当前已发布 (v0.75.2) ---
 
 版本节奏（慢，参考群星 DLC 式）:
   v0.19.1  → 小修补

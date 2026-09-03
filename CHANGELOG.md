@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.75.2 — 2026-09-04
+
+### Fixed — 安全护栏 fail-closed（Day 5 硬化）
+- 🔒 registry.py 两处 ImportError 从 fail-open（静默无护栏）改 fail-closed：权限模块不可用 → 抛错拒绝；safety 模块不可用 → 不可逆操作直接拒绝 + CRITICAL 日志（可逆操作警告放行防卡死）
+- 🧪 新增 3 测试证明 fail-closed：safety 不可用拒 irreversible / 可逆仅告警 / permission 不可用抛错（sys.modules=None 模拟导入失败）
+- 修正：test_safety.py 实为 27 测试（此前误判 0），本版 +3 = 30
+
 ## v0.75.1 — 2026-09-04
 
 ### Fixed — 三重熔断接线（Day 3-4 硬化）

@@ -95,9 +95,19 @@ def call_tool(name: str, **kwargs) -> dict:
         from .permission import check_permission, log_audit
         from .tool_config import is_tool_enabled
     except ImportError:
-        def check_permission(p, source="harness", auto_confirm=True): return True
-        def log_audit(n, s, k, result="", duration_ms=0): pass
-        def is_tool_enabled(n): return True
+        # fail-closed：护栏模块不可用绝不静默放行——权限检查降级为抛错拒绝
+        import logging
+        logging.getLogger(__name__).critical(
+            "权限模块不可用——按 fail-closed 拒绝调用（护栏失效不可静默降级）")
+
+        def check_permission(_name, source="harness", auto_confirm=True):  # noqa: F811
+            raise RuntimeError("权限模块不可用——已按 fail-closed 拒绝调用")
+
+        def log_audit(n, s, k, result="", duration_ms=0):  # noqa: F811
+            pass
+
+        def is_tool_enabled(n):  # noqa: F811
+            return True
 
     # 开关检查：禁用的工具直接拒绝
     if not is_tool_enabled(name):
@@ -136,7 +146,16 @@ def call_tool(name: str, **kwargs) -> dict:
                          "risk": op_check.get("risk", "")},
             }
     except ImportError:
-        pass  # safety 模块不可用时降级为无护栏（向后兼容）
+        # fail-closed：护栏不可用时不可逆操作直接拒绝（不再静默裸奔）
+        import logging
+        logging.getLogger(__name__).critical(
+            "safety 模块不可用——护栏失效，不可逆操作按 fail-closed 拒绝")
+        if priv == "irreversible":
+            return {
+                "success": False,
+                "error": "[安全护栏不可用] 已拒绝不可逆操作（fail-closed）",
+                "data": None,
+            }
 
     # 记录 irreversible 审计日志
     if priv == "irreversible":
