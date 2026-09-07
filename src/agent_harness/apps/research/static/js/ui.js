@@ -81,6 +81,7 @@ async function init() {
   // Check first-boot (admin not created yet)
   if (window.__NEEDS_ADMIN__) {
     renderSetupAdmin();
+    setTimeout(() => document.getElementById('splash').classList.add('hidden'), 50);
     return;
   }
 
