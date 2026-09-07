@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.75.3 — 2026-09-07
+
+### Fixed — Supervisor-Worker 架构加固（Cognition P1/P2 对照，Day 审查）
+- 🧭 replan 上下文含失败原因：worker errors + 调度级 errors 全进 replan 决策（原只见 300 字输出摘要 → 会重派同一失败任务）；部分失败 worker 提示"只补缺失勿重复"
+- ⚠️ worker 汇报反映真实完成度：_failed_step_summary 统计 validation 失败步骤，synthesize 强制开头声明失败/跳过项（原静默跳过失败步骤仍报成功）
+- 🛡️ 副作用 Worker 串行化：analyze/execute 声明 side_effect，多个副作用 Worker 同时调度时只保留 1 个并行、其余串行（防文件系统/桌面/ComfyUI 队列冲突）
+- 🔍 judge 上下文失败时附原始工具证据：collect 判定不再只依赖 worker 自报总结（self-report 核对）
+- 🧪 新增 8 测试（tests/test_arch_cognition.py），全量 183 passed / 8 failed(环境依赖) / 2 skipped 零回归
+
 ## v0.75.2 — 2026-09-04
 
 ### Fixed — 安全护栏 fail-closed（Day 5 硬化）

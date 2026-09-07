@@ -97,6 +97,21 @@ def clear_progress_queue():
 
 # ─── Dispatch: run workers in parallel ───
 
+def _partition_workers(workers: list, capabilities: dict) -> tuple:
+    """Split workers into (safe, side_effect). Side-effect workers conflict with
+    each other (file system / desktop / ComfyUI queue) — Cognition P2 fix:
+    at most one side-effect worker may run in the parallel batch; the rest
+    must run serially. Safe (read-only) workers may parallel with one risky.
+    """
+    safe, risky = [], []
+    for w in workers:
+        if capabilities.get(w, {}).get("side_effect"):
+            risky.append(w)
+        else:
+            safe.append(w)
+    return safe, risky
+
+
 def supervisor_dispatch(state: SupervisorState) -> dict:
     """Fan-out tasks to workers, running them in parallel."""
     workers_assigned = state.get("workers_assigned", [])
@@ -119,7 +134,23 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
             "content": f"🔀 分配 {len(workers_assigned)} 个 Worker: {', '.join(workers_assigned)}\n"
         })
 
-    # Run all workers in parallel
+    # Cognition P2 fix: side-effect workers (analyze/execute share file system,
+    # desktop, ComfyUI queue) must not run in parallel with each other.
+    from ..agents.supervisor import WORKER_CAPABILITIES
+    _safe, _risky = _partition_workers(workers_assigned, WORKER_CAPABILITIES)
+    if len(_risky) > 1:
+        parallel_workers = _safe + [_risky[0]]
+        serial_workers = _risky[1:]
+        print(f"[Supervisor] 副作用 Worker 串行化: 并行 {parallel_workers}，串行 {serial_workers}")
+        if _progress_queue:
+            _progress_queue.put({
+                "type": "progress",
+                "content": f"🛡️ {len(serial_workers)} 个副作用 Worker 转串行（防并行冲突）\n"
+            })
+    else:
+        parallel_workers = workers_assigned
+        serial_workers = []
+
     results: dict[str, WorkerResult] = {}
     errors: dict[str, list[str]] = {}
 
@@ -137,9 +168,9 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
                 return result
         return run_worker(wname, task)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(workers_assigned)) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(parallel_workers)) as pool:
         futures = {}
-        for wname in workers_assigned:
+        for wname in parallel_workers:
             task = worker_tasks.get(wname, state["request"])
             print(f"  → {wname}: {task[:60]}...")
             futures[pool.submit(_run_with_trace, wname, task)] = wname
@@ -171,6 +202,27 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
                 )
                 errors[wname] = [str(e)]
                 print(f"  ❌ {wname}: {e}")
+
+    # Serial tail: remaining side-effect workers run one by one (Cognition P2)
+    for wname in serial_workers:
+        if is_cancelled():
+            print("[Supervisor] ⛔ 取消检测到，跳过串行 Worker")
+            break
+        task = worker_tasks.get(wname, state["request"])
+        print(f"  → {wname} (串行): {task[:60]}...")
+        try:
+            result = _run_with_trace(wname, task)
+            results[wname] = result
+            status = "✅" if result.get("success") else "❌"
+            print(f"  {status} {wname} (串行) ({result.get('elapsed_s', 0):.1f}s): "
+                  f"{str(result.get('output', ''))[:80]}")
+        except Exception as e:
+            results[wname] = WorkerResult(
+                worker_name=wname, success=False, output="",
+                data=None, trace_steps=[], errors=[str(e)], elapsed_s=0,
+            )
+            errors[wname] = [str(e)]
+            print(f"  ❌ {wname} (串行): {e}")
 
     # Feed circuit breaker with this round's tokens + per-worker outputs.
     cb = state.get("circuit_breaker")  # type: ignore[union-attr]
