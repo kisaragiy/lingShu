@@ -78,12 +78,13 @@ HIDDEN_IMPORTS = [
 
 # ─── Data files (static HTML/CSS/JS) ───
 DATA_FILES = []
-if STATIC.exists():
-    for f in STATIC.rglob("*"):
-        if f.is_file():
-            rel = f.relative_to(SRC / "agent_harness")
-            dest = str(rel.parent).replace("\\", "/")
-            DATA_FILES.append((str(f), "agent_harness/" + dest))
+for _static_root in (STATIC, SRC / "agent_harness" / "apps" / "research" / "static"):
+    if _static_root.exists():
+        for f in _static_root.rglob("*"):
+            if f.is_file():
+                rel = f.relative_to(SRC / "agent_harness")
+                dest = str(rel.parent).replace("\\", "/")
+                DATA_FILES.append((str(f), "agent_harness/" + dest))
 
 # ─── Exclusions ───
 EXCLUDES = [

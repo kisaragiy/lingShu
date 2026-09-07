@@ -2,7 +2,7 @@
 结构化日志 — 替代 print()。
 
 用法:
-    from agent_harness.core.logging import log
+    from agent_harness.core.log_kit import log
     log.info("generate", model="sdxl", duration=12.3, result="ok")
     log.warning("vlm_unavailable", fallback="text_only")
     log.error("comfyui_down", detail="Connection refused")

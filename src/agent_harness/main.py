@@ -75,7 +75,7 @@ async def _logging_middleware(request: Request, call_next):
     """注入 request_id 到日志上下文。"""
     import uuid
     request.state.request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())[:8]
-    from agent_harness.core.logging import get_logger
+    from agent_harness.core.log_kit import get_logger
     logger = get_logger()
     resp = await call_next(request)
     logger.info("request", method=request.method, path=request.url.path,
