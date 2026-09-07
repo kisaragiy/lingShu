@@ -17,17 +17,92 @@ WORKER_CAPABILITIES = {
     "search": {
         "description": "网页搜索、信息抓取、RAG语义检索、实时数据查询、知识问答",
         "tools": ["search", "fetch", "web_scrape", "web_browse", "rag_query", "datetime", "think"],
+        "side_effect": False,
     },
     "analyze": {
         "description": "数据分析、报告生成、内容总结、代码执行、文本处理",
         "tools": ["think", "code_execute", "summarize", "file_read", "file_write"],
+        "side_effect": True,
     },
     "execute": {
         "description": "桌面自动化、浏览器操作、ComfyUI图像生成、文件管理、应用启动",
         "tools": ["desktop_gui", "browser_automation", "app_launch", "comfyui_text2img",
-                   "comfyui_img2img", "file_write", "chat_send"],
+                  "comfyui_img2img", "file_write", "chat_send"],
+        "side_effect": True,
     },
 }
+
+
+# ─── Context builders (arch review 2026-09-07, Cognition P1) ───
+
+def _build_replan_context(worker_results: dict, worker_errors: dict,
+                          max_chars: int = 300) -> str:
+    """Build replan context that includes failure reasons, not just output summaries.
+
+    Cognition P1 fix: a replan that cannot see *why* a worker failed tends to
+    re-dispatch the same doomed task. Include errors and partial-failure marks.
+    """
+    lines = []
+    for w, r in (worker_results or {}).items():
+        if not isinstance(r, dict):
+            continue
+        ok = bool(r.get("success", False))
+        out = str(r.get("output", ""))[:max_chars]
+        lines.append(f"[{w}] {'✅成功' if ok else '❌失败'}: {out}")
+        errs = list(r.get("errors") or []) + list((worker_errors or {}).get(w, []) or [])
+        if errs:
+            lines.append(f"  └ 失败原因: {'; '.join(str(e)[:200] for e in errs[:3])}")
+        if ok and "部分步骤失败" in out:
+            lines.append(f"  └ ⚠️ {w} 汇报部分步骤失败——新一轮请只补缺失部分，勿重复已完成工作")
+    # Errors-only entries (dispatch-level failures not present in results)
+    for w, errs in (worker_errors or {}).items():
+        if w in (worker_results or {}):
+            continue
+        if errs:
+            lines.append(f"[{w}] ❌失败(调度级): {'; '.join(str(e)[:200] for e in errs[:3])}")
+    return "\n".join(lines) or "(无上一轮结果)"
+
+
+def _last_raw_evidence(data) -> str:
+    """Extract the last non-empty tool result text from worker data records."""
+    if isinstance(data, list):
+        for item in reversed(data):
+            if not isinstance(item, dict):
+                continue
+            res = item.get("result") or {}
+            if isinstance(res, dict):
+                for key in ("data", "output", "error"):
+                    val = res.get(key)
+                    if isinstance(val, str) and val.strip():
+                        return val
+                nested = res.get("data")
+                if isinstance(nested, dict):
+                    for key in ("data", "output", "result", "content"):
+                        val = nested.get(key)
+                        if isinstance(val, str) and val.strip():
+                            return val
+    return ""
+
+
+def _build_judge_context(worker_results: dict) -> str:
+    """Build judge context; append raw tool evidence for failed/partial workers.
+
+    Cognition P1 fix: judge decisions should not rest only on the worker's own
+    LLM-compressed summary (self-report). When a worker failed or reports partial
+    failure, attach a slice of its raw tool output so the judge can cross-check.
+    """
+    parts = []
+    for w, r in (worker_results or {}).items():
+        if not isinstance(r, dict):
+            continue
+        out = str(r.get("output", "无结果"))[:500]
+        parts.append(f"### {w}\n{out}")
+        flagged = (not r.get("success", True)) or ("部分步骤失败" in out)
+        if flagged:
+            raw = _last_raw_evidence(r.get("data"))
+            if raw:
+                parts.append(f"[{w} 原始证据]\n{raw[:300]}")
+    return "\n\n".join(parts)
 
 
 # ─── LLM call helper ───
@@ -257,10 +332,7 @@ def supervisor_collect(state: SupervisorState) -> dict:
 
     # If all workers succeeded, ask LLM if task is done
     if all_complete:
-        combined = "\n\n".join(
-            f"### {w}\n{r['output'][:500]}"
-            for w, r in worker_results.items()
-        )
+        combined = _build_judge_context(worker_results)
 
         system = (
             "你是一个任务验收员。根据 Worker 们返回的结果，判断原始任务是否已完成。\n"
@@ -295,13 +367,11 @@ def supervisor_replan(state: SupervisorState) -> dict:
     """If task is not done, replan for next round."""
     request = state["request"]
     worker_results = state.get("worker_results", {})
+    worker_errors = state.get("worker_errors", {})
     current_round = state.get("round", 0)
 
-    # Build context from previous results
-    context = "\n".join(
-        f"[{w}] {r.get('output', '')[:300]}"
-        for w, r in worker_results.items()
-    )
+    # Build context from previous results, including failure reasons (Cognition P1)
+    context = _build_replan_context(worker_results, worker_errors)
 
     system = (
         "上一轮 Worker 的结果不够充分，请分析缺失了什么信息，"

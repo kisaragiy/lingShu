@@ -357,6 +357,31 @@ def _worker_advance(state: WorkerState) -> dict:
 
 # ─── Worker synthesizer node ───
 
+def _failed_step_summary(results: list) -> str:
+    """Summarize validation-failed steps. Empty string when none failed.
+
+    Arch review 2026-09-07: worker success must reflect plan completion —
+    silently skipped failed steps previously let a worker report success
+    while key work was missing.
+    """
+    if not results:
+        return ""
+    failed = [r for r in results if not r.get("validation", {}).get("passed", False)]
+    if not failed:
+        return ""
+    names = []
+    for r in failed[:3]:
+        step = r.get("step")
+        if isinstance(step, dict):
+            names.append(str(step.get("name", step.get("tool", "?"))))
+        else:
+            names.append(str(step))
+    label = ", ".join(names)
+    if len(failed) > 3:
+        label += " 等"
+    return f"⚠️ 部分步骤失败 ({len(failed)}/{len(results)}): {label}"
+
+
 def _worker_synthesize(state: WorkerState) -> dict:
     """Synthesize results into a concise response for the supervisor."""
     # ─── dsh P0: phase-abort — 取消后不再调 LLM 合成 ───
@@ -372,6 +397,14 @@ def _worker_synthesize(state: WorkerState) -> dict:
         str(r["result"].get("data", ""))[:300]
         for r in successful
     )
+    failed_note = _failed_step_summary(results)
+
+    user_msg = f"子任务: {state['task']}\n执行结果: {evidence}"
+    if failed_note:
+        user_msg += (
+            f"\n\n{failed_note}\n"
+            "你的汇报开头必须说明哪些步骤失败/被跳过，不得假装全部完成。"
+        )
 
     system = (
         f"你是 {state['worker_name']} Worker。你的子任务已完成。\n"
@@ -380,7 +413,7 @@ def _worker_synthesize(state: WorkerState) -> dict:
     )
 
     output = _call_llm(
-        [{"role": "user", "content": f"子任务: {state['task']}\n执行结果: {evidence}"}],
+        [{"role": "user", "content": user_msg}],
         system_prompt=system,
     )
     # Fallback: if LLM returns empty, try direct answer
