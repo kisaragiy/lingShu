@@ -23,7 +23,7 @@
 **【红线（内部对账，不写进对外）】**
 - 对外只展示最好面；**踩坑/教训/重构/缺陷 → 口头讲**（面试是真实证据），不写 README。
 - 数字必须对上仓库：README 历史"63 测试"与实测（知识管道 38 + 项目自身 325）不符，**已修正**；"39 个工具"需核对实际注册数。
-- 实测（2026-09-11 `pytest tests/ -q`）：**325 passed / 0 failed / 2 skipped**（327 collected）。此前 15 个失败为**安全验收锁**（`test_desktop_launch_guard` 8 + `test_skill_marketplace` 7），已于同日修复（详见下方 v0.75.x）。
+- 实测（2026-10-10 `pytest tests/ -q`）：**368 passed / 0 failed / 2 skipped**（370 tests，+8 集成用例默认 deselect）。
 - 别让技术广度稀释"用 AI 解决真实问题"的浓度——主打是"这个 Agent 怎么设计、怎么保证最坏不发生"，不是"造了框架"或"写了多少行前端"。
 - **AIGC 集成** — ComfyUI API 对接、LoRA 训练、批量生图管线
 
