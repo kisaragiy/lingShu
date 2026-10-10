@@ -119,10 +119,19 @@ def _init_schema():
 
 _ROLE_VALUES = ("admin", "user")
 
+# 设备登录账号的保留用户名前缀。设备身份(mp-login)与密码身份共用 users 表，
+# 但命名空间必须隔离：密码账号一律禁止占用该前缀，设备账号一律只能存在于该前缀下，
+# 否则 mp-login 按 device_id 命中已存在密码账号(如 admin)会免密铸出该账号的 token。
+DEVICE_USERNAME_PREFIX = "mp_"
+
 
 def create_user(username: str, password: str, role: str = "user",
-                display_name: str = "") -> dict:
-    """Create a new user. Raises ValueError if username taken."""
+                display_name: str = "", *, is_device: bool = False) -> dict:
+    """Create a new user. Raises ValueError if username taken.
+
+    is_device=True 表示创建设备登录账号(mp-login)：用户名必须带 DEVICE_USERNAME_PREFIX，
+    且角色只能是 user。密码身份(is_device=False)禁止占用设备前缀命名空间。
+    """
     db = _get_db()
     if role not in _ROLE_VALUES:
         role = "user"
@@ -134,6 +143,16 @@ def create_user(username: str, password: str, role: str = "user",
         raise ValueError("密码长度至少 6 位")
     if not username.isalnum() and "_" not in username:
         raise ValueError("用户名只能包含字母、数字和下划线")
+
+    # 命名空间隔离：设备前缀是保留区，密码账号不许进、设备账号不许出、设备不许 admin
+    if username.startswith(DEVICE_USERNAME_PREFIX) and not is_device:
+        raise ValueError(
+            f"用户名不能以 '{DEVICE_USERNAME_PREFIX}' 开头（该前缀保留给设备登录账号）")
+    if is_device and not username.startswith(DEVICE_USERNAME_PREFIX):
+        raise ValueError(
+            f"设备账号用户名必须以 '{DEVICE_USERNAME_PREFIX}' 开头")
+    if is_device and role != "user":
+        raise ValueError("设备账号角色只能是 user")
 
     existing = db.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
     if existing:
@@ -331,9 +350,3 @@ def needs_initial_admin() -> bool:
     ).fetchone()
     return row["cnt"] == 0
 
-
-def ensure_first_admin(username: str = "admin", password: str = "admin123") -> dict:
-    """Create the initial admin account if none exists. For setup wizard."""
-    if not needs_initial_admin():
-        return get_user_by_username(username) or list_users()[0]
-    return create_user(username, password, role="admin", display_name="管理员")

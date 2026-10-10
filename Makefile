@@ -1,17 +1,20 @@
 # agent-harness 统一命令入口
-.PHONY: install test lint format run clean serve docs docker-up docker-down
+.PHONY: install install-prod test test-integration test-cov lint lint-fix format format-check typecheck security run serve docs clean docker-up docker-down docker-build ci help
 
-install:  ## 安装开发依赖
-	uv sync
+install:  ## 安装开发依赖（含 pytest/ruff/mypy —— 注意 dev 在 optional-dependencies，`uv sync` 装不出它们）
+	uv sync --extra dev
 
 install-prod:  ## 安装生产依赖
 	uv sync --no-dev
 
-test:  ## 运行测试
-	uv run pytest -x -q tests/ -v --tb=short
+test:  ## 运行测试（默认不跑需外部服务的集成用例）
+	uv run pytest
+
+test-integration:  ## 运行集成测试（需本地服务：cs_demo :8788 / llama.cpp :8080）
+	uv run pytest -m integration
 
 test-cov:  ## 运行测试 + 覆盖率
-	uv run pytest --cov=src/agent_harness --cov-report=term --cov-report=xml tests/
+	uv run pytest --cov=src/agent_harness --cov-report=term --cov-report=xml
 
 lint:  ## 代码质量检查
 	uv run ruff check src/
@@ -31,8 +34,8 @@ typecheck:  ## 类型检查（渐进式）
 security:  ## 安全审计
 	uv run pip-audit --strict --progress-spinner=off 2>&1 || echo "⚠️ 有已知漏洞依赖"
 
-run:  ## 启动开发服务器
-	uv run uvicorn src.agent_harness.api_fastapi:app --reload --port 8788
+run:  ## 启动开发服务器（与 README 的入口一致；api_fastapi 只是兼容壳）
+	uv run python -m agent_harness.main
 
 serve: run  ## 别名
 

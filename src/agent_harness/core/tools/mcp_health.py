@@ -2,8 +2,7 @@
 
 Industry best practice: always probe before you call. Saves tokens on dead-connection timeouts.
 """
-import json, os, socket, time
-from pathlib import Path
+import json, socket, time
 
 # Known MCP server endpoints
 MCP_SERVERS = {

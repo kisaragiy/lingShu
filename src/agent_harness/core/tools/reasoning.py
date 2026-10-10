@@ -118,7 +118,9 @@ def _tool_reflect(what_happened: str, root_cause: str, lesson: str, context: str
         from agent_harness.core.holographic import fact_store
         result = fact_store(action="add", category="general", content=entry, tags="教训,反思,方法论")
         fact_id = result.get("fact_id")
-    except Exception as e:
+    except Exception:
+        # fact_store 可选：写失败=这条教训不会落库（数据丢失路径）。
+        # 待 ADR#7 规则落地时补 logger.warning（本轮不扩大改动面）。
         pass  # fact_store may not be available
 
     # Also try to write to memory

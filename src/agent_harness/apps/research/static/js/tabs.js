@@ -14,15 +14,15 @@ function renderSetupAdmin() {
         <p class="text-muted text-sm" style="margin-bottom:24px">创建管理员账号以开始使用灵枢</p>
         <div class="form-group text-left">
           <label class="form-label">管理员用户名</label>
-          <input class="form-input" id="setup-admin-username" placeholder="admin" value="admin">
+          <input class="form-input" id="setup-admin-username" placeholder="例如 admin" autocomplete="username">
         </div>
         <div class="form-group text-left">
           <label class="form-label">密码（至少 6 位）</label>
-          <input class="form-input" id="setup-admin-password" type="password" placeholder="••••••">
+          <input class="form-input" id="setup-admin-password" type="password" placeholder="至少 6 位">
         </div>
         <div class="form-group text-left">
           <label class="form-label">确认密码</label>
-          <input class="form-input" id="setup-admin-password2" type="password" placeholder="••••••">
+          <input class="form-input" id="setup-admin-password2" type="password" placeholder="再输入一次">
         </div>
         <div id="setup-admin-error" class="text-sm text-left" style="color:var(--danger);margin-bottom:12px;display:none"></div>
         <button class="btn btn-primary" onclick="doSetupAdmin()" id="setup-admin-btn" style="width:100%;font-size:16px;padding:14px">
@@ -84,7 +84,7 @@ function renderLogin() {
         </div>
         <div class="form-group text-left">
           <label class="form-label">密码</label>
-          <input class="form-input" id="login-password" type="password" placeholder="••••••" autocomplete="current-password"
+          <input class="form-input" id="login-password" type="password" placeholder="请输入密码" autocomplete="current-password"
             onkeydown="if(event.key==='Enter') doLogin()">
         </div>
         <button class="btn btn-primary" onclick="doLogin()" id="login-btn" style="width:100%;font-size:16px;padding:14px;border-radius:12px">
@@ -664,7 +664,11 @@ async function loadReports(q) {
   const list = document.getElementById('report-list');
   if (!list) return;
   try {
-    const url = q ? '/v1/reports/search?q=' + encodeURIComponent(q) : '/v1/reports';
+    // 集合过滤（REST 集合惯例）：静态子路径别名已删除，前端只走 ?q=，
+    // 并带上与浏览态一致的 limit/offset，避免"搜索后分页乱"。
+    const url = q
+      ? '/v1/reports?q=' + encodeURIComponent(q) + '&limit=50&offset=0'
+      : '/v1/reports?limit=50&offset=0';
     const data = await API.get(url);
     if (!data.reports || !data.reports.length) {
       list.innerHTML = '<div class="text-center text-muted" style="padding:20px">暂无报告。在「💬 对话」中聊天后保存即可。</div>';

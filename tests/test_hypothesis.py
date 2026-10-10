@@ -84,3 +84,33 @@ def test_protobuf_string_roundtrip(text):
         isinstance(f.get("sample"), str) and text[:10] in f["sample"]
         for f in result["fields"]
     ), f"string '{text}' not recovered in {result}"
+
+
+# ─── 去重键的语义不变量（@bughunter 2026-09-10）───
+# 幂等只是**必要**条件；真正的不变量是"同页带不带追踪参数必须算出同一个键"。
+# 首版实现把分隔符 `?` 与参数一起剥掉、留下 `&id=1`（`re.sub(r"\?&","?")` 修不到这种形状）
+# → 搜索页返回的"utm 在前、真参数在后"形状会算出两个键 → 去重/缓存失效。
+TRACKING_PARAMS = [
+    "utm_source=tw", "utm_medium=social", "utm_campaign=x",
+    "fbclid=Zz", "gclid=Yy", "ref=abc",
+]
+
+
+@given(
+    path=st.from_regex(r"[a-zA-Z0-9_\-]{1,12}(?:/[a-zA-Z0-9_\-]{1,12}){0,2}", fullmatch=True),
+    trackers=st.lists(st.sampled_from(TRACKING_PARAMS), min_size=1, max_size=3, unique=True),
+)
+def test_tracking_params_do_not_change_dedup_key(path, trackers):
+    """等价类断言：`?id=1` 与 `?<追踪参数…>&id=1`（参数在首/尾两种位置）必须归一化成同一个键。"""
+    from agent_harness.core.tools.web import _normalize_url
+
+    clean = f"https://example.com/{path}?id=1"
+    key_clean = _normalize_url(clean)
+    for params in (trackers + ["id=1"], ["id=1"] + trackers):
+        dirty = f"https://example.com/{path}?" + "&".join(params)
+        key_dirty = _normalize_url(dirty)
+        assert key_dirty == key_clean, (
+            f"带追踪参数与干净 URL 算出不同去重键：\n  {dirty!r} → {key_dirty!r}\n"
+            f"  {clean!r} → {key_clean!r}\n"
+            "（幂等是必要条件，这才是去重键的语义不变量）"
+        )

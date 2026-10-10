@@ -13,7 +13,8 @@ import time
 TOOL_REGISTRY: dict[str, dict] = {}
 
 
-def register_tool(name: str, func, schema: dict, privilege: str = "reversible"):
+def register_tool(name: str, func, schema: dict, privilege: str = "reversible",
+                  category: str = ""):
     """注册一个工具到全局注册表
 
     Args:
@@ -21,9 +22,11 @@ def register_tool(name: str, func, schema: dict, privilege: str = "reversible"):
         func: 工具函数
         schema: JSON Schema 描述
         privilege: 权限级别 (read-only / reversible / irreversible)
+        category: 工具分类（UI 分类/置顶/说明入口用；缺省空串 = 未分类，向后兼容）
     """
     privilege = privilege if privilege in ("read-only", "reversible", "irreversible") else "reversible"
-    TOOL_REGISTRY[name] = {"func": func, "schema": schema, "privilege": privilege}
+    TOOL_REGISTRY[name] = {"func": func, "schema": schema, "privilege": privilege,
+                           "category": category}
 
 
 _SCREENSHOTS_DIR = os.path.join(
@@ -77,9 +80,37 @@ def _default_post(name: str, result: dict, kwargs: dict) -> dict:
     return result
 
 
-# ─── 工具调用（含参数别名规范化）───
+# ─── 工具调用入口（指标记录层）───
 
 def call_tool(name: str, **kwargs) -> dict:
+    """调用已注册工具的公共入口 —— 记录调用结果指标后返回结果。
+
+    包装而不是侵入 `_call_tool_impl` 的 8 个 return 分支：调用指标是横切关注点，
+    在入口处解析结果即可，执行逻辑零改动。失败原因由 error 前缀归类
+    （见 `metrics.classify_tool_failure`），使「工具失败原因分布」可直接聚合。
+
+    指标采集绝不允许影响工具调用本身 —— 观测性故障不传导到业务。
+    """
+    start = time.perf_counter()
+    result = _call_tool_impl(name, **kwargs)
+    duration = time.perf_counter() - start
+    try:
+        from ..metrics import classify_tool_failure, record_tool_call
+        if isinstance(result, dict) and result.get("success"):
+            status = "success"
+        else:
+            status = classify_tool_failure(
+                result.get("error") if isinstance(result, dict) else str(result)
+            )
+        record_tool_call(name, status, duration)
+    except Exception:  # noqa: BLE001 — 观测层故障必须被吞掉，不能改业务结果
+        pass
+    return result
+
+
+# ─── 工具调用实现（含参数别名规范化）───
+
+def _call_tool_impl(name: str, **kwargs) -> dict:
     """调用已注册工具的通用入口，带参数别名规范化和权限检查"""
     if name not in TOOL_REGISTRY:
         return {"success": False, "error": f"工具不存在: {name}", "data": None}
@@ -392,8 +423,13 @@ def validate_result(tool_name: str, result: dict) -> dict:
         return {"passed": False, "reason": "返回为空", "severity": "warning"}
     if isinstance(data, str) and len(data) < 5:
         return {"passed": False, "reason": "返回内容过短", "severity": "warning"}
-    if isinstance(data, str) and ("错误" in data or "失败" in data or "[搜索失败]" in data
-                                   or "未找到" in data or "未安装" in data or "未运行" in data):
+    # 降级信号词：出现在**工具返回内容**里即说明结果无效。
+    # "不可用" 是实测补上的 —— LLM 后端不可用时 Worker 输出
+    #   "[搜索] 由于 LLM 后端不可用，搜索结果不可用"
+    # 旧关键词表只有"失败"没有"不可用"，于是被判成 severity=ok，
+    # 导致 harness_tool_results_total 把无效结果记成"结果有效"（监控在说谎）。
+    _FAILURE_MARKERS = ("错误", "失败", "[搜索失败]", "未找到", "未安装", "未运行", "不可用")
+    if isinstance(data, str) and any(m in data for m in _FAILURE_MARKERS):
         return {"passed": False, "reason": data[:100], "severity": "error"}
     if isinstance(data, list) and len(data) == 0:
         return {"passed": False, "reason": "返回空列表", "severity": "warning"}

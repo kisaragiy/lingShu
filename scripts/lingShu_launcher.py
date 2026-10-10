@@ -202,6 +202,55 @@ def show_loading_screen(port: int):
     pass
 
 
+def _ensure_llm_configured() -> None:
+    """无 LLM 配置时，后台尝试自动检测本地 Ollama（不阻塞窗口打开）。
+
+    2026-09-10 修正：此前 auto_setup 只挂在 CLI 入口（main.py），而打包版
+    的入口是本 launcher —— 结果「无 key 也能用本地模型」这条路在实现上
+    根本不存在（评审 D2）。
+    """
+    def _task():
+        try:
+            from agent_harness.core.pipeline import config_manager as cm
+            cfg = cm.load_config()
+            llm = cfg.get("llm") or {}
+            if (llm.get("api_key") or "").strip():
+                return                                   # 已有云 key
+            if (llm.get("backend") or "") == "ollama" and llm.get("api_url"):
+                return                                   # 已配本地
+            from agent_harness.auto_setup import auto_setup
+            url = auto_setup()
+            logger.info("auto_setup 结果: %s", url)
+        except Exception as e:
+            logger.warning("auto_setup 跳过: %s", e)
+    threading.Thread(target=_task, daemon=True).start()
+
+
+def _pause(msg: str) -> None:
+    """等待用户确认。打包为 GUI 程序（无控制台）时 stdin 不可用，静默跳过。"""
+    try:
+        if not sys.stdin or not sys.stdin.isatty():
+            return
+        input(msg)
+    except (EOFError, OSError, ValueError):
+        pass
+
+
+def _fail(msg: str) -> None:
+    """致命错误提示：优先弹窗（无控制台用户唯一能看到的方式），退化到日志。"""
+    logger.error(msg)
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("灵枢启动失败", msg)
+        root.destroy()
+    except Exception:
+        print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
 # ─── Main ───
 
 def main():
@@ -214,20 +263,19 @@ def main():
     try:
         port = find_free_port()
     except RuntimeError as e:
-        logger.error("Port detection failed: %s", e)
-        input("端口不可用，按 Enter 退出...")
-        sys.exit(1)
+        _fail("端口不可用，无法启动服务。请关闭占用端口的程序后重试。\n\n详细信息：%s" % e)
 
     # 2. Start server in background
     t = threading.Thread(target=run_server, args=(port,), daemon=True)
     t.start()
 
+    # 2.5 无配置时后台自动探测本地 LLM（不阻塞窗口）
+    _ensure_llm_configured()
+
     # 3. Wait for server to be ready
     logger.info("Waiting for server...")
     if not wait_for_server(timeout=20):
-        logger.error("Server failed to start within 20 seconds")
-        input("服务启动超时，按 Enter 退出...")
-        sys.exit(1)
+        _fail("服务启动超时（20 秒内未就绪）。请查看日志文件后重试。")
 
     # 4. Open native window
     logger.info("Opening application window...")
@@ -239,7 +287,7 @@ def main():
         import webbrowser
         logger.info("Falling back to browser...")
         webbrowser.open("http://127.0.0.1:%d" % port)
-        input("按 Enter 退出...")
+        _pause("已在浏览器中打开，按 Enter 退出...")
 
     # 5. Cleanup after window closes
     stop_server()

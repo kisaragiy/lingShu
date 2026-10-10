@@ -1,8 +1,12 @@
 """Web tools — search, fetch, scrape"""
 import contextlib
 import json
+import logging
 import os
+import re
 import time
+
+logger = logging.getLogger(__name__)
 
 from ..pipeline.llm import HARNESS_DIR, _session, call_llama
 
@@ -32,23 +36,38 @@ def _pick_user_agent() -> str:
 
 
 def _normalize_url(url: str) -> str:
-    import re as _re
-    url = url.rstrip("/")
-    url = _re.sub(r"://www\.", "://", url)
-    url = _re.sub(
+    """URL 规范化（用于去重键）。
+
+    尾部清理必须是**不动点**：`rstrip("/")` 排在去 `?` 之前时，尾部的 `?` 会把 `/`
+    挡在后面 → `'000/?'` 第一次得 `'000/'`、第二次才得 `'000'`，同一 URL 两次规范化
+    结果不同（hypothesis 的 `test_normalize_url_idempotent` 2026-09-10 抓到的真实反例，
+    非本轮引入）。去重键必须幂等，故这里循环到稳定值为止。
+    """
+    url = re.sub(r"://www\.", "://", url)
+    _before_strip = url
+    url = re.sub(
         r'[?&](utm_source|utm_medium|utm_campaign|utm_term|utm_content|fbclid|gclid|ref)=[^&]+',
         "", url,
     )
-    url = _re.sub(r"\?&", "?", url)
-    url = _re.sub(r"[&?]$", "", url)
+    # 剥离时分隔符被一起吃掉：`?utm_source=tw&id=1` → `&id=1`，于是同一页面「带追踪参数」
+    # 与「干净 URL」算出**两个去重键** → 去重/缓存失效、重复抓取、多喂一段上下文
+    # （@bughunter 2026-09-10 四种位置实测）。只在**确实剥过**且 `?` 已丢失时还原首个 `&`，
+    # 这样 `#frag&x` 这类本来就没有 `?` 的串不会被误改。
+    if url != _before_strip and "?" not in url and "&" in url:
+        url = url.replace("&", "?", 1)
+    url = re.sub(r"\?&", "?", url)
+    prev = None
+    while prev != url:                      # 不动点：尾部 `?`/`&`/`/` 互相遮挡时也不留残渣
+        prev = url
+        url = url.rstrip("/")
+        url = re.sub(r"[&?]$", "", url)
     return url
 
 
 def _dedup_results(new_results: list[str], seen: set[str]) -> list[str]:
-    import re as _re
     out = []
     for r in new_results:
-        m = _re.search(r'\[([^\]]+)\]$', r)
+        m = re.search(r'\[([^\]]+)\]$', r)
         url = _normalize_url(m.group(1)) if m else r
         if url not in seen:
             seen.add(url)
@@ -102,8 +121,7 @@ def _webgate_fetch(url: str, timeout: int = 30) -> str | None:
         via = "→".join(result.get("via", []))
         level = result.get("level", "?")
         _log_search_diag(url[:60], f"wg_{level}", "ok", len(text), via)
-        import re as _re
-        return _re.sub(r"\s+", " ", text).strip()
+        return re.sub(r"\s+", " ", text).strip()
     except ImportError:
         return None
     except Exception as e:
@@ -114,17 +132,16 @@ def _webgate_fetch(url: str, timeout: int = 30) -> str | None:
 def _fetch_fallback(url: str, max_chars: int = 8000) -> str:
     """Fallback: bare requests (no anti-scraping)."""
     try:
-        import re as _re
         r = _session.get(url, timeout=15, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         })
         if r.status_code != 200:
             return f"[fetch] HTTP {r.status_code}"
         text = r.text
-        text = _re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=_re.DOTALL | _re.IGNORECASE)
-        text = _re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=_re.DOTALL | _re.IGNORECASE)
-        text = _re.sub(r"<[^>]+>", " ", text)
-        text = _re.sub(r"\s+", " ", text).strip()
+        text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
         return text[:max_chars]
     except Exception as e:
         return f"[fetch] 抓取失败: {e}"
@@ -199,7 +216,6 @@ def _tool_search(query: str, max_results: int = 5) -> list:
     # 2. DuckDuckGo
     if not all_results:
         try:
-            import re as _re
             headers = {"User-Agent": _pick_user_agent()}
             r = _session.get("https://html.duckduckgo.com/html/",
                              params={"q": query}, headers=headers, timeout=15)
@@ -212,9 +228,9 @@ def _tool_search(query: str, max_results: int = 5) -> list:
             if r.status_code == 200:
                 html = r.text
                 ddg_results: list[str] = []
-                l1 = _re.findall(
+                l1 = re.findall(
                     r'<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([^<]+)</a>', html)
-                s1 = _re.findall(r'<a class="result__snippet"[^>]*>([^<]+)</a>', html)
+                s1 = re.findall(r'<a class="result__snippet"[^>]*>([^<]+)</a>', html)
                 for i, (url, title) in enumerate(l1[:max_results]):
                     sn = s1[i] if i < len(s1) else ""
                     nu = _normalize_url(url)
@@ -222,9 +238,9 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                         seen_urls.add(nu)
                         ddg_results.append(f"{title}: {sn} [{url}]")
                 if len(ddg_results) < max_results:
-                    l2 = _re.findall(
+                    l2 = re.findall(
                         r'<a[^>]+class="result-link"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', html)
-                    s2 = _re.findall(r'<span[^>]+class="snippet-text"[^>]*>([^<]+)</span>', html)
+                    s2 = re.findall(r'<span[^>]+class="snippet-text"[^>]*>([^<]+)</span>', html)
                     for i, (url, title) in enumerate(l2[:max_results]):
                         nu = _normalize_url(url)
                         if nu not in seen_urls:
@@ -232,7 +248,7 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                             sn = s2[i] if i < len(s2) else ""
                             ddg_results.append(f"{title}: {sn} [{url}]")
                 if len(ddg_results) < max_results:
-                    l3 = _re.findall(
+                    l3 = re.findall(
                         r'<a[^>]+href="(https?://[^"]+)"[^>]*>([^<]+)</a>', html)
                     for url, title in l3[:max_results * 2]:
                         nu = _normalize_url(url)
@@ -240,10 +256,10 @@ def _tool_search(query: str, max_results: int = 5) -> list:
                             seen_urls.add(nu)
                             ddg_results.append(f"{title}: [{url}]")
                 if len(ddg_results) < max_results:
-                    divs = _re.findall(
+                    divs = re.findall(
                         r'<div[^>]*class="[^"]*result[^"]*"[^>]*>.*?</div>', html)
                     for d in divs:
-                        inner = _re.findall(r'<a[^>]+href="(https?://[^"]+)"[^>]*>([^<]+)</a>', d)
+                        inner = re.findall(r'<a[^>]+href="(https?://[^"]+)"[^>]*>([^<]+)</a>', d)
                         for url, title in inner:
                             nu = _normalize_url(url)
                             if nu not in seen_urls and "duckduckgo.com" not in url:
@@ -284,21 +300,40 @@ _QUERY_DECOMPOSE_PROMPT = """你是一个搜索策略师。用户的问题可能
 用户问题: {query}"""
 
 
+def _parse_query_array(raw: str) -> list[str]:
+    """从 LLM 输出里取**最后一个**可解析的 JSON 数组，并做**语义**校验。
+
+    两个实测过的坑（@bughunter / @testgate 2026-09-10）：
+      - 只取**第一个** `\[...\]` 片段：`抱歉，我先看[1]这段：["a","b"]` → 返回 `[1]`
+        —— 合法 JSON、内容是数字，模型会当"3 条查询"用。**比降级更坏**（降级看得见）。
+      - 只查 `isinstance(list)`：`["" , ""]`、`[1,"x",2]` 同样"成功返回垃圾"。
+    故：从后往前找，取第一个"list 且每项是非空 str"的片段；找不到返回 []（交给可观测降级）。
+    """
+    for frag in reversed(re.findall(r"\[.*?\]", raw or "", re.DOTALL)):
+        try:
+            arr = json.loads(frag)
+        except Exception:
+            continue
+        if isinstance(arr, list) and arr and all(isinstance(x, str) and x.strip() for x in arr):
+            return [x.strip() for x in arr]
+    return []
+
+
 def _tool_query_decompose(query: str) -> str:
     if not query or len(query.strip()) < 10:
         return json.dumps([query], ensure_ascii=False)
+    raw = ""
     try:
         prompt = _QUERY_DECOMPOSE_PROMPT.format(query=query[:500])
         raw, _ = call_llama([{"role": "user", "content": prompt}],
                             system_prompt="你只输出 JSON 数组，不加解释。")
-        import re as _re
-        m = _re.search(r'\[.*?\]', raw, re.DOTALL)
-        if m:
-            queries = json.loads(m.group(0))
-            if isinstance(queries, list) and len(queries) >= 1:
-                return json.dumps(queries[:5], ensure_ascii=False)
-    except Exception:
-        pass
+        queries = _parse_query_array(raw)
+        if queries:
+            return json.dumps(queries[:_QUERY_DECOMPOSE_MAX], ensure_ascii=False)
+        # 可观测降级（ADR#7）：形状合法但内容不是查询 —— 必须留痕，不能静默
+        logger.warning("query_decompose 未解析出查询数组，降级为不分解。LLM 输出前 200 字：%r", raw[:200])
+    except Exception as exc:
+        logger.warning("query_decompose 调用异常，降级为不分解：%s", exc, exc_info=True)
     return json.dumps([query], ensure_ascii=False)
 
 
@@ -331,7 +366,6 @@ def _try_playwright_fetch(url: str) -> str | None:
 
 def _tool_web_scrape(url: str, extract_links: bool = False) -> str:
     """强化版网页爬取 — webgate L0→L3 + 提取标题/正文/链接"""
-    import re as _re
     html = _webgate_fetch(url)
     if html is None:
         try:
@@ -344,17 +378,17 @@ def _tool_web_scrape(url: str, extract_links: bool = False) -> str:
         except Exception as e:
             return json.dumps({"error": str(e), "url": url}, ensure_ascii=False)
 
-    title_m = _re.search(r"<title[^>]*>(.*?)</title>", html, _re.IGNORECASE)
-    title = _re.sub(r"<[^>]+>", "", title_m.group(1)).strip() if title_m else ""
+    title_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE)
+    title = re.sub(r"<[^>]+>", "", title_m.group(1)).strip() if title_m else ""
     body = html
     for tag in ("script", "style", "nav", "footer", "header"):
-        body = _re.sub(rf"<{tag}[^>]*>.*?</{tag}>", " ", body, flags=_re.DOTALL | _re.IGNORECASE)
-    body = _re.sub(r"<[^>]+>", " ", body)
-    body = _re.sub(r"\s+", " ", body).strip()[:6000]
+        body = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", " ", body, flags=re.DOTALL | re.IGNORECASE)
+    body = re.sub(r"<[^>]+>", " ", body)
+    body = re.sub(r"\s+", " ", body).strip()[:6000]
     result = {"title": title, "body": body[:5000], "url": url}
     if extract_links:
         links = []
-        for m in _re.finditer(r'<a[^>]+href=["\']([^"\']+)["\']', html, _re.IGNORECASE):
+        for m in re.finditer(r'<a[^>]+href=["\']([^"\']+)["\']', html, re.IGNORECASE):
             href = m.group(1)
             if href.startswith("http"):
                 links.append(href)
@@ -364,7 +398,6 @@ def _tool_web_scrape(url: str, extract_links: bool = False) -> str:
 
 def _tool_agent_browser(url: str, instruction: str) -> str:
     """智能浏览器 — webgate L0→L3 + 按指令提取信息"""
-    import re as _re
     text = _webgate_fetch(url)
     if text is None:
         try:
@@ -383,9 +416,9 @@ def _tool_agent_browser(url: str, instruction: str) -> str:
         return "[browser] 抓取失败"
     try:
         for tag in ("script", "style", "nav", "footer", "header"):
-            text = _re.sub(rf"<{tag}[^>]*>.*?</{tag}>", " ", text, flags=_re.DOTALL | _re.IGNORECASE)
-        text = _re.sub(r"<[^>]+>", " ", text)
-        text = _re.sub(r"\s+", " ", text).strip()[:4000]
+            text = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()[:4000]
         prompt = f"根据指令从网页提取信息:\n指令: {instruction}\n\n{text[:4000]}\n\n只输出结果。"
         result, _ = call_llama([{"role": "user", "content": prompt}],
                                system_prompt="你是信息提取器，只输出结果。")
@@ -422,6 +455,11 @@ register_tool("agent_browser", _tool_agent_browser, {
     "description": "智能浏览器 — webgate 反爬链，按指令提取信息",
     "properties": {"url": "string", "instruction": "string"},
 }, privilege="read-only")
+# 条数上限：**这一处是实现的真源**，description 里的「3 条」是已发布给模型的契约。
+# 两者由 tests/test_web_query_decompose.py::test_registered_description_count_matches_actual_cap
+# 守死（改契约要单独提交 + 走成本决策）。
+_QUERY_DECOMPOSE_MAX = 3
+
 register_tool("query_decompose", _tool_query_decompose, {
     "description": "🔍 查询分解 — 复杂问题拆成 3 条并行搜索子查询",
     "properties": {"query": "string"},

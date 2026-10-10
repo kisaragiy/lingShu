@@ -6,13 +6,14 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.requests import ClientDisconnect
 
 from agent_harness import __version__
 from agent_harness.core.auth import auth_db as _auth_db
 from agent_harness.core.auth.api_security import validate_token
 from agent_harness.core.auth import auth_jwt as _auth_jwt
 from agent_harness.core.config import require_config
-from agent_harness.core.exceptions import register_error_handlers, AppError
+from agent_harness.core.exceptions import register_error_handlers
 from agent_harness.core.health import run_health_checks, get_cached_report
 from agent_harness.core.metrics import metrics_middleware, metrics_endpoint
 from agent_harness.core.tasks import register_task_routes
@@ -37,6 +38,15 @@ register_error_handlers(app)
 async def _startup_health():
     report = run_health_checks()
     logger = app.state.logger if hasattr(app.state, "logger") else None
+    # 启动自检同时落日志（ADR#7：失败路径必须有可观测出口；此前只有一个取了不用的
+    # logger 绑定 + 纯 print）。日志失败绝不能影响启动，故单独兜住。
+    _log = getattr(logger, "info", None)
+    if callable(_log):
+        try:
+            _log("启动自检 v%s: %s", __version__,
+                 "; ".join(f"{c.name}={c.status}" for c in report.checks))
+        except Exception:
+            pass
     print(f"\n{'='*48}")
     print(f"灵枢 v{__version__} 启动自检")
     print(f"{'='*48}")
@@ -65,10 +75,8 @@ async def metrics():
     return await metrics_endpoint()
 
 # ── 注册中间件 ──
-
-@app.middleware("http")
-async def _metrics_middleware_wrapper(request: Request, call_next):
-    return await metrics_middleware(request, call_next)
+# ⚠️ Starlette 的 user_middleware 是 insert(0)：**后注册者在外层**。
+# 中间件的相对顺序 = 观测覆盖面，所以指标中间件在文件末尾才注册（必须最外层）。
 
 @app.middleware("http")
 async def _logging_middleware(request: Request, call_next):
@@ -139,7 +147,8 @@ async def _api_auth_middleware(request: Request, call_next):
                 request.state.user = user
                 return await call_next(request)
 
-    api_key = request.headers.get("x-api-key", "") or request.query_params.get("api_token", "")
+    # 只认 header：URL query 会进 access log / 浏览器历史 / Referer / 代理日志
+    api_key = request.headers.get("x-api-key", "")
     if api_key and validate_token(api_key, _API_TOKEN):
         request.state.user = {
             "id": "__api_key__",
@@ -177,6 +186,27 @@ async def _security_headers_middleware(request: Request, call_next):
     )
     response.headers["Content-Security-Policy"] = csp
     return response
+
+
+# ─── 指标中间件（必须最后注册 = 最外层）───
+# Starlette 后注册者在外层：认证/限流中间件会短路返回 401/429，若指标中间件处在
+# 它们内侧，这些响应永远进不了指标——而 401/429 突增恰恰是安全监控最该报警的信号。
+# 放在所有中间件之后，确保它包住全部短路路径与未捕获异常（5xx）。
+
+@app.middleware("http")
+async def _metrics_middleware_wrapper(request: Request, call_next):
+    return await metrics_middleware(request, call_next)
+
+
+# ─── ClientDisconnect → 499（不是服务端故障）───
+# 客户端在请求体读完之前断开（用户关页面、客户端超时）是**正常现象**。默认它会从
+# `await request.json()` 冒成未捕获异常 → 500，把错误率打脏：真出服务端故障时，
+# 告警阈值会被这些噪声顶掉。实测：50 并发压测下 3 个 500 全部源于此。
+# 499 = nginx 惯例的 client-closed-request；`status=~"5.."` 不会匹配它。
+
+@app.exception_handler(ClientDisconnect)
+async def _client_disconnect_handler(request: Request, exc: Exception):
+    return JSONResponse({"error": "客户端已断开连接"}, status_code=499)
 
 
 # ─── Static files (灵枢 frontend) ───
@@ -255,6 +285,12 @@ async def ws_health(websocket: WebSocket):
 
 
 # ─── Include both app routers ───
+# 跨 app 能力由 composition root 注入（ADR#9 rule2：apps 之间不得互相 import）
+from agent_harness.apps.cs_demo.agents.cs_agent import run_cs_agent as _cs_demo_fallback  # noqa: E402
+from agent_harness.apps.research.api import set_demo_chat_fallback as _set_demo_fallback  # noqa: E402
+
+_set_demo_fallback(_cs_demo_fallback)
+
 app.include_router(research_router)
 app.include_router(cs_demo_router)
 app.include_router(knowledge_qa_router)

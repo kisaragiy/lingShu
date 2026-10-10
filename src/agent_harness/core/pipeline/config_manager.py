@@ -49,6 +49,23 @@ def _ensure_dir():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def redact_config(cfg: dict) -> dict:
+    """返回脱敏副本：api_key 绝不明文外泄，只暴露「是否已配置」。
+
+    2026-09-10 评审发现：GET /v1/setup/config 曾在认证豁免名单里且原样返回
+    llm.api_key —— 本机任意进程一条 curl 即可读到云 key（.exe 解压同理）。
+    预览片段（前4后4）也会泄掉一半密钥，故只暴露布尔值。
+    """
+    import copy
+    out = copy.deepcopy(cfg)
+    llm = out.get("llm")
+    if isinstance(llm, dict):
+        key = llm.get("api_key") or ""
+        llm["api_key"] = ""
+        llm["has_api_key"] = bool(key)
+    return out
+
+
 def load_config() -> dict:
     """Load config from disk, merging with defaults."""
     _ensure_dir()
@@ -103,7 +120,6 @@ def find_llama_cpp() -> str | None:
     """Detect llama.cpp directory."""
     candidates = [
         r"C:\llama\llama.cpp",
-        r"C:\Users\zwq\Downloads\llama.cpp",
         os.path.expanduser("~/Downloads/llama.cpp"),
         os.path.expanduser("~/llama.cpp"),
     ]
@@ -163,9 +179,9 @@ def check_llm_backend(backend: str = "auto") -> dict:
     }
 
     results["ollama"] = {
-        "available": check_port(11434, "172.18.9.126"),
+        "available": check_port(11434),
         "port": 11434,
-        "endpoint": "http://172.18.9.126:11434/api/generate",
+        "endpoint": "http://127.0.0.1:11434/api/generate",
         "label": "Ollama (WSL)",
     }
 
@@ -315,9 +331,13 @@ def fix_action(action: str) -> dict:
 
 def _fix_start_model_proxy() -> dict:
     """Start model_proxy.py as a background process."""
+    # 打包态没有 Python 解释器：sys.executable 是 lingShu.exe，
+    # 用它去启动 .py 脚本只会再拉起一个灵枢实例。直接拒绝，让用户手动启动。
+    if getattr(sys, "frozen", False):
+        return {"success": False,
+                "error": "打包版不支持自动拉起 model_proxy，请手动启动后重试"}
     candidates = [
         os.path.expanduser("~/Downloads/llama.cpp/model_proxy.py"),
-        r"C:\Users\zwq\Downloads\llama.cpp\model_proxy.py",
     ]
     for path in candidates:
         if os.path.isfile(path):
@@ -342,7 +362,7 @@ def _fix_start_model_proxy() -> dict:
 
 def _fix_start_ollama() -> dict:
     """Start Ollama via WSL."""
-    if check_port(11434, "172.18.9.126"):
+    if check_port(11434):
         return {"success": True, "message": "Ollama 已在运行"}
     try:
         subprocess.run(
@@ -352,7 +372,7 @@ def _fix_start_ollama() -> dict:
         )
         for _ in range(10):
             time.sleep(2)
-            if check_port(11434, "172.18.9.126"):
+            if check_port(11434):
                 return {"success": True, "message": "Ollama 已启动"}
         return {"success": False, "error": "Ollama 启动超时"}
     except Exception as e:

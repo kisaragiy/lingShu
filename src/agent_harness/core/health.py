@@ -11,8 +11,7 @@ import os
 import shutil
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 import requests
 
@@ -131,7 +130,7 @@ def check_comfyui() -> CheckResult:
 @check(name="ollama")
 def check_ollama() -> CheckResult:
     """Ollama 模型服务"""
-    url = os.environ.get("OLLAMA_URL", "http://172.22.175.253:11434")
+    url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
     t0 = time.time()
     try:
         r = requests.get(f"{url}/api/tags", timeout=3)
@@ -150,13 +149,13 @@ def check_ollama() -> CheckResult:
 @check(name="vlm")
 def check_vlm() -> CheckResult:
     """VLM 视觉模型 (qwen3-vl:8b)"""
-    url = os.environ.get("OLLAMA_URL", "http://172.22.175.253:11434")
+    url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
     t0 = time.time()
     try:
         r = requests.get(f"{url}/api/tags", timeout=3)
         ms = (time.time() - t0) * 1000
         if r.status_code != 200:
-            return CheckResult("vlm", "degraded", f"Ollama 不可用，无法检测 VLM", latency_ms=ms)
+            return CheckResult("vlm", "degraded", "Ollama 不可用，无法检测 VLM", latency_ms=ms)
         models = [m["name"] for m in r.json().get("models", [])]
         vl_models = [m for m in models if "vl" in m.lower()]
         if vl_models:

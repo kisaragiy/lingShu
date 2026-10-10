@@ -4,20 +4,30 @@ Takes raw chat analysis content, re-processes it through the multi-agent
 to add source citations, proper formatting, and generates a standalone HTML file.
 """
 
-import os
+import html as _html
+import logging
 import re
 import time
 from datetime import datetime
 from pathlib import Path
 
-REPORTS_DIR = Path(os.environ.get(
-    "HARNESS_REPORTS_DIR",
-    os.path.expanduser("~/.agent-harness/reports"),
-))
+logger = logging.getLogger(__name__)
+
+
+def _reports_dir() -> Path:
+    """报告目录的**唯一来源** = report_store.REPORTS_DIR（调用时解析，不再各自 export 常量）。
+
+    此前本模块自带一份同默认值的 import-time 常量，与 store 的那份独立绑定：
+    任何只重定向其一的场景（测试 fixture、按 env 定制部署）都会变成
+    "写进 A 目录、按 B 目录读" —— 报告存了打不开，索引里留下悬空条目。
+    单测里最直观：只 patch store 一处，.html 仍会落进真实 ~/.agent-harness。
+    """
+    from agent_harness.apps.research.pipeline.report_store import REPORTS_DIR as _rd
+    return _rd
 
 
 def _ensure():
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    _reports_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _extract_sources_from_text(text: str) -> list[dict]:
@@ -104,6 +114,36 @@ def _link_sources(text: str, sources: list[dict]) -> str:
     return text
 
 
+def _esc(value) -> str:
+    """转义一切用户/模型可控文本。**必须**在任何 HTML 拼装之前调用。
+
+    存储型 XSS 成因：`_markdown_to_html` 原样插值 content，而 .html 报告经
+    `GET /v1/reports/{id}` 以 text/html 同源返回、CSP 又放行 inline →
+    裸 `<script>` / `onerror=` 可读走 localStorage 的 JWT。
+    """
+    return _html.escape("" if value is None else str(value), quote=True)
+
+
+_ALLOWED_URL_SCHEMES = ("http://", "https://", "mailto:")
+
+
+def _safe_href(url: str) -> str:
+    """URL 协议允许列表：只放行 http(s)/mailto/站内相对路径，其余返回 ""。
+
+    `html.escape` 挡的是**标记注入**，对**协议语义**无效——`javascript:` 不是标记，
+    但它会进 href 并在同源点击时执行（读走 localStorage 的 JWT）。sources[].url
+    由请求体直通（api.py:683→685），故必须在渲染出口这**单点**判定。
+    """
+    u = "" if url is None else str(url)
+    # 先剥掉控制字符/空白夹带（`java\tscript:`、`jav\nascript:`）
+    compact = re.sub(r"[\x00-\x20\x7f]", "", u).strip().lower()
+    if not compact:
+        return ""
+    if compact.startswith(_ALLOWED_URL_SCHEMES) or compact.startswith(("#", "/")):
+        return u.strip()
+    return ""
+
+
 def generate_report_html(title: str, content: str, sources: list[dict] = None, tags: list[str] = None) -> str:
     """Generate a professional HTML report with embedded CSS and source citations.
 
@@ -119,6 +159,9 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
     now = datetime.now().strftime("%Y年%m月%d日")
     sources = sources or []
     tags = tags or []
+    # ─── 安全：入参（title/content/sources/tags）全部不可信，先转义再拼装 ───
+    title = _esc(title)
+    tags = [_esc(t) for t in tags]
 
     # Step 1: Convert [url] patterns to [N] numbered citations
     # Also builds a source_map and a "## 参考来源" section to append
@@ -138,8 +181,12 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
     if not sources:
         sources = _extract_sources_from_text(formatted_content)
 
+    # ─── 安全：唯一转义点，且在 _link_sources 之前 ───
+    # <sup class="cite"> 由 _link_sources 在本行之后注入（可信），与用户文本互不污染。
+    escaped_content = _esc(formatted_content)
+
     # Link source markers in text
-    linked_content = _link_sources(formatted_content, sources)
+    linked_content = _link_sources(escaped_content, sources)
 
     # Format the main content (simple markdown → HTML conversion)
     body_html = _markdown_to_html(linked_content)
@@ -147,7 +194,7 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
     # ─── Build table of contents ───
     toc_items = []
     seen_headers = set()
-    for line in content.split("\n"):
+    for line in escaped_content.split("\n"):
         line_s = line.strip()
         if line_s.startswith("## ") or line_s.startswith("### "):
             h_text = line_s.lstrip("#").strip()
@@ -188,14 +235,22 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
     if sources:
         items = ""
         for i, s in enumerate(sources, 1):
-            url = s.get("url", "")
-            title_text = s.get("title", url)
-            source_type = s.get("type", "web")
-            type_icon = {"news": "📰", "paper": "📄", "official": "🏛️", "web": "🌐"}.get(source_type, "🌐")
-            access_date = s.get("access_date", _now_str)
+            raw_url = "" if s.get("url") is None else str(s.get("url"))
+            safe_url = _safe_href(raw_url)
+            url = _esc(safe_url)            # 属性位：连引号一起转义
+            title_text = _esc(s.get("title") or raw_url)
+            source_type_raw = s.get("type", "web")
+            source_type = _esc(source_type_raw)
+            type_icon = {"news": "📰", "paper": "📄", "official": "🏛️", "web": "🌐"}.get(source_type_raw, "🌐")
+            access_date = _esc(s.get("access_date", _now_str))
             items += f'<li id="source-{i}" class="source-item">'
             items += f'<span class="source-type">{type_icon}</span> '
-            items += f'<a href="{url}" target="_blank" rel="noopener">{title_text}</a>'
+            if url:
+                items += f'<a href="{url}" target="_blank" rel="noopener noreferrer">{title_text}</a>'
+            else:
+                # 非允许协议降级为纯文本：绝不进 href（点击不执行）
+                items += f'<span class="source-plain">{title_text}</span>'
+                items += '<span class="source-meta">（链接已禁用：非 http(s) 协议）</span> '
             items += f'<span class="source-meta"> · {source_type} · {access_date}</span>'
             items += '</li>'
         sources_html = f"""
@@ -339,7 +394,7 @@ def save_formal_report(title: str, html: str, tags: list[str] = None, source_ses
     timestamp = int(time.time())
     report_id = f"formal_{timestamp}_{_slugify(title)[:20]}"
     filename = f"{report_id}.html"
-    filepath = REPORTS_DIR / filename
+    filepath = _reports_dir() / filename
 
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(html)
@@ -355,6 +410,23 @@ def save_formal_report(title: str, html: str, tags: list[str] = None, source_ses
         "format": "html",
         "chars": len(html),
     }
+    # 入索引：正式报告此前只在磁盘上有文件、无索引条目 → 无 owner 记录，
+    # 只能靠直接读目录的路径提供（IDOR 载体）。登记后统一经 store 的
+    # get_report(owner_id=...) 访问，所有权在校验点唯一。
+    try:
+        from agent_harness.apps.research.pipeline.report_store import get_report, index_report
+        index_report(meta)
+        # 回查：index_report 不抛但也没写进去（静默失败）同样要可见
+        if get_report(report_id) is None:
+            raise RuntimeError("index_report 未抛异常，但索引中查不到该条目")
+    except Exception as exc:                     # noqa: BLE001 — 失败必须可见，不是吞掉
+        # 登记失败的症状正是"文件在磁盘上、UI 里全不可见"，且无 owner 记录
+        # → 又变回 IDOR 载体。fail-loud：结构化字段 + ERROR 日志，两条通道都留。
+        meta["index_error"] = f"{type(exc).__name__}: {exc}"
+        logger.error(
+            "报告登记入索引失败 id=%s（文件已写盘但 UI 不可见）: %s",
+            report_id, exc, exc_info=True,
+        )
     return meta
 
 

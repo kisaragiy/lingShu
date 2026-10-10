@@ -13,17 +13,17 @@
 
 **【真实落点 = 防复现知识管道】**（主叙事，面试讲透，有真据）
 - 解决的真实问题：`~/knowledge/daily/` 高产出零索引、教训全在事后记录无事前拦截、项目自己不被使用=样板房。
-- 真实产出：规则库 **32 条**（技术复现 21 + 求职 9 → README 旧文"30 条"需对照修正）· 中文 2-gram 检索层（零外部依赖）· 沉淀机制扫 daily 抽候选 · **28 测试通过**。
+- 真实产出：规则库 **35 条**（实测：v1 10 + v2 13 + v4 6 + 求职 11）· 中文 2-gram 检索层（零外部依赖）· 沉淀机制扫 daily 抽候选 · **38 测试通过**。
 - 真实拦截验证：`guardian.py --search "显存不够"` 命中 R-11/12；`guard "给简历写平台"` 拦截 R-22/23 共 4 条。
 
 **【核心深度 = Agent 可靠性工程】**（辅证，相对应届稀缺）
 - 熔断（circuit_breaker）· 预算控制（budget）· 重试退避（retry）· 降级链（degradation）· 安全三层（safety: risk/mode/backup）· 审计（audit）。
-- Supervisor-Worker 编排 + LangGraph 图，45+ 工具。
+- Supervisor-Worker 编排 + LangGraph 图，39 个工具。
 
 **【红线（内部对账，不写进对外）】**
 - 对外只展示最好面；**踩坑/教训/重构/缺陷 → 口头讲**（面试是真实证据），不写 README。
-- 数字必须对上仓库：README 历史"63 测试"与实测（知识管道 28 + 项目自身 29）不符，**需修正**；"45+ 工具"需核对实际注册数。
-- 实测（2026-08-31 `pytest tests/ -q`）：**163 passed / 8 failed / 2 skipped**。8 个失败均为**环境依赖**（非回归）：`test_cs_stream.py` 6 个（需本地起 `:8788` 服务）；`test_llm_cache.py` 2 个（需本地 llama.cpp 在 `:8080`）。README 已按实测 163 修正。
+- 数字必须对上仓库：README 历史"63 测试"与实测（知识管道 38 + 项目自身 325）不符，**已修正**；"39 个工具"需核对实际注册数。
+- 实测（2026-09-11 `pytest tests/ -q`）：**325 passed / 0 failed / 2 skipped**（327 collected）。此前 15 个失败为**安全验收锁**（`test_desktop_launch_guard` 8 + `test_skill_marketplace` 7），已于同日修复（详见下方 v0.75.x）。
 - 别让技术广度稀释"用 AI 解决真实问题"的浓度——主打是"这个 Agent 怎么设计、怎么保证最坏不发生"，不是"造了框架"或"写了多少行前端"。
 - **AIGC 集成** — ComfyUI API 对接、LoRA 训练、批量生图管线
 
@@ -38,13 +38,33 @@
 | **网页抓取** | fetch/web_scrape/agent_browser 三级抓取，Playwright 兜底 |
 | **RAG 知识库** | PDF/DOCX/TXT → 向量搜索 / BM25 关键词降级 + 嵌入状态提示 |
 | **JWT 认证 + RBAC** | HMAC-SHA256 双 token + admin/user 两角色 + CSP + 审计日志 |
-| **45+ 工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类 |
+| **39 个工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类 |
 | **核心+场景分层** | `core/` 共享基础设施 + `apps/research` 调研 + `apps/cs_demo` 客服 |
-| **测试体系** | 63 单元测试 + CI 集成 |
+| **测试体系** | 325 单元测试 + CI 集成 |
 | **exe 打包** | PyInstaller 单文件夹 exe，开箱即用 |
 | **Docker 部署** | 多阶段构建 + docker-compose（LingShu + SearXNG） |
 | 微信小程序 | 7 页面移动端（对话/报告/客服/个人中心），4 tab，对接灵枢 API | v0.63 |
 | 自动 LLM 配置 | 启动时自动检测 Ollama，pull qwen3:1.7b，无需手动配置 | v0.63 |
+
+---
+
+## ADR（架构决策记录）
+
+### ADR-001 不为外部用户引入服务端 / 多租户 / 配额组件（2026-09-10）
+**背景**：为「找真实用户」做的产品化补丁出现两次边界漂移迹象 —— ① 计划「内置体验 key + 限额」（等于在单机桌面应用里新建多租户配额子系统）；② `apps/research/api.py:1203` 的 skill 目录指向 Hermes 数据目录（把灵枢当 Hermes 下游）。
+**决策**：用户获取活动的产出**不进 `core/`**；允许的补丁类型仅限三类 —— **配置外置、错误恢复与诊断、文档**。
+**备选**：内置体验 key（**否决**：`budget` 在代码里没有执行原语，且打包后 key 必然明文可提取，限额放客户端等于没有限额）。
+**后果**：发 key / 限额 / 埋点 / DAU 这类动作留在运营层，不进代码库。
+
+### ADR-002 禁止硬编码私网地址与个人绝对路径（2026-09-10）
+**背景**：`rag_store.py` 默认把用户上传的文档原文 POST 到 `172.18.9.126:11434`（172.16/12 是私网段 —— 分发到别人机器后，该地址可能是路由器 DHCP 池里的陌生设备）；`config_manager.py` 硬编码 `C:\Users\zwq\Downloads\llama.cpp`。
+**决策**：环境相关地址一律走配置项 / 环境变量，默认值只能是 `127.0.0.1`；由 `tests/test_no_private_hosts.py` 作为发版门禁守着。
+**后果**：WSL 等特殊场景需显式设置 `HARNESS_OLLAMA_API`。
+
+### ADR-003 打包形态与配置读取的两条硬约束（2026-09-10）
+**背景**：三条「只在打包后才暴露」的缺陷 —— `console=True` 让用户第一眼是 cmd 黑框；`auto_setup` 只挂 CLI 入口（打包版入口是 launcher）导致「无 key 用本地模型」在实现上不存在；`llm.py` 用 import 快照常量导致设置页填的 api_url 永不生效。
+**决策**：① 打包一律 `console=False`，失败路径走 `tkinter` 弹窗（`_fail`），等待函数需容忍无控制台（`_pause`）；② **运行时配置必须走 `get_llm_config()`**，环境变量/import 常量只能作回退；③ 自动配置必须**落 `config.json`**，不能只设环境变量（对已 import 的模块是快照）。
+**后果**：由 `tests/test_packaging_and_config_gates.py` 守门。
 
 ---
 
@@ -219,7 +239,7 @@ v0.75.2 安全护栏 fail-closed — registry 两处 ImportError 不再静默裸
 第二层（60 秒）：
   "核心架构是 Supervisor-Worker 模式，用 LangGraph 定义工作流图。
    Worker 并行跑搜索/分析/执行，Supervisor 验收结果。做了三重熔断防失控。
-   前端 pywebview，后端 FastAPI，JWT 认证，RAG 知识库，63 个测试。"  
+   前端 pywebview，后端 FastAPI，JWT 认证，RAG 知识库，361 个测试。"  
 
 第三层（3 分钟）：
   "迭代了 50+ 版本，重构过一次架构（从单体到 core+apps 分层）。
@@ -233,8 +253,8 @@ v0.75.2 安全护栏 fail-closed — registry 两处 ImportError 不再静默裸
 |---------|--------------|
 | **Python + FastAPI** | 整个后端是 FastAPI |
 | **LLM/大模型应用** | 多模型路由、RAG、提示词工程 |
-| **Agent 开发** | Supervisor-Worker 编排、45+ 工具 |
+| **Agent 开发** | Supervisor-Worker 编排、39 个工具 |
 | **AIGC** | ComfyUI 对接、LoRA 训练管线 |
 | **全栈能力** | pywebview 前端 + 后端 + 部署 |
 | **安全意识** | JWT + RBAC + CSP + 审计日志 |
-| **工程规范** | 63 测试 + CI + 版本管理 + AGENTS.md |
+| **工程规范** | 361 测试 + CI + 版本管理 + AGENTS.md |

@@ -4,6 +4,7 @@ Desktop tools — GUI automation, web browsing, chat sending
 import contextlib
 import json
 import os
+import re
 import time
 
 from .registry import register_tool
@@ -747,6 +748,57 @@ _APP_WHITELIST = [
     "steam", "chrome", "firefox", "msedge", "brave",
 ]
 
+# 以路径分隔符结尾的条目是「目录白名单」，其余是「程序名白名单」
+_APP_DIRS = [e for e in _APP_WHITELIST if e.endswith(("\\", "/"))]
+_APP_NAMES = {
+    os.path.splitext(e.strip())[0].lower()
+    for e in _APP_WHITELIST if not e.endswith(("\\", "/"))
+}
+
+# ⚠️ 用户可写目录：这些目录下的可执行文件任何人都能放进去
+# （下载目录、临时目录、其他盘符），只凭"父目录在白名单"就放行等于没有限制 ——
+# 攻击链是 `file_write` 落一个 exe + `app_launch` 调用它 = 完整 RCE。
+# 对这类目录额外要求「程序名也在白名单里」（即已知应用）。
+_USER_WRITABLE_DIRS = ("C:\\Users\\", "D:\\", "E:\\")
+
+# shell 元字符（cmd.exe 与 POSIX sh 的都列上，宁可误拒不可漏放）
+_SHELL_METACHARS = re.compile(r"[&|;<>`$()\[\]{}*?!\"'^\n\r\t]")
+
+
+def _is_allowed_app(app: str) -> bool:
+    """白名单校验 —— **精确匹配程序本体**，不做子串匹配。
+
+    旧实现是 `entry.lower() in app_lower`，于是 "notepad & calc" 因为含 "notepad"
+    被判为命中，再叠加 `Popen(..., shell=True)`（Windows 下 list 被拼成一行交给
+    cmd.exe）就是一条完整的命令注入链：提示注入即可在主机上执行任意命令。
+
+    现行判据（两条都必须）：
+      ① 出现任何 shell 元字符 → 直接拒；
+      ② 纯程序名（不含路径分隔符）→ 必须与白名单程序名**精确相同**，且不含空白；
+         路径形式 → 其父目录必须落在白名单目录内。
+    """
+    raw = (app or "").strip()
+    if not raw:
+        return False
+    if _SHELL_METACHARS.search(raw):
+        return False
+
+    is_path = ("\\" in raw) or ("/" in raw)
+    if not is_path:
+        # 纯程序名：程序名不可能含空白（"cmd /c whoami"、"a b" 都在此被拒）
+        if any(c.isspace() for c in raw):
+            return False
+        return os.path.splitext(raw)[0].lower() in _APP_NAMES
+
+    # 路径形式：父目录必须命中目录白名单
+    parent = os.path.normpath(os.path.dirname(raw)).lower()
+    if not any(parent.startswith(os.path.normpath(d).lower()) for d in _APP_DIRS):
+        return False
+    # 用户可写目录额外收紧：程序名也必须白名单（否则用户目录下随便放个 exe 就放行了）
+    if any(parent.startswith(os.path.normpath(d).lower()) for d in _USER_WRITABLE_DIRS):
+        return os.path.splitext(os.path.basename(raw))[0].lower() in _APP_NAMES
+    return True
+
 
 def _tool_app_launch(app: str, args: str = "", wait_for_window: str = "", bring_to_front: bool = False) -> str:
     """启动 Windows 应用（白名单控制）。"""
@@ -765,27 +817,16 @@ def _tool_app_launch(app: str, args: str = "", wait_for_window: str = "", bring_
         except Exception:
             pass
     
-    # 检查白名单
-    app_lower = app.lower()
-    allowed = False
-    for entry in _APP_WHITELIST:
-        if entry.lower() in app_lower or app_lower.startswith(entry.lower()):
-            allowed = True
-            break
-    if not allowed and "." in app:
-        parent = os.path.dirname(app)
-        if parent:
-            for entry in _APP_WHITELIST:
-                if os.path.normpath(parent).lower().startswith(os.path.normpath(entry).lower()):
-                    allowed = True
-                    break
-    if not allowed:
+    # 检查白名单（精确匹配程序本体，见 _is_allowed_app）
+    if not _is_allowed_app(app):
         return f"[permission_gate] 应用 '{app}' 不在白名单中。需要确认启动。使用 permission_gate 工具申请权限。"
     try:
         cmd = [app]
         if args:
             cmd.extend(args.split())
-        p = subprocess.Popen(cmd, shell=True)
+        # shell=False：list 直接作为 argv 传入，不再拼成一行交给 cmd.exe。
+        # shell=True 时 "notepad & calc" 会被整串执行 —— 命令注入。
+        p = subprocess.Popen(cmd, shell=False)
         
         # 等待窗口出现
         if wait_for_window:

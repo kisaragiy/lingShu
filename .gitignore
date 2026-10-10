@@ -17,7 +17,8 @@ memory/
 eval_report.json
 comic_output/
 *.json
-uv.lock
+# 例外：测试夹具/数据允许入库（全局 `*.json` 是黑名单式地雷，会静默吃掉未来的 fixture）
+!tests/**/*.json
 # 公开仓库边界: 逆向/加密分析脚本与运行时数据不出仓库
 reference/
 src/data/
@@ -30,3 +31,11 @@ jwt_secret.txt
 *.key
 *.spec
 /site/
+# 测试/CI 产物（不该进仓库，也不该在 git status 里当噪音）
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.mutmut-cache/

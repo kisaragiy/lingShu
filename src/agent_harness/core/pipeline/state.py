@@ -38,6 +38,8 @@ class SupervisorState(TypedDict, total=False):
     worker_results: dict[str, dict]    # {worker_name: WorkerResult}
     worker_errors: dict[str, list[str]]
     all_done: bool                     # supervisor decides if task is complete
+    feasibility: str                   # "" | "feasible" | "infeasible" (WP16 abstention)
+    feasibility_reason: str            # why the task is infeasible (when feasibility=infeasible)
     final_output: str
     errors: list[str]
     trace_id: str

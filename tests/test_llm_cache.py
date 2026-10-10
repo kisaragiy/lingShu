@@ -75,6 +75,7 @@ def test_cache_eviction():
     assert _llm_cache_get("key0000") is None
 
 
+@pytest.mark.integration          # 需要真实 LLM 后端（llama.cpp :8080），CI 默认不跑
 def test_call_llama_skips_cache_high_temp(monkeypatch):
     """call_llama with temperature > 0.5 should not look up cache."""
     cache_lookups = []
@@ -110,6 +111,7 @@ def test_call_llama_skips_cache_high_temp(monkeypatch):
     assert tokens == 10
 
 
+@pytest.mark.integration          # 需要真实 LLM 后端（llama.cpp :8080），CI 默认不跑
 def test_call_llama_saves_cache(monkeypatch):
     """On successful response, content should be cached."""
     import requests
