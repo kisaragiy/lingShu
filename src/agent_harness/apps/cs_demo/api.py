@@ -54,7 +54,13 @@ async def cs_chat(request: Request):
         )
     from agent_harness.apps.cs_demo.agents.cs_agent import run_cs_agent
     from agent_harness.apps.cs_demo.tools.customer_service import classify_cs_intent
-    result = run_cs_agent(message, context=context)
+    from starlette.concurrency import run_in_threadpool
+
+    # ⚠️ run_cs_agent 是**同步**函数（内部走阻塞式 LLM 调用，timeout=2s）。
+    # 直接在 async 端点里调用会阻塞事件循环：实测 50 并发下 /health 从 2ms
+    # 劣化到 23s、60s 只跑完 66 个请求。放进线程池让事件循环继续服务其他请求。
+    # （流式端点 cs_chat_stream 已用 run_in_executor 处理同一问题，此处是遗漏补齐。）
+    result = await run_in_threadpool(run_cs_agent, message, context=context)
     reply = result.get("reply", "")
     intent = result.get("intent", classify_cs_intent(message))
     tool_results = result.get("tool_results", {})

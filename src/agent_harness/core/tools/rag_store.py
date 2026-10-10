@@ -34,9 +34,11 @@ RAG_DIR = os.environ.get(
 os.makedirs(RAG_DIR, exist_ok=True)
 
 # Embedding API
+# 默认指向本机 Ollama。WSL 等场景请通过 HARNESS_OLLAMA_API 显式指定，
+# 不要在代码里硬编码私网 IP —— 打包分发后会把用户文档原文发往局域网内任意主机。
 OLLAMA_API = os.environ.get(
     "HARNESS_OLLAMA_API",
-    "http://172.18.9.126:11434/api/embed",
+    "http://127.0.0.1:11434/api/embed",
 )
 EMBED_MODEL = os.environ.get("HARNESS_EMBED_MODEL", "nomic-embed-text")
 EMBED_DIM = int(os.environ.get("HARNESS_EMBED_DIM", "768"))

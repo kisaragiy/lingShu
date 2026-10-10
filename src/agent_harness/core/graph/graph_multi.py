@@ -266,6 +266,11 @@ def supervisor_route(state: SupervisorState) -> Literal["replan", "finalize"]:
     if _breaker_tripped(cb):
         print("[Supervisor] 🔥 熔断已触发，停止 Replan 提前收尾", file=sys.stderr)
         return "finalize"
+    # WP16: infeasible task → finalize immediately, straight to the abstention
+    # path (never replan, never fabricate a research report).
+    if state.get("feasibility") == "infeasible":
+        print("[Supervisor] ⚠️ 判定任务不可行，声明无法完成（不走调研报告）", file=sys.stderr)
+        return "finalize"
     if state.get("all_done"):
         return "finalize"
     if state.get("round", 0) >= SUPERVISOR_MAX_ROUNDS:
@@ -275,11 +280,66 @@ def supervisor_route(state: SupervisorState) -> Literal["replan", "finalize"]:
 
 # ─── Finalizer ───
 
+def _build_abstention_output(state: SupervisorState) -> dict:
+    """WP16 abstention: declare the task unachievable instead of fabricating a report.
+
+    Triggered when ``supervisor_collect`` set ``feasibility="infeasible"``. Lists
+    what was attempted and why it was not enough. Deliberately does NOT use the
+    1000-2000 word research-report prompt — that prompt would hard-code a
+    "looks complete" report on top of evidence we do not have.
+    """
+    reason = (state.get("feasibility_reason") or "").strip() or "现有手段无法获得足够信息"
+    worker_results = state.get("worker_results", {}) or {}
+    worker_tasks = state.get("worker_tasks", {}) or {}
+    worker_errors = state.get("worker_errors", {}) or {}
+
+    order = list(state.get("workers_assigned", []) or [])
+    for w in worker_results:
+        if w not in order:
+            order.append(w)
+
+    lines = []
+    for w in order:
+        task = str(worker_tasks.get(w, "") or "").strip()
+        r = worker_results.get(w, {})
+        r = r if isinstance(r, dict) else {}
+        ok = bool(r.get("success"))
+        errs = list(r.get("errors") or []) + list(worker_errors.get(w, []) or [])
+        detail = f"（{'成功' if ok else '失败'}）"
+        if errs:
+            detail += f" 失败原因: {'; '.join(str(e)[:120] for e in errs[:2])}"
+        lines.append(f"- {w}: {task or '（无子任务描述）'} {detail}")
+    attempted = "\n".join(lines) or "- （无可用手段）"
+
+    final = (
+        "⚠️ 无法完成该任务。\n\n"
+        f"理由：{reason}\n\n"
+        "已尝试的手段：\n"
+        f"{attempted}\n\n"
+        "为避免在证据不足时生成一份看似完整的报告，本次不提供调研报告。"
+        "建议：补充关键前提（数据源 / 权限 / 更明确的目标），或人工介入。"
+    )
+    return {
+        "final_output": final,
+        "feasibility": "infeasible",
+        "trace_steps": [{
+            "step": "finalize_abstention",
+            "feasibility": "infeasible",
+            "attempted_workers": order,
+        }],
+    }
+
+
 def supervisor_finalize(state: SupervisorState) -> dict:
     """Synthesize all worker results into a final response."""
     print("\n[Supervisor] 生成最终回复...")
 
     worker_results = state.get("worker_results", {})
+
+    # ─── WP16: infeasible → declare inability, do NOT call the report LLM ───
+    if state.get("feasibility") == "infeasible":
+        print("[Supervisor] 任务不可行，输出「无法完成」声明", file=sys.stderr)
+        return _build_abstention_output(state)
 
     # ─── dsh P0: 空决策短路 — 无结果不调 LLM 生成报告 ───
     if not worker_results:
@@ -446,6 +506,8 @@ def run_multi_agent(
         "worker_results": {},
         "worker_errors": {},
         "all_done": False,
+        "feasibility": "",
+        "feasibility_reason": "",
         "final_output": "",
         "errors": [],
         "trace_id": trace_id,

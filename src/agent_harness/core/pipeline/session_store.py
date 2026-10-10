@@ -368,6 +368,9 @@ def get_session_summary(session_id: str) -> dict | None:
         "pinned": meta.get("pinned", False),
         "exchanges": meta.get("exchanges", 0),
         "message_count": meta.get("message_count", 0),
+        # owner_id 必须在摘要里：单条会话的访问闸靠它判归属，缺了它就变成"非 admin 一律拒"
+        # （包括 owner 自己）。口径与 list_sessions（:303/:315 用同一字段过滤）保持一致。
+        "owner_id": meta.get("owner_id", ""),
     }
 
 

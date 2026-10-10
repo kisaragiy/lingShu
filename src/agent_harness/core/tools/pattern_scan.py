@@ -5,7 +5,7 @@ I call this tool when I need to recognize what kind of encryption or
 offuscation I'm looking at during reverse engineering.
 """
 
-import json, os, sys
+import json
 
 # Known crypto constants for pattern matching
 _AES_SBOX = bytes([

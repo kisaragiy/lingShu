@@ -9,7 +9,7 @@ P2 功能：用户用自然语言描述一个 skill 的功能，
   3. 写入 skills/<name>/SKILL.md
   4. 返回安装路径和摘要
 """
-import json, os, re
+import os, re
 from pathlib import Path
 from ..pipeline.llm import call_llama
 
@@ -91,4 +91,4 @@ from .registry import register_tool
 register_tool("skill_generate", generate_skill, {
     "description": "对话式 Skill 生成器 — 用自然语言描述 Skill 功能，自动生成 SKILL.md 并安装。参数: description=功能描述, name=指定名称",
     "properties": {"description": {"type": "string"}, "name": {"type": "string"}},
-}, privilege="reversible")
+}, privilege="reversible", category="生成")

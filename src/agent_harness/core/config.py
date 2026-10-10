@@ -144,13 +144,13 @@ def get_llm_config() -> dict:
     返回: {"api_url": str, "api_key": str, "model": str}
     """
     import json as _json
-    from pathlib import Path as _Path
 
     # 1) 优先 config.json (用户运行时配置)
-    config_path = _Path(os.environ.get(
-        "HARNESS_CONFIG_DIR",
-        os.path.expanduser("~/.agent-harness"),
-    )) / "config.json"
+    # 路径**唯一来源** = config_manager.CONFIG_PATH（ADR#5）。此前这里按 os.environ 现算，
+    # 而 save_config 写的是 config_manager 的 import 期常量 → 同一份配置两条解析路径，
+    # 任何只重定向其一的环境（测试夹具、按 env 定制部署）都会"刚写完读不到"、
+    # 静默回退到启动快照（实测：回退到 .env 里的 mock 端口）。函数内 import 避免循环依赖。
+    from agent_harness.core.pipeline.config_manager import CONFIG_PATH as config_path
     if config_path.exists():
         try:
             with open(config_path, encoding="utf-8") as _f:

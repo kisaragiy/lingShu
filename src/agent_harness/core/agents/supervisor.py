@@ -107,6 +107,20 @@ def _build_judge_context(worker_results: dict) -> str:
 
 # ─── LLM call helper ───
 
+def _record_llm(model: str, usage: dict | None = None, success: bool = True) -> None:
+    """把 LLM 调用记进指标（延迟导入，观测层故障绝不影响主链路）。
+
+    ⚠️ 这里是 Agent 主链路的 LLM 入口 —— 它**直接 post LLAMA_API，绕过 `pipeline/llm.py`**，
+    所以 llm.py 里的接线覆盖不到它。实测：日志里 8+ 次「LLM 调用异常」，
+    而 /metrics 里 status="error" 一行都没有（监控对主链路 LLM 完全失明）。
+    """
+    try:
+        from ..pipeline.llm import _record_llm_metrics
+        _record_llm_metrics(model, usage, success)
+    except Exception:
+        pass
+
+
 def _call_llm_full(messages: list[dict], system_prompt: str = "",
                    max_tokens: int = 4096, timeout: int = 300) -> tuple[str, str]:
     """Call LLM, return (content, finish_reason).
@@ -135,10 +149,14 @@ def _call_llm_full(messages: list[dict], system_prompt: str = "",
             msg = choice["message"]
             finish_reason = str(choice.get("finish_reason", ""))
             content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
-            ledger_bump(data.get("usage", {}).get("total_tokens", 0))
+            usage = data.get("usage", {}) or {}
+            ledger_bump(usage.get("total_tokens", 0))
+            _record_llm(MODEL_LLAMA, usage)
             return content, finish_reason
+        _record_llm(MODEL_LLAMA, None, success=False)     # 非 200：后端在但报错
         return "", ""
     except Exception:
+        _record_llm(MODEL_LLAMA, None, success=False)     # 不可达/超时
         return "", "error"
 
 
@@ -331,13 +349,23 @@ def supervisor_collect(state: SupervisorState) -> dict:
     )
 
     # If all workers succeeded, ask LLM if task is done
+    infeasible = False
+    feasible = False
+    reason = ""
     if all_complete:
         combined = _build_judge_context(worker_results)
 
         system = (
             "你是一个任务验收员。根据 Worker 们返回的结果，判断原始任务是否已完成。\n"
-            "如果信息足够充分，返回 done=true；如果还需要更多信息，返回 done=false 和补充说明。\n"
-            '输出 JSON: {"done": true/false, "reason": "说明"}'
+            "三种判定（必须保守，宁可判「还缺信息」也不要误判可解任务为不可解）：\n"
+            "1. 信息充分、目标已达成 → {\"done\": true, \"reason\": \"简述\"}\n"
+            "2. 还缺信息，且下一轮有合理手段可补 → {\"done\": false, \"reason\": \"缺什么\"}\n"
+            "3. 任务不可行 / 信息根本不足（数据不存在、来源不可达、需求自相矛盾等，"
+            "再搜再算也拿不到）→ {\"done\": false, \"infeasible\": true, "
+            "\"reason\": \"为什么不可行 + 到底缺什么\"}\n"
+            "只有当所有合理手段都已用尽仍无法获得关键信息时，才选第 3 态；"
+            "只要还剩可行手段，就选第 2 态。\n"
+            '输出 JSON: {"done": true/false, "infeasible": false, "reason": "说明"}'
         )
         response = _call_llm(
             [
@@ -348,18 +376,29 @@ def supervisor_collect(state: SupervisorState) -> dict:
         try:
             check = json.loads(response.strip().strip("`").replace("json", ""))
             done = check.get("done", True)
+            # WP16: conservative abstention — only abstain on an explicit infeasible flag
+            infeasible = bool(check.get("infeasible", False))
+            reason = str(check.get("reason", "") or "")
         except json.JSONDecodeError:
             done = True
+            infeasible = False
 
-        # Also check round limit
+        # A round-cap force-finish is NOT evidence of infeasibility — never
+        # let "ran out of rounds" masquerade as an abstention.
         if state.get("round", 0) >= SUPERVISOR_MAX_ROUNDS:
             done = True
+            infeasible = False
+        feasible = bool(done) and not infeasible
     else:
         done = state.get("round", 0) >= SUPERVISOR_MAX_ROUNDS
 
+    feasibility = "infeasible" if infeasible else ("feasible" if feasible else "")
     return {
         "all_done": done or all_complete,
-        "trace_steps": [{"step": "supervisor_collect", "all_done": done}],
+        "feasibility": feasibility,
+        "feasibility_reason": reason if infeasible else "",
+        "trace_steps": [{"step": "supervisor_collect", "all_done": done,
+                         "feasibility": feasibility}],
     }
 
 

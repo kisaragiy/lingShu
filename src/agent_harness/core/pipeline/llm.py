@@ -13,11 +13,11 @@ import requests as req_lib
 
 from ..config import (
     CLOUD_API_KEY,
-    DEEPSEEK_API,
     HARNESS_DIR,
     LLAMA_API,
     MODEL_DEEPSEEK,
     MODEL_LLAMA,
+    get_llm_config,
 )
 from ..retry import with_retry
 
@@ -88,6 +88,24 @@ def _llm_cache_set(key: str, content: str, tokens: int):
 CENSORED_SYSTEM_PROMPT = "你是一个内容安全助手。对于色情、暴力、违法内容，回复'我无法处理该请求'。"
 
 
+def _record_llm_metrics(model: str, usage: dict | None, success: bool, total: int = 0) -> None:
+    """把一次**真实** LLM 调用记进指标 —— token 消耗是成本控制的唯一依据。
+
+    只记真实调用：缓存命中不算（否则 calls_total 与 token 数虚高）。
+    观测层故障绝不允许影响 LLM 调用本身，故整个函数被 try 吞住。
+    """
+    try:
+        from ..metrics import record_llm_call
+        u = usage or {}
+        prompt_t = int(u.get("prompt_tokens", 0) or 0)
+        completion_t = int(u.get("completion_tokens", 0) or 0)
+        if not prompt_t and not completion_t:
+            completion_t = int(total or 0)  # 上游只给 total 时归到 completion 侧，不能丢
+        record_llm_call(model, prompt_t, completion_t, success)
+    except Exception:
+        pass
+
+
 def call_llama(messages: list[dict], system_prompt: str = "",
                max_tokens: int = 2048, temperature: float = 0.3) -> tuple[str, int]:
     """Call local LLaMA model. Returns (text, tokens_used)."""
@@ -97,8 +115,10 @@ def call_llama(messages: list[dict], system_prompt: str = "",
         cached = _llm_cache_get(cache_key)
         if cached:
             return cached
+    # 运行时读取：用户在设置页填的 api_url/model 立即生效，不再依赖 import 快照
+    _cfg = get_llm_config()
     payload = {
-        "model": MODEL_LLAMA,
+        "model": _cfg.get("model") or MODEL_LLAMA,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
@@ -106,7 +126,7 @@ def call_llama(messages: list[dict], system_prompt: str = "",
         "thinking": {"type": "disabled"},
     }
     try:
-        resp = _http_post(_session, LLAMA_API, payload, timeout=300)
+        resp = _http_post(_session, _cfg.get("api_url") or LLAMA_API, payload, timeout=300)
         if resp.status_code == 200:
             data = resp.json()
             msg = data["choices"][0]["message"]
@@ -117,6 +137,7 @@ def call_llama(messages: list[dict], system_prompt: str = "",
                 content = msg.get("reasoning_content", "")[-200:] or "(empty)"
             tokens = data.get("usage", {}).get("total_tokens", 0)
             ledger_bump(tokens)
+            _record_llm_metrics(payload["model"], data.get("usage"), True, tokens)
             if cache_key and content:
                 _llm_cache_set(cache_key, content, tokens)
             return content, tokens
@@ -124,6 +145,7 @@ def call_llama(messages: list[dict], system_prompt: str = "",
         print(f"[LLM] call_llama: 请求异常 — {e}", file=sys.stderr)
         pass
     print("[LLM] call_llama: LLM 后端不可达，返回空结果", file=sys.stderr)
+    _record_llm_metrics(payload["model"], None, False)
     return "", 0
 
 
@@ -179,11 +201,14 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
             content = data["choices"][0]["message"]["content"]
             tokens = data.get("usage", {}).get("total_tokens", 0)
             ledger_bump(tokens)
+            _record_llm_metrics(model, data.get("usage"), True, tokens)
             if content:
                 _llm_cache_set(cache_key, content, tokens)
             return content, tokens
     except Exception as e:
         print(f"[LLM] _post_cloud: 云 API 请求异常 — {e}", file=sys.stderr)
+        # 云侧失败单独记 error：能看出「云挂了 → 降级到本地」这个模式（随后 call_llama 会再记一次 success）
+        _record_llm_metrics(model, None, False)
         pass
     # Fallback to local
     print("[LLM] _post_cloud: 云 API 不可达，降级到本地 LLM", file=sys.stderr)

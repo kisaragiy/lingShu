@@ -27,10 +27,13 @@ import re
 import threading
 import uuid
 from datetime import UTC, datetime
+import logging
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from . import mode as safety_mode
+
+logger = logging.getLogger(__name__)
 
 # ─── 敏感路径模式（Windows 为主，兼容 POSIX） ───
 _SENSITIVE_DIR_RE = re.compile(
@@ -67,10 +70,27 @@ class _PendingConfirm:
         for p in self._dir.glob("*.json"):
             try:
                 item = json.loads(p.read_text(encoding="utf-8"))
-                if item.get("status") == "pending":
-                    self._items[item["code"]] = item
-            except Exception:
-                pass
+                if item.get("status") != "pending":
+                    continue
+                code = item.get("code")
+                if not code:
+                    # 缺 code 键同样不可恢复（json 能解析但消费端 _items.get(code) 取不到）
+                    raise KeyError("pending 条目缺少 code 键")
+                self._items[code] = item
+            except Exception as exc:                # noqa: BLE001 — 见下：这条不能静默
+                # fail-loud（@bughunter/@architect 2026-09-10）：pending 丢项**用户不可感知、
+                # 不可重放**（危险操作确认请求无声消失，人再也批不了），属数据完整性失败而非
+                # 可接受降级。移入 corrupt/ 留档 + ERROR 日志，绝不 `pass`。
+                corrupt_dir = self._dir / "corrupt"
+                try:
+                    corrupt_dir.mkdir(parents=True, exist_ok=True)
+                    p.replace(corrupt_dir / p.name)
+                except OSError:
+                    pass
+                logger.error(
+                    "待确认条目加载失败，已移入 %s：%s (%s)",
+                    corrupt_dir.name, p.name, exc, exc_info=True,
+                )
 
     def add(self, tool: str, args: dict, reason: str, operator: str = "") -> str:
         code = uuid.uuid4().hex[:8]
@@ -174,7 +194,7 @@ def _detect_external_send(tool: str, args: dict) -> Optional[str]:
     """对外发送（IM / 发帖）→ 确认（不可逆外部影响）。"""
     if tool in ("wechat_send", "qq_send", "chat_send", "send_message", "post"):
         target = args.get("to") or args.get("contact") or args.get("chat_id") or ""
-        return f"对外发送消息" + (f" → {target}" if target else "")
+        return "对外发送消息" + (f" → {target}" if target else "")
     return None
 
 

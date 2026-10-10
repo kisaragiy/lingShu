@@ -117,8 +117,10 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
             content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
             ledger_bump(data.get("usage", {}).get("total_tokens", 0))
             return content
+        print(f"[Worker] LLM 返回 HTTP {resp.status_code}，本步产出为空", file=sys.stderr)
         return ""
-    except Exception:
+    except Exception as e:
+        print(f"[Worker] LLM 调用异常: {e}", file=sys.stderr)
         return ""
 
 
@@ -292,6 +294,13 @@ def _worker_executor(state: WorkerState) -> dict:
 
     elapsed = time.time() - t0
     validation = validate_result(tool_name, result)
+    # 结果有效性也进指标：call_tool 的 success 只代表「函数没抛异常」，
+    # 搜索降级返回、空结果这类「调用成功但没用」必须单独可见。
+    try:
+        from ..metrics import record_tool_result
+        record_tool_result(tool_name, validation.get("severity", "ok"))
+    except Exception:
+        pass
 
     # Push tool progress event
     try:
@@ -384,6 +393,7 @@ def _failed_step_summary(results: list) -> str:
 
 def _worker_synthesize(state: WorkerState) -> dict:
     """Synthesize results into a concise response for the supervisor."""
+    _t0 = time.time()
     # ─── dsh P0: phase-abort — 取消后不再调 LLM 合成 ───
     if is_cancelled():
         return {
@@ -423,7 +433,23 @@ def _worker_synthesize(state: WorkerState) -> dict:
             system_prompt=f"你是 {state['worker_name']} Worker。直接回答这个问题，给出具体内容。用中文。",
             max_tokens=1024,
         )
-        output = direct or _fallback_worker_result(state['worker_name'], state['task'])
+        if direct and len(direct) >= 10:
+            output = direct
+        else:
+            # LLM 全挂时**不要丢掉已经拿到的工具结果**：工具成功 ≠ 非要 LLM 才能交付。
+            # 实测：search 已返回 5 条结果，却因 LLM 不可用输出"搜索结果不可用"（数据白丢、
+            # 可用性无谓降低）。有 evidence 就直接交出去，让上层自己决定要不要润色。
+            output = evidence.strip()[:2000] or _fallback_worker_result(
+                state["worker_name"], state["task"])
+
+    # Agent（Worker）调用指标 —— 每次 worker 跑完记一次。
+    # 时长是 synthesize 段（LLM 总结/降级）的耗时；工具耗时另有
+    # harness_tool_call_duration_seconds 单独记，两者不是同一层。
+    try:
+        from ..metrics import record_agent_call
+        record_agent_call(state.get("worker_name", "unknown"), time.time() - _t0)
+    except Exception:
+        pass
 
     return {"final_output": output}
 

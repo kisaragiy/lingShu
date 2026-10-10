@@ -15,19 +15,51 @@
 import os
 import sys
 from pathlib import Path
-import importlib
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import pytest
 
-# 用临时配置目录,不污染真实配置
-os.environ["HARNESS_CONFIG_DIR"] = str(Path(__file__).parent / ".test-cfg")
-os.environ.setdefault("HARNESS_DISABLE_AUTH", "1")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+# ⚠️ 不要在这里写 `os.environ["HARNESS_CONFIG_DIR"] = ...`（2026-09-10 实测的写穿路径）：
+# pytest 在 **collection 期**就 import 测试模块，而 `config_manager.CONFIG_DIR/CONFIG_PATH`
+# 是 **import-time 常量** —— 谁先 import 谁说了算；顺序一反就落到用户真实
+# `~/.agent-harness/config.json`，而 `save_config` 是**整文件覆盖**（不是合并）
+# → 清空用户已填的 api_url/api_key/model。
+# 数据根重定向现在统一在 `tests/conftest.py::pytest_configure`（startup 期，早于 collection），
+# 本文件再用下面的 fixture 把 config.json 的落点钉到 tmp_path（与 import 顺序无关）。
+
+
+@pytest.fixture(autouse=True)
+def _isolated_config(tmp_path, monkeypatch):
+    """把 config.json 的落点钉到 tmp_path —— 不依赖"谁先 import"。"""
+    from agent_harness.core import config as config_mod
+    from agent_harness.core.pipeline import config_manager as cm
+
+    cdir = tmp_path / "cfg"
+    cdir.mkdir(parents=True, exist_ok=True)
+    for mod in (cm, config_mod):
+        if hasattr(mod, "CONFIG_DIR"):
+            monkeypatch.setattr(mod, "CONFIG_DIR", cdir, raising=False)
+        if hasattr(mod, "CONFIG_PATH"):
+            monkeypatch.setattr(mod, "CONFIG_PATH", cdir / "config.json", raising=False)
+    # save_config 会同步写这两个真实环境变量，先清干净，避免测试互相污染
+    for k in ("HARNESS_LLAMA_API", "HARNESS_CLOUD_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    # 关键（@bughunter 定位的读写不同源）：`save_config` 写 `cm.CONFIG_PATH`，
+    # 而 `config.get_llm_config()` 是**每次调用按 `os.environ["HARNESS_CONFIG_DIR"]` 现算路径**
+    # → 不同步就会出现"刚写好却读不到"（回退到 import 期常量，实测读到 .env 的 mock 端口）。
+    # 根治是让 get_llm_config 改用 `config_manager.CONFIG_PATH`（同一份配置两个解析路径，
+    # ADR#5 实例）；这里先保证两侧指向同一处。
+    monkeypatch.setenv("HARNESS_CONFIG_DIR", str(cdir))
+    monkeypatch.setenv("HARNESS_DISABLE_AUTH", "1")
+    return cdir
 
 
 def _reset_config():
+    """清掉本次测试写入的配置（落点由 _isolated_config 指向 tmp）。"""
     import shutil
-    shutil.rmtree(os.environ["HARNESS_CONFIG_DIR"], ignore_errors=True)
+    from agent_harness.core.pipeline import config_manager as cm
+    shutil.rmtree(cm.CONFIG_DIR, ignore_errors=True)
 
 
 # ─── get_llm_config: 优先 config.json ───

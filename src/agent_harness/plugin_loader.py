@@ -40,7 +40,7 @@ def _ensure_dir():
             'register_tool("my_echo", _tool_my_echo, {\n'
             '    "description": "回显输入文本（示例插件工具）",\n'
             '    "properties": {"text": "string"},\n'
-            '}, privilege="read-only")\n'
+            '}, privilege="read-only", category="工具")\n'
         )
 
 

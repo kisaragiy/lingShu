@@ -18,7 +18,9 @@ REPORTS_DIR = Path(os.environ.get(
 ))
 INDEX_FILE = REPORTS_DIR / "index.json"
 
-_lock = threading.Lock()
+_lock = threading.RLock()   # 可重入：save_report/index_report/delete_report 都在持锁状态下
+                            # 调 _load_index()/_save_index()，用非重入 Lock 会同线程自死锁
+                            # （HEAD 版真实缺陷：POST /v1/reports 永久挂住请求线程）。
 
 
 def _ensure():
@@ -93,14 +95,16 @@ def save_report(title: str, content: str, tags: list[str] = None,
 
 
 def list_reports(limit: int = 50, offset: int = 0,
-                 owner_id: str | None = None) -> list[dict]:
-    """List reports, newest first.
+                 owner_id: str | None = None, q: str | None = None) -> list[dict]:
+    """List reports, newest first. Single read path for browse + search.
 
     Args:
         limit: Max reports to return
         offset: Pagination offset
         owner_id: If set, only return reports owned by this user.
                   If None, return all (admin view).
+        q: If set, keep only reports whose title or a tag contains it
+           (case-insensitive). Filtering always happens BEFORE pagination.
 
     Returns:
         List of report metadata dicts
@@ -108,62 +112,92 @@ def list_reports(limit: int = 50, offset: int = 0,
     index = _load_index()
     if owner_id is not None:
         index = [m for m in index if m.get("owner_id", "") == owner_id]
-    return index[offset:offset + limit]
+    if q:
+        needle = q.lower()
+        index = [
+            m for m in index
+            if needle in str(m.get("title", "")).lower()
+            or any(needle in str(t).lower() for t in m.get("tags", []))
+        ]
+    # 过滤在前、切片在后（顺序即正确性）；store 也是对外 API，负值在这里钳制，
+    # 不指望每个调用点都记得传 Query 约束。
+    start = max(0, int(offset or 0))
+    size = max(0, int(limit)) if limit is not None else len(index)
+    return index[start:start + size]
 
 
-def get_report(report_id: str) -> dict | None:
-    """Get a report's metadata and content."""
+def get_report(report_id: str, owner_id: str | None = None) -> dict | None:
+    """Get a report's metadata and content.
+
+    owner_id is an explicit parameter: None = unrestricted (admin path),
+    a user id = only that owner's report is returned. Ownership is enforced
+    HERE (the store), not in route handlers, so a handler that forgets the
+    check cannot leak — and reports are only reachable through this API,
+    never by routes globbing REPORTS_DIR directly.
+    """
     index = _load_index()
     for meta in index:
-        if meta["id"] == report_id:
-            filepath = REPORTS_DIR / meta["filename"]
-            if filepath.exists():
-                content = filepath.read_text(encoding="utf-8")
-                return {**meta, "content": content}
-            return {**meta, "content": ""}
+        if meta["id"] != report_id:
+            continue
+        if owner_id is not None and meta.get("owner_id", "") != owner_id:
+            return None
+        filepath = REPORTS_DIR / meta.get("filename", "")
+        if filepath.exists() and filepath.is_file():
+            content = filepath.read_text(encoding="utf-8")
+        else:
+            content = ""
+        return {**meta, "content": content}
     return None
 
 
-def delete_report(report_id: str) -> bool:
-    """Delete a report and remove from index."""
+def index_report(meta: dict) -> None:
+    """Register an already-written report file in the index.
+
+    Needed by report_formatter.save_formal_report(): formal HTML reports were
+    written to disk without an index entry, so they had no owner record and
+    could only be served by a route reading REPORTS_DIR directly (the IDOR
+    path). Indexing them keeps every report addressable through get_report()
+    with ownership enforced in one place.
+    """
+    with _lock:
+        index = _load_index()
+        if any(m.get("id") == meta.get("id") for m in index):
+            return
+        index.insert(0, meta)
+        _save_index(index)
+
+
+def delete_report(report_id: str, owner_id: str | None = None) -> bool:
+    """Delete a report and remove from index.
+
+    owner_id: None = unrestricted (admin); a user id = only that owner's
+    report may be deleted (returns False otherwise → route answers 404).
+    """
     with _lock:
         index = _load_index()
         for i, meta in enumerate(index):
-            if meta["id"] == report_id:
-                filepath = REPORTS_DIR / meta["filename"]
-                if filepath.exists():
-                    filepath.unlink()
-                index.pop(i)
-                _save_index(index)
-                return True
+            if meta["id"] != report_id:
+                continue
+            if owner_id is not None and meta.get("owner_id", "") != owner_id:
+                return False
+            filepath = REPORTS_DIR / meta["filename"]
+            if filepath.exists():
+                filepath.unlink()
+            index.pop(i)
+            _save_index(index)
+            return True
     return False
 
 
-def search_reports(query: str, owner_id: str | None = None) -> list[dict]:
+def search_reports(query: str, owner_id: str | None = None,
+                   limit: int = 50, offset: int = 0) -> list[dict]:
     """Search reports by title and tags.
 
-    Args:
-        query: Search string
-        owner_id: If set, only search this user's reports.
-
-    Returns:
-        List of matching report metadata dicts
+    Deprecated alias: delegates to list_reports(q=...) so there is exactly one
+    filtering/pagination implementation — a second copy is what let the route
+    signature diverge from the store (500 on GET /v1/reports?q=).
     """
-    q = query.lower()
-    index = _load_index()
-    results = []
-    for meta in index:
-        # Filter by owner
-        if owner_id is not None and meta.get("owner_id", "") != owner_id:
-            continue
-        if q in meta.get("title", "").lower():
-            results.append(meta)
-            continue
-        for tag in meta.get("tags", []):
-            if q in tag.lower():
-                results.append(meta)
-                break
-    return results
+    return list_reports(limit=limit, offset=offset, owner_id=owner_id, q=query)
 
 
 def _slugify(text: str) -> str:

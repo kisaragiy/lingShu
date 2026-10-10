@@ -21,8 +21,7 @@ DEFAULT_MODEL = "qwen3:1.7b"
 _OLLAMA_CANDIDATES = [
     "http://127.0.0.1:11434",
     "http://localhost:11434",
-    # WSL 桥接 (通过 model_proxy 转发)
-    "http://172.18.9.126:11434",
+    # WSL 桥接：用 HARNESS_OLLAMA_API 显式指定（勿硬编码私网 IP，分发后不可用）
     # model_proxy 统一入口
     "http://127.0.0.1:8081",
 ]
@@ -69,7 +68,7 @@ def _model_available(ollama_url: str, model: str) -> bool:
 def _pull_model(ollama_url: str, model: str) -> bool:
     """Pull a model from Ollama. Shows progress. May take minutes."""
     print(f"  📥 正在下载模型 {model}（首次约 1-3 分钟）...")
-    print(f"     此操作仅执行一次，后续启动秒开。")
+    print("     此操作仅执行一次，后续启动秒开。")
     sys.stdout.flush()
 
     try:
@@ -144,9 +143,24 @@ def auto_setup() -> str | None:
     # Ollama >= 0.1.26 has /v1/chat/completions
     llama_api = f"{ollama_url}/v1/chat/completions"
 
-    # Set environment variable for this process
+    # 进程内环境变量（向后兼容；对已 import 的模块是快照，不生效）
     os.environ["HARNESS_LLAMA_API"] = llama_api
     os.environ["HARNESS_MODEL_LLAMA"] = DEFAULT_MODEL
+
+    # 持久化到 config.json —— 这才是 get_llm_config() 的运行时真源。
+    # 2026-09-10 修正：此前只设环境变量，导致"自动配置成功"但 LLM 调用读不到。
+    try:
+        from agent_harness.core.pipeline import config_manager as _cm
+        _cfg = _cm.load_config()
+        _llm = dict(_cfg.get("llm") or {})
+        _llm["backend"] = "ollama"
+        _llm["api_url"] = llama_api
+        _llm["model"] = DEFAULT_MODEL
+        _cfg["llm"] = _llm
+        _cm.save_config(_cfg)
+        print(f"  ✅ 配置已写入 {_cm.CONFIG_PATH}")
+    except Exception as _e:
+        print(f"  ⚠️  配置持久化失败（本次会话仍可用）: {_e}")
 
     print(f"  ✅ 已配置: {llama_api}")
     print(f"  ✅ 默认模型: {DEFAULT_MODEL}")

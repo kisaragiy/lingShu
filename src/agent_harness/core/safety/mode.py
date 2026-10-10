@@ -16,10 +16,8 @@ from __future__ import annotations
 import json
 import os
 import threading
-import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 # ─── 模式常量 ───
 MODE_DEFAULT = "default"  # 沙箱优先（默认）

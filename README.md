@@ -8,7 +8,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-1c3d5a?logo=langchain)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-f5de17)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-175%20passed-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-325%20passed-brightgreen)]()
 [![GitHub stars](https://img.shields.io/github/stars/kisaragiy/lingShu?style=flat&logo=github)](https://github.com/kisaragiy/lingShu)
 
 > **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
@@ -77,11 +77,20 @@
 ```bash
 git clone https://github.com/kisaragiy/lingShu.git
 cd lingShu
-pip install -e .
+cp .env.example .env          # ← 先拷配置模板（不拷会因"未配置 LLM 后端"直接退出）
+pip install -e ".[dev]"       # 只跑服务可省去 [dev]（pytest/ruff/mypy 在里面）
 
 # 启动 Web 服务
 python -m agent_harness.main
 # → http://127.0.0.1:8788
+```
+
+### 跑测试
+
+```bash
+pytest                        # 默认口径：不跑需要外部服务的集成用例
+pytest -m integration         # 集成用例（需本地 cs_demo :8788 / llama.cpp :8080）
+pytest --cov=src/agent_harness --cov-report=term
 ```
 
 ### 使用 pip 安装
@@ -94,7 +103,8 @@ agent-harness serve
 # → http://127.0.0.1:8788
 ```
 
-> 需要自行配置 LLM 后端（OpenAI 兼容 API 即可，详见下方文档）。
+> 需要自行配置 LLM 后端（OpenAI 兼容 API 即可，详见下方文档）。`cp .env.example .env` 后可起服务；
+> 后端未就绪时接口会明确返回"后端不可用"，不会静默降级成假回答。
 
 ---
 
@@ -179,7 +189,7 @@ agent-harness eval          # 运行回归测试
 
 覆盖：搜索、RAG、代码执行、桌面操作、多轮对话、客服场景等。
 
-> 项目共有 175 个测试用例通过（`pytest tests/ -q`，实测 175 passed / 8 failed / 2 skipped），覆盖工具链路、鉴权、安全护栏、RAG、成本控制、推理缓存等模块。8 个失败均为环境依赖：客服流式用例需本地起 `:8788` 服务，llm_cache 用例需本地 llama.cpp 跑在 `:8080`——非代码缺陷。测试数量以仓库实测为准。
+> 项目共 325 个测试用例通过（`pytest`，实测 **325 passed / 2 skipped**），覆盖工具链路、鉴权与安全护栏、架构边界与数据根隔离、HTTP 契约、可观测性、RAG、成本控制、推理缓存等模块；其中 8 个集成用例需本地起服务（`cs_demo :8788` / `llama.cpp :8080`），默认不收集，用 `pytest -m integration` 显式运行。测试数量以仓库实测为准。
 
 ---
 
