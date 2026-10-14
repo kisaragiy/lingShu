@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "project": "lingshu-agent-harness",
+  "created": "2026-10-14T23:40:00+08:00",
+  "updated": "2026-10-14T23:45:00+08:00",
+  "smoke_cmd": ".venv/Scripts/python.exe -m pytest tests/test_failure_attribution.py tests/test_module_eval.py tests/test_skill_lifecycle.py -q",
+  "notes": "由 TASK-PROGRESS.md（2026-08-24 盘点，可能已部分过期）种子的机器可读接班清单。散文版仍在 TASK-PROGRESS.md；本文件是唯一事实来源。完成一项须带 --evidence 才能 pass。",
+  "features": [
+    {
+      "id": "p0-1-untracked-cleanup",
+      "desc": "把 25 个未跟踪文件逐一定性（有价值并入主代码 / 废弃删除），最终 `git status --short` 不再有 tmp_*/fix_*/do_zimage.py 等未跟踪垃圾",
+      "passes": false,
+      "evidence": null,
+      "verified_at": null,
+      "notes": "来源 TASK-PROGRESS.md P0-1"
+    },
+    {
+      "id": "p0-2-remove-junk-dirs",
+      "desc": "删除 2 个编码事故产生的垃圾目录（不可逆，需用户批准）——目录树中不再存在它们",
+      "passes": false,
+      "evidence": null,
+      "verified_at": null,
+      "notes": "来源 TASK-PROGRESS.md P0-2；需要用户批准"
+    },
+    {
+      "id": "p0-3-memory-import",
+      "desc": "跨产品记忆导入功能在 tabs.js 前端 + API + test 全部落地可跑；`.venv/Scripts/python.exe -m pytest tests/test_memory_import.py -q` 全绿",
+      "passes": false,
+      "evidence": null,
+      "verified_at": null,
+      "notes": "来源 TASK-PROGRESS.md P0-3"
+    },
+    {
+      "id": "p1-4-write-docs",
+      "desc": "P1+P2 相关工作（跨产品记忆导入、新工具集）技术文档已沉淀到 docs/ 或 CHANGELOG，含「做了什么/怎么做/为什么/下一步」",
+      "passes": false,
+      "evidence": null,
+      "verified_at": null,
+      "notes": "来源 TASK-PROGRESS.md P1-4"
+    },
+    {
+      "id": "p1-5-version-align",
+      "desc": "AGENTS.md / CHANGELOG 版本号与 git log 最新版本一致（AGENTS.md 现停 v0.28.0，git 已更高）",
+      "passes": false,
+      "evidence": null,
+      "verified_at": null,
+      "notes": "来源 TASK-PROGRESS.md P1-5"
+    }
+  ]
+}

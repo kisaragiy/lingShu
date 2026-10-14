@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PROGRESS.json — 长任务 harness 的机器可读「接班简历」",
+  "description": "长任务的唯一事实来源。目标：新会话在 3 步内（pwd -> harness.py status -> 认领一个 feature）接手，不依赖散文。它不是待办清单：只放「可验证的 feature」，能一次做透的不要拆碎。",
+  "type": "object",
+  "required": ["schema_version", "project", "features"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "project": {
+      "type": "string",
+      "description": "项目名，短。"
+    },
+    "created": { "type": "string", "description": "ISO-8601 时间戳。" },
+    "updated": { "type": "string", "description": "每次写入由 harness.py 自动刷新。" },
+    "smoke_cmd": {
+      "type": "string",
+      "description": "「怎么确认服务/程序能跑」的一行命令，固化进 init.sh。新会话不必重新摸索。"
+    },
+    "notes": { "type": "string", "description": "可选：交接备注。别在这里写进度散文。" },
+    "features": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "desc", "passes"],
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+            "description": "稳定短 id（slug）。一旦发布不要改名——它是对外引用键。"
+          },
+          "desc": {
+            "type": "string",
+            "description": "一条验收标准。写成「做什么 + 怎么算成功」，不要写成任务步骤。"
+          },
+          "passes": {
+            "type": "boolean",
+            "description": "是否已完成且已实测验证。默认 false。"
+          },
+          "evidence": {
+            "type": ["string", "null"],
+            "description": "不变量：passes=true 时此处必须为非空字符串（命令或输出摘要）。harness.py check 会强制此约束。"
+          },
+          "verified_at": {
+            "type": ["string", "null"],
+            "description": "证据记录时间（由 harness.py pass 写入）。"
+          },
+          "notes": { "type": "string", "description": "可选交接备注。" }
+        }
+      }
+    }
+  },
+  "x-invariants": [
+    "feature id 全局唯一",
+    "passes=true => evidence 为非空字符串（harness.py 拒绝无证据的 pass）",
+    "「下一个该做的」= features 中第一个 passes=false（按数组顺序，顺序即优先级）"
+  ]
+}
