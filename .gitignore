@@ -39,3 +39,6 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 .mutmut-cache/
+# harness 的机器可读载体必须入库（上面的 `*.json` 黑名单会静默吃掉它）
+!PROGRESS.json
+!tools/harness/*.json

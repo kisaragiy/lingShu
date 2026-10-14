@@ -22,3 +22,12 @@ repos:
         args: [--strict, --ignore-missing-imports, --allow-untyped-decorators]
         additional_dependencies: [pydantic, types-requests, types-PyYAML]
         exclude: tests/
+
+  - repo: local
+    hooks:
+      - id: harness-check
+        name: harness progress invariants
+        entry: .venv/Scripts/python.exe tools/harness/harness.py --dir . check
+        language: system
+        pass_filenames: false
+        always_run: true
