@@ -414,8 +414,8 @@ def _call_tool_impl(name: str, **kwargs) -> dict:
 
 # ─── 验证器 ───
 
-def validate_result(tool_name: str, result: dict) -> dict:
-    """工具执行结果验证"""
+def _validate_basic(tool_name: str, result: dict) -> dict:
+    """结构性/文本层判据：成功位、非空、长度、降级关键词。"""
     if not result["success"]:
         return {"passed": False, "reason": result["error"], "severity": "error"}
     data = result.get("data")
@@ -434,3 +434,26 @@ def validate_result(tool_name: str, result: dict) -> dict:
     if isinstance(data, list) and len(data) == 0:
         return {"passed": False, "reason": "返回空列表", "severity": "warning"}
     return {"passed": True, "reason": "", "severity": "ok"}
+
+
+def validate_result(tool_name: str, result: dict) -> dict:
+    """工具执行结果验证。
+
+    两层：
+      1. ``_validate_basic`` —— 成功位/非空/降级关键词（原行为，逐字节保留）；
+      2. **语义校验**（P0-5 anomaly gate）—— 注册的语义校验器判
+         "这个值在业务/物理上可能吗"（负库存、越界、单位/类型、单调性）。
+
+    第 2 层**默认零规则**：未注册任何校验器时 ``run_semantic_validators``
+    返回 ``None``，本函数行为与只做第 1 层时逐字节一致（不改变现有回路）。
+    命中语义异常 → 判 error/warning（异常值**不静默下发**，交由上层
+    router/corrector 走阻断/降级）。
+    """
+    verdict = _validate_basic(tool_name, result)
+    if not verdict["passed"]:
+        return verdict
+    from .semantic import run_semantic_validators
+    anomaly = run_semantic_validators(tool_name, result)
+    if anomaly is not None:
+        return anomaly
+    return verdict

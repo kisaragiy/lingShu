@@ -26,6 +26,17 @@ from .registry import (
     register_tool,
     validate_result,
 )
+from .semantic import (
+    clear_semantic_validators,
+    matches_type,
+    monotonic,
+    non_negative,
+    numeric_range,
+    one_of,
+    register_semantic_validator,
+    run_semantic_validators,
+    unregister_semantic_validator,
+)
 
 # Optional: parallel executor
 with contextlib.suppress(ImportError):
@@ -34,6 +45,10 @@ with contextlib.suppress(ImportError):
 __all__ = [
     "TOOL_REGISTRY", "register_tool", "call_tool", "validate_result",
     "_capture_error_screenshot",
+    # P0-5 语义校验（anomaly gate）
+    "register_semantic_validator", "unregister_semantic_validator",
+    "clear_semantic_validators", "run_semantic_validators",
+    "non_negative", "numeric_range", "matches_type", "one_of", "monotonic",
     "_desktop", "_misc", "_web", "_rev_utils", "_pattern_scan",
     "_mcp_health", "_reasoning", "_parallel",
 ]
