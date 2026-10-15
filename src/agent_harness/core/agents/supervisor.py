@@ -121,6 +121,28 @@ def _record_llm(model: str, usage: dict | None = None, success: bool = True) -> 
         pass
 
 
+def _emit_llm_envelope(messages: list[dict] | None, system_prompt: str,
+                       temperature: float, usage: dict | None,
+                       data: dict | None = None) -> None:
+    """落主链路 LLM 调用的可复现信封（P1-1）。观测层故障绝不影响主链路。"""
+    try:
+        from ..reproducibility import reproducibility_envelope
+        from ..agent_log import log_llm_envelope
+        resp = data or {}
+        env = reproducibility_envelope(
+            model=MODEL_LLAMA,
+            model_version=resp.get("model") or resp.get("model_version"),
+            provider=resp.get("provider"),
+            temperature=temperature,
+            system_fingerprint=resp.get("system_fingerprint"),
+            messages=messages,
+            system_prompt=system_prompt,
+        )
+        log_llm_envelope(None, env, usage)
+    except Exception:
+        pass
+
+
 def _call_llm_full(messages: list[dict], system_prompt: str = "",
                    max_tokens: int = 4096, timeout: int = 300) -> tuple[str, str]:
     """Call LLM, return (content, finish_reason).
@@ -152,11 +174,14 @@ def _call_llm_full(messages: list[dict], system_prompt: str = "",
             usage = data.get("usage", {}) or {}
             ledger_bump(usage.get("total_tokens", 0))
             _record_llm(MODEL_LLAMA, usage)
+            _emit_llm_envelope(messages, system_prompt, 0.3, usage, data=data)
             return content, finish_reason
         _record_llm(MODEL_LLAMA, None, success=False)     # 非 200：后端在但报错
+        _emit_llm_envelope(messages, system_prompt, 0.3, None)
         return "", ""
     except Exception:
         _record_llm(MODEL_LLAMA, None, success=False)     # 不可达/超时
+        _emit_llm_envelope(messages, system_prompt, 0.3, None)
         return "", "error"
 
 

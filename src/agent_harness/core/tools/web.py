@@ -43,7 +43,7 @@ def _normalize_url(url: str) -> str:
     结果不同（hypothesis 的 `test_normalize_url_idempotent` 2026-09-10 抓到的真实反例，
     非本轮引入）。去重键必须幂等，故这里循环到稳定值为止。
     """
-    url = re.sub(r"://www\.", "://", url)
+    url = re.sub(r"://(?:www\.)+", "://", url)
     _before_strip = url
     url = re.sub(
         r'[?&](utm_source|utm_medium|utm_campaign|utm_term|utm_content|fbclid|gclid|ref)=[^&]+',

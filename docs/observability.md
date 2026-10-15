@@ -209,7 +209,7 @@ HARNESS_RATE_LIMIT=100000 ./.venv/Scripts/python scripts/run_server_8788.py &
 | 缺口 | 影响 | 说明 |
 |------|------|------|
 | 无采集/存储/告警后端 | `/metrics` 只有拉取端点，无 Prometheus/Grafana 落库，**无历史趋势、无告警** | 本地优先的产品定位下有意不引入（见 ADR-001）；接后端是部署侧的事，不是代码侧 |
-| 无分布式追踪落地 | `core/pipeline/tracing.py` 有 trace_tree，但未与指标打通 | 排查单次请求仍需看结构化日志 |
+| 无分布式追踪落地 | `core/pipeline/tracing.py` 有 trace_tree，但未与指标打通 | 排查单次请求仍需看结构化日志；**单次调用复现已由 §6 的可复现信封覆盖**（trace 级贯通仍未做） |
 
 ### 已完成（原缺口，2026-09-11 关掉）
 
@@ -246,7 +246,67 @@ harness_agent_calls_total{worker_type="analyze"}               2.0
 > 本文件只记录**代码侧**的可观测性能力。告警规则、看板、采集器属于部署配置，
 > 不进代码库（与 ADR-001「不为外部用户引入服务端组件」一致）。
 
-## 6. 复现命令
+## 6. 可复现信封 + OTel 字段对齐（P1-1 / P1-4）
+
+### 6.1 为什么要信封
+
+同输入两次调用拿到不同输出、线上事故无法复现，根因有三类：
+
+| 根因 | 信封里对应的字段 |
+|------|------------------|
+| 采样非确定性 | `temperature` / `seed` |
+| batch 数值差异 / 权重版本 | `system_fingerprint` / `model_version` |
+| 外部状态（喂了什么） | `prompt_hash` / `tools_hash` |
+
+每次**真实** LLM 调用（`pipeline/llm.py::call_llama` / `_post_cloud` 与 Agent 主链路
+`agents/supervisor.py::_call_llm_full`）都会落一份信封：写入会话日志
+`agent_logs/<session>.jsonl`（事件类型 `llm_call`），并同时发一行结构化日志
+（`core/log_kit.py`）。**失败调用也落**——事故现场正是失败那次，缺了就无法复现。
+
+### 6.2 信封字段
+
+实现：`core/reproducibility.py::reproducibility_envelope()`。字段齐全、**缺一律 `None`**（向后兼容，
+零参数调用也不报错）。哈希一律 `hashlib.sha256` + 稳定序列化（`sort_keys` + 固定分隔符），
+**绝不用内置 `hash()`**（受 `PYTHONHASHSEED` 影响，跨进程不稳定）。
+
+| 字段 | 含义 |
+|------|------|
+| `model` | 请求的模型名 |
+| `model_version` | 上游响应里回报的真实模型版本 |
+| `provider` | 供应商 / 后端标识 |
+| `seed` | 采样种子 |
+| `temperature` | 采样温度 |
+| `system_fingerprint` | 后端指纹（区分同一模型的不同后端批次） |
+| `prompt_hash` | system 提示 + 消息序列的稳定 sha256 |
+| `tools_hash` | 工具 schema 的稳定 sha256 |
+
+### 6.3 OTel GenAI 字段对齐
+
+字段名向 OpenTelemetry GenAI 语义约定对齐（`core/reproducibility.py::OTEL_GEN_AI_MAP`）。
+过渡期 `envelope_record()` **新旧两种键一并输出**，现有读者（前端读 `data.model` 等）不受影响，
+新读者可直接按 OTel 约定取键：
+
+| 旧键 | OTel 键 |
+|------|---------|
+| `provider` | `gen_ai.system` |
+| `model` | `gen_ai.request.model` |
+| `model_version` | `gen_ai.response.model` |
+| `temperature` | `gen_ai.request.temperature` |
+| `seed` | `gen_ai.request.seed` |
+| `system_fingerprint` | `gen_ai.response.system_fingerprint` |
+| `prompt_hash` | `gen_ai.request.prompt_hash` |
+| `tools_hash` | `gen_ai.request.tools_hash` |
+| `prompt_tokens` | `gen_ai.usage.input_tokens` |
+| `completion_tokens` | `gen_ai.usage.output_tokens` |
+
+> 前 5 条与 `usage` 两条为 OTel 稳定约定；`response.*` / `request.seed` / `*_hash`
+> 为 harness 扩展（OTel 尚无对应字段，沿用 `gen_ai.` 命名空间以示归属）。
+
+观测层故障（写日志/落盘失败）**绝不改变 LLM 调用结果**——整段被 `try` 吞住，
+与 §1 的指标原则一致。回归测试：`tests/test_reproducibility_envelope.py`（纯函数层，
+13 项）与 `tests/test_llm_envelope_logging.py`（两条调用路径接线 + 故障隔离，8 项）。
+
+## 7. 复现命令
 
 ```bash
 # 起服务（压测前务必放宽限流，默认 100 req/min/IP 会掩盖真实吞吐）

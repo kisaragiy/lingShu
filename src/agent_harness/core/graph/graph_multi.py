@@ -18,6 +18,8 @@ Architecture:
 """
 
 import concurrent.futures
+import json
+import re
 import sys
 import time
 import uuid
@@ -41,6 +43,7 @@ from ..pipeline.circuit_breaker import CircuitBreaker
 from ..pipeline.llm import ledger_total
 from ..pipeline.state import SupervisorState, WorkerResult
 from ..pipeline.tracing import TraceCollector
+from ..retry import NoProgressError, _default_call_key, with_no_progress_guard
 
 # Module-level trace collector — set before graph invocation
 _trace_collector: TraceCollector | None = None
@@ -75,6 +78,87 @@ def _breaker_tripped(cb: CircuitBreaker | None) -> bool:
         return False
     _feed_breaker_tokens(cb)
     return bool(cb.check()["tripped"])
+
+
+# ─── P1-3: 主回路无进展熔断（with_no_progress_guard 接线）───
+# 主回路 = supervisor 的多轮 worker 派发循环（dispatch → collect → replan → dispatch）。
+# 每轮都按 (worker, task) 重新调用 `run_worker`；若主管反复派**同一个 worker + 同一个
+# 子任务**，就是在空转烧 token。这里用既有的 `with_no_progress_guard` 把「连续 K 次
+# 同 tool+同参」变成真正的熔断：
+#   * 每个 worker（= tool）一个独立 guard 实例 → 多 worker 交错派发时互不掩盖计数；
+#   * guard 状态跨轮次保留（模块级、每次 run 重置）；
+#   * 熔断那一次**不真正执行** worker（check 在派发前跑，非装饰在 run_worker 上）；
+#   * key_fn 可注入（默认 = worker 名 + 任务指纹），K 可配（默认 3）。
+
+NO_PROGRESS_MAX_REPEATS = 3
+
+_no_progress_enabled: bool = False
+_no_progress_max_repeats: int = NO_PROGRESS_MAX_REPEATS
+_no_progress_key_fn = None  # type: ignore[var-annotated]  # (worker_name, task) -> hashable
+_no_progress_guards: dict = {}
+
+
+def _worker_call_key(wname: str, task: Any) -> tuple:
+    """默认 tool 粒度指纹：worker 名（tool）+ 任务参数指纹。"""
+    return (str(wname), _default_call_key((str(task),), {}))
+
+
+def set_no_progress_detection(enabled: bool = True,
+                              max_repeats: int = NO_PROGRESS_MAX_REPEATS,
+                              key_fn=None) -> None:
+    """启用/配置主回路无进展熔断（每次 `run_multi_agent` 前调用）。
+
+    Args:
+        enabled: 是否启用；False 时 `check_no_progress` 一律 no-op（默认关闭，向后兼容）。
+        max_repeats: 连续同 (worker, task) 达到该次数即熔断（>=1）。
+        key_fn: 可注入的 (worker_name, task) -> hashable 指纹；默认 worker 名 + 任务指纹。
+    """
+    global _no_progress_enabled, _no_progress_max_repeats, _no_progress_key_fn, _no_progress_guards
+    if max_repeats < 1:
+        raise ValueError("max_repeats 必须 >= 1")
+    _no_progress_enabled = bool(enabled)
+    _no_progress_max_repeats = int(max_repeats)
+    _no_progress_key_fn = key_fn
+    _no_progress_guards = {}
+
+
+def _guard_for(wname: str):
+    """取（或建）某 worker 专属的 no-progress guard（per-tool 独立计数）。"""
+    g = _no_progress_guards.get(wname)
+    if g is None:
+        base = _no_progress_key_fn or _worker_call_key
+
+        def _kf(task, _w=wname, _base=base):
+            return _base(_w, task)
+
+        @with_no_progress_guard(max_repeats=_no_progress_max_repeats, key_fn=_kf)
+        def _guard(task):
+            return task
+
+        g = _guard
+        _no_progress_guards[wname] = g
+    return g
+
+
+def check_no_progress(wname: str, task: Any) -> None:
+    """派发前检查：连续 K 次同 (worker, task) → 抛 :class:`NoProgressError`。
+
+    检测未启用时一律 no-op。**在调用线程（主派发线程）串行执行**，避免并发竞争。
+    """
+    if not _no_progress_enabled:
+        return
+    _guard_for(wname)(task)
+
+
+def _record_no_progress_trip(wname: str, task: Any, exc: NoProgressError,
+                             results: dict, events: list) -> None:
+    """记录一次熔断：占位 worker 结果 + 事件，供 router 收尾 / 完成契约标记未完成。"""
+    results[wname] = WorkerResult(
+        worker_name=wname, success=False,
+        output=f"⛔ 无进展熔断：{wname} 连续 {exc.repeats} 次重复同一子任务，已跳过执行",
+        data=None, trace_steps=[], errors=[f"no_progress:{exc.repeats}"], elapsed_s=0,
+    )
+    events.append({"worker": wname, "task": str(task)[:120], "repeats": exc.repeats})
 
 
 def set_trace_collector(collector: TraceCollector):
@@ -153,6 +237,8 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
 
     results: dict[str, WorkerResult] = {}
     errors: dict[str, list[str]] = {}
+    no_progress_tripped = False
+    no_progress_events: list[dict] = []
 
     def _run_with_trace(wname: str, task: str):
         """Run worker with optional trace span."""
@@ -172,6 +258,14 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
         futures = {}
         for wname in parallel_workers:
             task = worker_tasks.get(wname, state["request"])
+            # P1-3: 派发前无进展检查 —— 连续同 tool+同参则熔断，跳过本次执行
+            try:
+                check_no_progress(wname, task)
+            except NoProgressError as e:
+                no_progress_tripped = True
+                _record_no_progress_trip(wname, task, e, results, no_progress_events)
+                print(f"  🔥 {wname}: 无进展熔断（连续 {e.repeats} 次重复），跳过执行")
+                continue
             print(f"  → {wname}: {task[:60]}...")
             futures[pool.submit(_run_with_trace, wname, task)] = wname
 
@@ -209,6 +303,14 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
             print("[Supervisor] ⛔ 取消检测到，跳过串行 Worker")
             break
         task = worker_tasks.get(wname, state["request"])
+        # P1-3: 串行分支同样做派发前无进展检查
+        try:
+            check_no_progress(wname, task)
+        except NoProgressError as e:
+            no_progress_tripped = True
+            _record_no_progress_trip(wname, task, e, results, no_progress_events)
+            print(f"  🔥 {wname} (串行): 无进展熔断（连续 {e.repeats} 次重复），跳过执行")
+            continue
         print(f"  → {wname} (串行): {task[:60]}...")
         try:
             result = _run_with_trace(wname, task)
@@ -249,12 +351,20 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
             for w in workers_assigned
         ],
     })
+    if no_progress_events:
+        all_traces.append({
+            "step": "supervisor_no_progress_fuse",
+            "events": no_progress_events,
+        })
 
+    tripped = no_progress_tripped or (cb is not None and cb.check()["tripped"])
     return {
         "worker_results": results,
         "worker_errors": errors,
         "trace_steps": all_traces,
-        "all_done": True if (cb is not None and cb.check()["tripped"]) else state.get("all_done", False),
+        "no_progress_tripped": no_progress_tripped or bool(state.get("no_progress_tripped", False)),
+        "no_progress_events": list(state.get("no_progress_events", []) or []) + no_progress_events,
+        "all_done": True if tripped else state.get("all_done", False),
     }
 
 
@@ -265,6 +375,11 @@ def supervisor_route(state: SupervisorState) -> Literal["replan", "finalize"]:
     cb = state.get("circuit_breaker")  # type: ignore[union-attr]
     if _breaker_tripped(cb):
         print("[Supervisor] 🔥 熔断已触发，停止 Replan 提前收尾", file=sys.stderr)
+        return "finalize"
+    # P1-3: 主回路无进展熔断 → 立即收尾，不再 replan（否则只会重复空转）
+    if state.get("no_progress_tripped"):
+        print("[Supervisor] 🔥 无进展熔断（连续同 tool+同参），停止 Replan 提前收尾",
+              file=sys.stderr)
         return "finalize"
     # WP16: infeasible task → finalize immediately, straight to the abstention
     # path (never replan, never fabricate a research report).
@@ -330,23 +445,241 @@ def _build_abstention_output(state: SupervisorState) -> dict:
     }
 
 
+# ─── P0-2: 反编造 facts 校验 ───
+# 报告中的数字必须能对回 state 里的 tool 产出/中间事实。对不上的数字标「未核实」；
+# 保守判据（round 触顶 / 无数字 / 无证据 / 解析失败 → 一律跳过），绝不误判。
+
+_CITE_RE = re.compile(r"\[[^\]]*\]")      # [来源 12] / [15] / [url]
+_URL_RE = re.compile(r"https?://\S+")
+_NUM_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def _extract_checkable_numbers(text: str) -> list[float]:
+    """提取「可核对」的显著数字（多位整数 / 小数），用于反编造校验。
+
+    保守剔除会误伤的内容：URL 与引用标记 [来源 N]/[N] 里的数字不是事实断言；
+    0-9 的单位数在正文里太常见，同样跳过。
+    """
+    if not text:
+        return []
+    cleaned = _URL_RE.sub(" ", text)
+    cleaned = _CITE_RE.sub(" ", cleaned)
+    nums: list[float] = []
+    for m in _NUM_RE.finditer(cleaned):
+        raw = m.group(0).replace(",", "")
+        try:
+            val = float(raw)
+        except ValueError:
+            continue
+        if val == int(val) and 0 <= val <= 9:
+            continue  # 单位数不显著，跳过
+        nums.append(val)
+    return nums
+
+
+def _collect_report_evidence(state) -> str:
+    """汇总 state 里的 tool 产出/中间事实，作为事实核对基准。"""
+    parts: list[str] = []
+    for r in (state.get("worker_results") or {}).values():
+        if not isinstance(r, dict):
+            continue
+        parts.append(str(r.get("output", "")))
+        data = r.get("data")
+        if data is not None:
+            try:
+                parts.append(json.dumps(data, ensure_ascii=False, default=str))
+            except Exception:
+                parts.append(str(data))
+        for e in (r.get("errors") or []):
+            parts.append(str(e))
+    for errs in (state.get("worker_errors") or {}).values():
+        for e in (errs or []):
+            parts.append(str(e))
+    return "\n".join(p for p in parts if p)
+
+
+def _fmt_num(v: float) -> str:
+    return str(int(v)) if v == int(v) else str(v)
+
+
+def verify_report_facts(report: str, state) -> dict:
+    """反编造校验：报告的显著数字须能在 state 证据里找到依据。
+
+    返回 ``{"report", "unverified", "checked", "skipped", "reason"}``。
+    保守原则：round 触顶 / 报告无数字 / 证据为空 / 解析异常 → 跳过（不误判）。
+    """
+    result: dict = {"report": report, "unverified": [], "checked": False,
+                    "skipped": False, "reason": ""}
+    try:
+        if int(state.get("round", 0) or 0) >= SUPERVISOR_MAX_ROUNDS:
+            result["skipped"] = True
+            result["reason"] = "round 触顶，跳过事实校验"
+            return result
+        report_nums = _extract_checkable_numbers(report)
+        if not report_nums:
+            result["skipped"] = True
+            result["reason"] = "报告无可核对数字"
+            return result
+        evidence_nums = set(_extract_checkable_numbers(_collect_report_evidence(state)))
+        if not evidence_nums:
+            result["skipped"] = True
+            result["reason"] = "无证据可核对"
+            return result
+        seen: set[float] = set()
+        unverified: list[float] = []
+        for n in report_nums:
+            if n in evidence_nums or n in seen:
+                continue
+            seen.add(n)
+            unverified.append(n)
+        result["checked"] = True
+        result["unverified"] = unverified
+        return result
+    except Exception as exc:  # 解析失败绝不误判
+        result["skipped"] = True
+        result["reason"] = f"校验异常，已跳过: {exc}"
+        return result
+
+
+def _apply_fact_check(report: str, state) -> tuple[str, dict]:
+    """跑 facts 校验；对不上的数字在报告末尾标「未核实」（不调报告 LLM）。"""
+    info = verify_report_facts(report, state)
+    if info["checked"] and info["unverified"]:
+        nums = "、".join(_fmt_num(n) for n in info["unverified"][:12])
+        report = report + (
+            "\n\n---\n"
+            "⚠️ 未核实数据：以下数字未能在 Worker 产出/中间事实中找到依据，"
+            f"请谨慎采信 —— {nums}\n"
+        )
+    return report, info
+
+
+# ─── P1-6: 显式完成契约 ───
+# 痛点：agent 倾向「声称完成」，半成品被当完成交付。收尾产物必须带一个**显式完成契约**
+# ——feature 列表 + 每项 `passes` 布尔；`supervisor_finalize` 输出必带「未完成项」显式列表
+# （无未完成则明确声明「无」）。保守原则：**未经验证不得置 passes=true**。
+
+def _feature_verified(state: SupervisorState, worker: str) -> bool:
+    """保守判据：仅当有明确证据证明该 worker 交付了实质产物时才认为 feature 完成。
+
+    未验证 / 失败 / 空输出 / 带错误 / 无进展熔断 / 部分步骤失败 → False。
+    整体任务被判 infeasible 时全部 False（见 build_completion_contract）。
+    """
+    r = (state.get("worker_results") or {}).get(worker)
+    if not isinstance(r, dict):
+        return False
+    if not r.get("success"):
+        return False
+    out = str(r.get("output") or "").strip()
+    if len(out) < 5:
+        return False
+    if r.get("errors"):
+        return False
+    if "无进展熔断" in out or "部分步骤失败" in out:
+        return False
+    return True
+
+
+def build_completion_contract(state: SupervisorState) -> dict:
+    """构建显式完成契约：``{features, incomplete, complete}``。
+
+    features: ``[{"feature": str, "worker": str, "passes": bool}]``
+      * 若 state 提供 ``features``（调用方声明的验收项），按 worker 关联核对；
+      * 否则从 ``workers_assigned`` / ``worker_results`` 派生（每个 worker 一项）。
+    每项 passes 由 :func:`_feature_verified` 保守判定；infeasible 时强制全 false。
+    """
+    force_incomplete = state.get("feasibility") == "infeasible" or bool(
+        state.get("no_progress_tripped"))
+    features_in = state.get("features")
+    feats: list[dict] = []
+    if features_in:
+        for f in features_in:
+            if isinstance(f, dict):
+                name = str(f.get("feature") or f.get("name") or "").strip()
+                worker = f.get("worker")
+            else:
+                name = str(f).strip()
+                worker = None
+            worker = str(worker or name)
+            passes = (not force_incomplete) and _feature_verified(state, worker)
+            feats.append({"feature": name or worker, "worker": worker, "passes": bool(passes)})
+    else:
+        order = list(state.get("workers_assigned") or [])
+        for w in (state.get("worker_results") or {}):
+            if w not in order:
+                order.append(w)
+        tasks = state.get("worker_tasks") or {}
+        for w in order:
+            passes = (not force_incomplete) and _feature_verified(state, w)
+            feats.append({"feature": str(tasks.get(w) or w), "worker": w, "passes": bool(passes)})
+    incomplete = [f for f in feats if not f["passes"]]
+    return {
+        "features": feats,
+        "incomplete": incomplete,
+        "complete": bool(feats) and not incomplete,
+    }
+
+
+def render_completion_contract(contract: dict) -> str:
+    """把完成契约渲染成收尾产物里的显式小节（必带「未完成项」列表）。"""
+    lines = ["", "---", "## ✅ 完成契约"]
+    feats = contract.get("features") or []
+    if not feats:
+        lines.append("- 未声明可验收的 feature（无完成契约）")
+        lines.append("")
+        lines.append("**未完成项：** 无 feature 可验收（未声明完成契约）")
+        return "\n".join(lines)
+    for f in feats:
+        mark = "✅ 通过" if f.get("passes") else "❌ 未完成"
+        lines.append(f"- [{mark}] {f.get('feature')}")
+    lines.append("")
+    incomplete = contract.get("incomplete") or []
+    if incomplete:
+        lines.append("**未完成项：**")
+        for f in incomplete:
+            lines.append(f"- ❌ {f.get('feature')}")
+    else:
+        lines.append("未完成项：无（全部 feature 均已验证通过）")
+    return "\n".join(lines)
+
+
+def _contract_trace(contract: dict) -> dict:
+    return {
+        "step": "finalize_completion_contract",
+        "complete": contract.get("complete", False),
+        "incomplete_count": len(contract.get("incomplete") or []),
+        "incomplete": [f.get("feature") for f in (contract.get("incomplete") or [])][:20],
+    }
+
+
 def supervisor_finalize(state: SupervisorState) -> dict:
     """Synthesize all worker results into a final response."""
     print("\n[Supervisor] 生成最终回复...")
+
+    # P1-6: 收尾必带显式完成契约（feature + passes + 未完成项列表）
+    contract = build_completion_contract(state)
+    contract_text = render_completion_contract(contract)
+    contract_trace = _contract_trace(contract)
 
     worker_results = state.get("worker_results", {})
 
     # ─── WP16: infeasible → declare inability, do NOT call the report LLM ───
     if state.get("feasibility") == "infeasible":
         print("[Supervisor] 任务不可行，输出「无法完成」声明", file=sys.stderr)
-        return _build_abstention_output(state)
+        out = _build_abstention_output(state)
+        out["final_output"] = (out.get("final_output", "") or "") + "\n" + contract_text
+        out["completion_contract"] = contract
+        out.setdefault("trace_steps", []).append(contract_trace)
+        return out
 
     # ─── dsh P0: 空决策短路 — 无结果不调 LLM 生成报告 ───
     if not worker_results:
         print("[Supervisor] 无 Worker 结果，跳过报告生成", file=sys.stderr)
         return {
-            "final_output": state.get("final_output", "⚠️ 无可用结果，未生成报告。"),
-            "trace_steps": [{"step": "finalize_shortcircuit", "no_results": True}],
+            "final_output": (state.get("final_output", "⚠️ 无可用结果，未生成报告。")
+                             + "\n" + contract_text),
+            "completion_contract": contract,
+            "trace_steps": [{"step": "finalize_shortcircuit", "no_results": True}, contract_trace],
         }
 
     combined = "\n\n".join(
@@ -420,13 +753,30 @@ def supervisor_finalize(state: SupervisorState) -> dict:
         for r in worker_results.values()
     )
 
+    # ─── P0-2: 反编造 facts 校验（不改内容结构，仅标注未核实数字；不调报告 LLM）───
+    final, fact_info = _apply_fact_check(final, state)
+
+    # P1-6: 收尾附显式完成契约（feature + passes + 未完成项列表）
+    final = final + "\n" + contract_text
+
+    trace_steps: list[dict] = [{
+        "step": "finalize",
+        "total_elapsed": round(total_elapsed, 1),
+        "rounds": state.get("round", 1),
+    }]
+    if fact_info["checked"]:
+        trace_steps.append({
+            "step": "finalize_fact_check",
+            "checked": True,
+            "unverified_count": len(fact_info["unverified"]),
+            "unverified": [_fmt_num(n) for n in fact_info["unverified"][:12]],
+        })
+    trace_steps.append(contract_trace)
+
     return {
         "final_output": final,
-        "trace_steps": [{
-            "step": "finalize",
-            "total_elapsed": round(total_elapsed, 1),
-            "rounds": state.get("round", 1),
-        }],
+        "completion_contract": contract,
+        "trace_steps": trace_steps,
     }
 
 
@@ -484,6 +834,9 @@ def run_multi_agent(
     t0 = time.time()
     trace_id = trace_id or str(uuid.uuid4())
 
+    # P1-3: 启用主回路无进展熔断（每次 run 重置 guard 状态，避免跨任务串计数）
+    set_no_progress_detection(True, NO_PROGRESS_MAX_REPEATS)
+
     print(f"\n{'='*60}")
     print(f"[Multi-Agent] 任务: {request[:100]}...")
     print(f"{'='*60}")
@@ -506,6 +859,8 @@ def run_multi_agent(
         "worker_results": {},
         "worker_errors": {},
         "all_done": False,
+        "no_progress_tripped": False,
+        "no_progress_events": [],
         "feasibility": "",
         "feasibility_reason": "",
         "final_output": "",
@@ -536,6 +891,8 @@ def run_multi_agent(
         "rounds": final.get("round", 1),
         "elapsed_s": round(elapsed, 2),
         "trace_id": trace_id,
+        "no_progress_tripped": final.get("no_progress_tripped", False),
+        "completion_contract": final.get("completion_contract", {}),
     }
 
     if collector:

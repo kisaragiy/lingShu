@@ -106,6 +106,35 @@ def _record_llm_metrics(model: str, usage: dict | None, success: bool, total: in
         pass
 
 
+def _emit_llm_envelope(model: str, messages: list[dict] | None = None,
+                       system_prompt: str = "", temperature: float | None = None,
+                       usage: dict | None = None, seed: int | None = None,
+                       data: dict | None = None) -> None:
+    """落一次 LLM 调用的可复现信封（P1-1 / P1-4），供日志/trace 排查复现。
+
+    观测层故障绝不允许影响 LLM 调用本身 —— 整函数 try 吞住。
+    信封字段可从上游响应（`data`）补 model_version / system_fingerprint。
+    """
+    try:
+        from ..agent_log import log_llm_envelope
+        from ..reproducibility import reproducibility_envelope
+        resp = data or {}
+        env = reproducibility_envelope(
+            model=model,
+            model_version=resp.get("model") or resp.get("model_version"),
+            provider=resp.get("provider"),
+            seed=seed,
+            temperature=temperature,
+            system_fingerprint=resp.get("system_fingerprint"),
+            messages=messages,
+            system_prompt=system_prompt,
+        )
+        log_llm_envelope(None, env, usage)
+    except Exception:
+        pass
+
+
+
 def call_llama(messages: list[dict], system_prompt: str = "",
                max_tokens: int = 2048, temperature: float = 0.3) -> tuple[str, int]:
     """Call local LLaMA model. Returns (text, tokens_used)."""
@@ -138,6 +167,8 @@ def call_llama(messages: list[dict], system_prompt: str = "",
             tokens = data.get("usage", {}).get("total_tokens", 0)
             ledger_bump(tokens)
             _record_llm_metrics(payload["model"], data.get("usage"), True, tokens)
+            _emit_llm_envelope(payload["model"], messages, system_prompt, temperature,
+                               data.get("usage"), data=data)
             if cache_key and content:
                 _llm_cache_set(cache_key, content, tokens)
             return content, tokens
@@ -146,6 +177,7 @@ def call_llama(messages: list[dict], system_prompt: str = "",
         pass
     print("[LLM] call_llama: LLM 后端不可达，返回空结果", file=sys.stderr)
     _record_llm_metrics(payload["model"], None, False)
+    _emit_llm_envelope(payload["model"], messages, system_prompt, temperature, None)
     return "", 0
 
 
@@ -202,6 +234,8 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
             tokens = data.get("usage", {}).get("total_tokens", 0)
             ledger_bump(tokens)
             _record_llm_metrics(model, data.get("usage"), True, tokens)
+            _emit_llm_envelope(model, messages, system_prompt, 0.7,
+                               data.get("usage"), data=data)
             if content:
                 _llm_cache_set(cache_key, content, tokens)
             return content, tokens
@@ -209,6 +243,7 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
         print(f"[LLM] _post_cloud: 云 API 请求异常 — {e}", file=sys.stderr)
         # 云侧失败单独记 error：能看出「云挂了 → 降级到本地」这个模式（随后 call_llama 会再记一次 success）
         _record_llm_metrics(model, None, False)
+        _emit_llm_envelope(model, messages, system_prompt, 0.7, None)
         pass
     # Fallback to local
     print("[LLM] _post_cloud: 云 API 不可达，降级到本地 LLM", file=sys.stderr)

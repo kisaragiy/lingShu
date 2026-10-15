@@ -28,6 +28,19 @@ class BudgetExceeded(Exception):
     recoverable = True
 
 
+class DailyLevel(Enum):
+    """日聚合预算级别。"""
+    OK = "ok"
+    WARN = "warn"
+    HALT = "halt"
+
+
+def _today_key() -> str:
+    """当天日期键（本地时区 YYYY-MM-DD），用于日聚合的跨日重置。"""
+    return time.strftime("%Y-%m-%d", time.localtime())
+
+
+
 @dataclass
 class TokenBudget:
     """单次会话的 token 预算追踪。
@@ -50,6 +63,14 @@ class TokenBudget:
     warned: bool = False
     asked: bool = False
     started_at: float = field(default_factory=time.time)
+
+    # ─── P0-1: cache 命中统计（只加字段，默认值不改变原有行为）───
+    cache_hit_tokens: int = 0
+    cache_miss_tokens: int = 0
+
+    # ─── P0-4: session kill switch ───
+    killed: bool = False
+    kill_reason: str = ""
 
     def add(self, tokens: int) -> BudgetLevel:
         """记录 token 消耗，返回当前预算级别。"""
@@ -76,6 +97,8 @@ class TokenBudget:
 
     def can_continue(self, level: BudgetLevel) -> bool:
         """根据预算级别判断是否可继续。"""
+        if self.killed:
+            return False  # P0-4: session kill switch — 触发后一律停止
         if level == BudgetLevel.STOP:
             return False
         if level == BudgetLevel.ASK and not self.asked:
@@ -86,6 +109,31 @@ class TokenBudget:
         """用户确认继续。"""
         self.asked = True
         self.soft_limit = int(self.soft_limit * 1.5)  # 下次更宽裕
+
+    # ─── P0-1: cache 指标 ───
+
+    def record_cache(self, hit_tokens: int = 0, miss_tokens: int = 0) -> None:
+        """记录一次 LLM 调用的缓存命中/未命中 token 数。"""
+        if hit_tokens > 0:
+            self.cache_hit_tokens += int(hit_tokens)
+        if miss_tokens > 0:
+            self.cache_miss_tokens += int(miss_tokens)
+
+    @property
+    def cache_hit_rate(self) -> float:
+        """缓存命中率（按 token 计）；无数据时返回 0.0，避免 0/0。"""
+        total = self.cache_hit_tokens + self.cache_miss_tokens
+        if total <= 0:
+            return 0.0
+        return self.cache_hit_tokens / total
+
+    # ─── P0-4: session kill switch ───
+
+    def kill(self, reason: str = "") -> None:
+        """触发 session 级急停开关：之后 can_continue 恒为 False。"""
+        self.killed = True
+        if reason:
+            self.kill_reason = reason
 
     @property
     def estimated_cost(self) -> float:
@@ -103,4 +151,84 @@ class TokenBudget:
             "cost_usd": round(self.estimated_cost, 4),
             "level": self.check().value,
             "elapsed_s": int(time.time() - self.started_at),
+            # P0-1: cache 指标
+            "cache_hit_tokens": self.cache_hit_tokens,
+            "cache_miss_tokens": self.cache_miss_tokens,
+            "cache_hit_rate": round(self.cache_hit_rate, 4),
+            # P0-4: kill switch
+            "killed": self.killed,
+        }
+
+
+@dataclass
+class DailyBudget:
+    """日聚合预算熔断 —— 按日累计成本，超阈值返回停机信号。
+
+    与单会话的 :class:`TokenBudget` 互补：TokenBudget 管「一次会话跑飞」，
+    DailyBudget 管「一整天累计烧钱」。跨日自动归零。
+
+    Args:
+        daily_limit_usd: 当日成本上限（美元）
+        warn_at: 预警比例（默认 0.7 = 70%）
+        halt_at: 停机比例（默认 1.0 = 100%）
+    """
+
+    daily_limit_usd: float = 1.0
+    warn_at: float = 0.7
+    halt_at: float = 1.0
+    used_cost: float = 0.0
+    warned: bool = False
+    halted: bool = False
+    day: str = field(default_factory=_today_key)
+
+    def _rollover(self) -> None:
+        """跨日则重置当日累计。"""
+        today = _today_key()
+        if today != self.day:
+            self.day = today
+            self.used_cost = 0.0
+            self.warned = False
+            self.halted = False
+
+    def add_cost(self, cost: float) -> DailyLevel:
+        """记录一笔成本，返回当前日级别（含停机信号）。"""
+        self._rollover()
+        try:
+            self.used_cost += float(cost or 0.0)
+        except (TypeError, ValueError):
+            pass
+        return self.check()
+
+    def check(self) -> DailyLevel:
+        """检查当日预算状态。"""
+        self._rollover()
+        if self.halted:
+            return DailyLevel.HALT
+        if self.daily_limit_usd and self.used_cost >= self.daily_limit_usd * self.halt_at:
+            self.halted = True
+            return DailyLevel.HALT  # 停机信号
+        if self.daily_limit_usd and self.used_cost >= self.daily_limit_usd * self.warn_at:
+            self.warned = True
+            return DailyLevel.WARN
+        return DailyLevel.OK
+
+    def can_continue(self) -> bool:
+        """是否可继续（HALT 时为 False）。"""
+        return self.check() != DailyLevel.HALT
+
+    @property
+    def remaining_usd(self) -> float:
+        """当日剩余可用额度。"""
+        return max(0.0, self.daily_limit_usd - self.used_cost)
+
+    def summary(self) -> dict[str, Any]:
+        """当日状态摘要。"""
+        return {
+            "day": self.day,
+            "used_cost_usd": round(self.used_cost, 4),
+            "daily_limit_usd": self.daily_limit_usd,
+            "remaining_usd": round(self.remaining_usd, 4),
+            "pct": round(self.used_cost / self.daily_limit_usd * 100, 1) if self.daily_limit_usd else 0,
+            "level": self.check().value,
+            "halted": self.halted,
         }

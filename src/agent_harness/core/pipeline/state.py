@@ -38,8 +38,12 @@ class SupervisorState(TypedDict, total=False):
     worker_results: dict[str, dict]    # {worker_name: WorkerResult}
     worker_errors: dict[str, list[str]]
     all_done: bool                     # supervisor decides if task is complete
+    no_progress_tripped: bool          # P1-3: 主回路无进展熔断已触发
+    no_progress_events: list[dict]     # P1-3: 熔断事件（worker/task/repeats）
     feasibility: str                   # "" | "feasible" | "infeasible" (WP16 abstention)
     feasibility_reason: str            # why the task is infeasible (when feasibility=infeasible)
+    features: list[dict]               # P1-6: 调用方声明的 feature 列表（显式完成契约）
+    completion_contract: dict          # P1-6: 收尾产物 —— feature + passes 布尔 + 未完成项
     final_output: str
     errors: list[str]
     trace_id: str

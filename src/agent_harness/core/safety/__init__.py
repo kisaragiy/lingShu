@@ -18,8 +18,49 @@ from .risk import (
 )
 from .backup import backup_before_write, safe_delete
 
+# ── P0-6：外源不可信标记 + 记忆写入准入 ──
+from .provenance import (
+    TRUSTED,
+    UNTRUSTED,
+    UNKNOWN,
+    EXTERNAL_SOURCE_TOOLS,
+    Provenance,
+    TaggedContent,
+    mark_untrusted,
+    mark_trusted,
+    is_tagged,
+    trust_of,
+    provenance_of,
+    unwrap,
+    is_external_source,
+    classify_tool_result,
+    tag_tool_result,
+)
+from .admission import (
+    Policy,
+    DEFAULT_POLICY,
+    DEFAULT_MEMORY_SINKS,
+    Decision,
+    Released,
+    admit,
+    guard_write,
+    release,
+    make_memory_admission_hook,
+    install_memory_admission,
+    uninstall_memory_admission,
+)
+
 __all__ = [
     "get_mode", "set_mode", "is_full_access", "MODE_DEFAULT", "MODE_FULL",
     "check_operation", "confirm_operation", "pending_operations",
     "backup_before_write", "safe_delete",
+    # provenance
+    "TRUSTED", "UNTRUSTED", "UNKNOWN", "EXTERNAL_SOURCE_TOOLS",
+    "Provenance", "TaggedContent",
+    "mark_untrusted", "mark_trusted", "is_tagged", "trust_of", "provenance_of",
+    "unwrap", "is_external_source", "classify_tool_result", "tag_tool_result",
+    # admission
+    "Policy", "DEFAULT_POLICY", "DEFAULT_MEMORY_SINKS", "Decision", "Released",
+    "admit", "guard_write", "release",
+    "make_memory_admission_hook", "install_memory_admission", "uninstall_memory_admission",
 ]
