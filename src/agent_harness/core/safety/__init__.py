@@ -50,6 +50,22 @@ from .admission import (
     uninstall_memory_admission,
 )
 
+# ── 溯源验证 agent：claim ↔ source 一致性判定（生成/评判分离） ──
+from .claim_verifier import (
+    SUPPORTED,
+    PARTIAL,
+    UNSUPPORTED,
+    Evidence,
+    Verdict,
+    RuleBasedJudge,
+    LLMJudge,
+    extract_citations,
+    verify_claims,
+    verify_one,
+    sources_from_citation_map,
+    rule_judge_spec,
+)
+
 __all__ = [
     "get_mode", "set_mode", "is_full_access", "MODE_DEFAULT", "MODE_FULL",
     "check_operation", "confirm_operation", "pending_operations",
@@ -63,4 +79,8 @@ __all__ = [
     "Policy", "DEFAULT_POLICY", "DEFAULT_MEMORY_SINKS", "Decision", "Released",
     "admit", "guard_write", "release",
     "make_memory_admission_hook", "install_memory_admission", "uninstall_memory_admission",
+    # claim_verifier（溯源验证）
+    "SUPPORTED", "PARTIAL", "UNSUPPORTED", "Evidence", "Verdict",
+    "RuleBasedJudge", "LLMJudge", "extract_citations", "verify_claims", "verify_one",
+    "sources_from_citation_map", "rule_judge_spec",
 ]
