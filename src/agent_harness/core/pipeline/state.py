@@ -49,6 +49,9 @@ class SupervisorState(TypedDict, total=False):
     trace_id: str
     trace_steps: list[dict]
     circuit_breaker: Any               # CircuitBreaker instance
+    token_budget: Any                  # TokenBudget instance（WARN/ASK/STOP 三层软限制）
+    budget_level: str                  # "ok" | "warn" | "ask" | "stop"
+    budget_events: list[dict]          # 预算提醒/告警/急停事件
 
 
 class WorkerState(TypedDict, total=False):

@@ -19,6 +19,7 @@ Architecture:
 
 import concurrent.futures
 import json
+import os
 import re
 import sys
 import time
@@ -39,6 +40,7 @@ from ..config import SUPERVISOR_MAX_ROUNDS
 from ..pipeline.cancel import (
     is_cancelled,
 )
+from ..budget import BudgetLevel, TokenBudget
 from ..pipeline.circuit_breaker import CircuitBreaker
 from ..pipeline.llm import ledger_total
 from ..pipeline.state import SupervisorState, WorkerResult
@@ -78,6 +80,79 @@ def _breaker_tripped(cb: CircuitBreaker | None) -> bool:
         return False
     _feed_breaker_tokens(cb)
     return bool(cb.check()["tripped"])
+
+
+# ─── Token 预算三层软限制（WARN / ASK / STOP）接线 ───
+# `core/budget.py` 的 `TokenBudget` 原语齐备（WARN 提醒 / ASK 请求确认 / STOP 急停
+# + session kill switch + cache 指标），但此前在生产调用链上 0 命中 —— 有芯未接线。
+# 这里把它挂到与硬熔断**同一个每轮检查点**（supervisor_dispatch 收尾 +
+# supervisor_route 判路），共用 pipeline.llm 的全局 token 台账。两者分工：
+#   * CircuitBreaker：硬阈值，撞上即停（token / 超时 / 无进展）。
+#   * TokenBudget  ：软限制三层 —— 先记日志提醒，再告警请求确认，最后强制急停。
+# 预算实例存在 `state["token_budget"]`；喂数的水位线 `_ledger_total` 挂在实例上
+# （每次 run 新建，不跨任务串计数）。缺此字段的旧调用方行为完全不变。
+
+def _new_token_budget() -> TokenBudget:
+    """构造会话级 TokenBudget；阈值可用环境变量覆盖（非法值忽略并提示）。"""
+    budget = TokenBudget()
+    for attr, env_name in (("soft_limit", "HARNESS_TOKEN_SOFT_LIMIT"),
+                           ("hard_limit", "HARNESS_TOKEN_HARD_LIMIT")):
+        raw = os.environ.get(env_name)
+        if not raw:
+            continue
+        try:
+            setattr(budget, attr, int(raw))
+        except (TypeError, ValueError):
+            print(f"[Supervisor] ⚠️ 忽略非法 {env_name}={raw!r}", file=sys.stderr)
+    return budget
+
+
+def _feed_budget(state: SupervisorState) -> BudgetLevel:
+    """把本轮新增的 LLM token 记进会话预算，返回当前预算级别。
+
+    与 `_feed_breaker_tokens` 同一台账来源，但**两本账各记各的 delta**（水位线分别
+    挂在 breaker 与 budget 实例上），互不吞数。state 里没有预算 → 返回 OK。
+    """
+    budget = state.get("token_budget") if isinstance(state, dict) else None
+    if not isinstance(budget, TokenBudget):
+        return BudgetLevel.OK
+    cur = ledger_total()
+    delta = cur - getattr(budget, "_ledger_total", 0)
+    if delta > 0:
+        budget._ledger_total = cur  # type: ignore[attr-defined]
+        return budget.add(delta)
+    return budget.check()
+
+
+def _budget_allows_continue(state: SupervisorState, level: BudgetLevel) -> bool:
+    """预算是否允许继续下一轮（ASK 未确认 / STOP / kill switch → False）。"""
+    budget = state.get("token_budget") if isinstance(state, dict) else None
+    if not isinstance(budget, TokenBudget):
+        return True
+    return budget.can_continue(level)
+
+
+def _handle_budget_level(state: SupervisorState, level: BudgetLevel) -> list[dict]:
+    """按预算级别记日志 / 发告警 / 触发急停，返回预算事件列表（OK → 空）。"""
+    budget = state.get("token_budget") if isinstance(state, dict) else None
+    if not isinstance(budget, TokenBudget) or level == BudgetLevel.OK:
+        return []
+    pct = round(budget.used / budget.soft_limit * 100, 1) if budget.soft_limit else 0.0
+    if level == BudgetLevel.WARN:
+        msg = (f"⚠️ Token 预算提醒：已用 {budget.used}/{budget.soft_limit} "
+               f"({pct}%)，接近软限")
+    elif level == BudgetLevel.ASK:
+        msg = (f"🛑 Token 预算已超软限：{budget.used}/{budget.soft_limit} ({pct}%)，"
+               f"需用户确认后才能继续 —— 本轮提前收尾")
+    else:  # BudgetLevel.STOP
+        reason = f"token 跑飞：{budget.used} ≥ {budget.stop_at:g}× 软限 {budget.soft_limit}"
+        budget.kill(reason)
+        msg = f"🔥 Token 预算急停（kill switch）：{reason}"
+    print(f"[Supervisor] {msg}", file=sys.stderr)
+    if _progress_queue:
+        _progress_queue.put({"type": "progress", "content": msg + "\n"})
+    return [{"level": level.value, "used": budget.used,
+             "soft_limit": budget.soft_limit, "message": msg}]
 
 
 # ─── P1-3: 主回路无进展熔断（with_no_progress_guard 接线）───
@@ -342,6 +417,11 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
                     "content": "🔥 任务熔断（token 超预算/超时/无进展），提前收尾\n",
                 })
 
+    # Token 预算三层软限制 —— 与硬熔断同一检查点（每轮收尾时结算本轮 token）。
+    budget_level = _feed_budget(state)
+    budget_events = _handle_budget_level(state, budget_level)
+    budget_halts = not _budget_allows_continue(state, budget_level)
+
     # Collect trace steps
     all_traces = list(state.get("trace_steps", []))
     all_traces.append({
@@ -356,6 +436,12 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
             "step": "supervisor_no_progress_fuse",
             "events": no_progress_events,
         })
+    if budget_events:
+        all_traces.append({
+            "step": "supervisor_budget",
+            "level": budget_level.value,
+            "events": budget_events,
+        })
 
     tripped = no_progress_tripped or (cb is not None and cb.check()["tripped"])
     return {
@@ -364,7 +450,9 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
         "trace_steps": all_traces,
         "no_progress_tripped": no_progress_tripped or bool(state.get("no_progress_tripped", False)),
         "no_progress_events": list(state.get("no_progress_events", []) or []) + no_progress_events,
-        "all_done": True if tripped else state.get("all_done", False),
+        "budget_level": budget_level.value,
+        "budget_events": list(state.get("budget_events", []) or []) + budget_events,
+        "all_done": True if (tripped or budget_halts) else state.get("all_done", False),
     }
 
 
@@ -375,6 +463,12 @@ def supervisor_route(state: SupervisorState) -> Literal["replan", "finalize"]:
     cb = state.get("circuit_breaker")  # type: ignore[union-attr]
     if _breaker_tripped(cb):
         print("[Supervisor] 🔥 熔断已触发，停止 Replan 提前收尾", file=sys.stderr)
+        return "finalize"
+    # Token 预算三层软限制：ASK（未确认）/ STOP / kill switch → 立即收尾
+    budget_level = _feed_budget(state)
+    if not _budget_allows_continue(state, budget_level):
+        print(f"[Supervisor] 💰 Token 预算级别 {budget_level.value}，停止 Replan 提前收尾",
+              file=sys.stderr)
         return "finalize"
     # P1-3: 主回路无进展熔断 → 立即收尾，不再 replan（否则只会重复空转）
     if state.get("no_progress_tripped"):
@@ -868,6 +962,10 @@ def run_multi_agent(
         "trace_id": trace_id,
         "trace_steps": [],
         "circuit_breaker": CircuitBreaker(),
+        # 会话级 token 预算（WARN/ASK/STOP 三层软限制）；水位线每次 run 重置
+        "token_budget": _new_token_budget(),
+        "budget_level": "ok",
+        "budget_events": [],
     }
 
     if collector:
@@ -893,6 +991,10 @@ def run_multi_agent(
         "trace_id": trace_id,
         "no_progress_tripped": final.get("no_progress_tripped", False),
         "completion_contract": final.get("completion_contract", {}),
+        # 预算摘要：成本/级别/cache 命中率在一等公民字段里可见
+        "budget": initial_state["token_budget"].summary(),
+        "budget_level": final.get("budget_level", "ok"),
+        "budget_events": final.get("budget_events", []),
     }
 
     if collector:
