@@ -8,7 +8,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-1c3d5a?logo=langchain)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-f5de17)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-368%20passed-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-703%20passed-brightgreen)]()
 [![GitHub stars](https://img.shields.io/github/stars/kisaragiy/lingShu?style=flat&logo=github)](https://github.com/kisaragiy/lingShu)
 
 > **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
@@ -67,6 +67,22 @@
 | **Execute Worker** | 桌面 GUI 自动化、浏览器控制、ComfyUI 图像/视频生成 |
 
 > 架构取舍：三个 Worker 各自独立 context，防止并行任务共享同一 LLM 上下文时互相串扰。这是处理并行 Agent 时最常被低估的一个点。
+
+### Harness 工程分层（ETCLOVG）
+
+除模型权重外的一切工程（harness），灵枢按业界七层分类法组织——`core/` 67 个模块**七层全覆盖，无空白层**：
+
+| 层 | 灵枢落位 |
+|---|---|
+| **E**xecution | 安全模式（沙箱优先 / 全权审计）+ 写前自动备份 + 危险操作确认矩阵 + 幂等 key |
+| **T**ool | 工具注册表（40+ 工具六大类）+ MCP 协议暴露 + 插件加载 + MCP 健康治理 |
+| **C**ontext | Token 预算 + RAG 检索（向量 → BM25 降级）+ 会话持久化 |
+| **L**ifecycle-Orchestration ★ | Supervisor-Worker **真并行 fan-out**（只读并行 / 副作用串行）+ 三重熔断 + 降级链 + provider 对冲 + 任务队列 + 可取消 |
+| **O**bservability | run 轨迹 + API 审计 + Prometheus 指标 + 轨迹冻结回放 + 失败归因 |
+| **V**erification | 判据隔离 + judge 冻结 + 在线采样 + 可复现信封 + 溯源准入 |
+| **G**overnance | JWT / RBAC + 准入闸 + 配置 / Prompt 版本戳 |
+
+> 分类法来源：《Agent Harness Engineering: A Survey》(2026)。完整映射、覆盖度分析与演进方向见 [`docs/architecture-harness-layers.md`](docs/architecture-harness-layers.md)。
 
 ---
 
@@ -189,7 +205,7 @@ agent-harness eval          # 运行回归测试
 
 覆盖：搜索、RAG、代码执行、桌面操作、多轮对话、客服场景等。
 
-> 项目共 368 个测试用例通过（`pytest`，实测 **368 passed / 2 skipped**），覆盖工具链路、鉴权与安全护栏、架构边界与数据根隔离、HTTP 契约、可观测性、RAG、成本控制、推理缓存等模块；其中 8 个集成用例需本地起服务（`cs_demo :8788` / `llama.cpp :8080`），默认不收集，用 `pytest -m integration` 显式运行。测试数量以仓库实测为准。
+> 项目共 703 个测试用例通过（`pytest`，2026-10-17 实测 **701 passed / 2 skipped**），覆盖工具链路、鉴权与安全护栏、架构边界与数据根隔离、HTTP 契约、可观测性、RAG、成本控制、推理缓存等模块；其中 8 个集成用例需本地起服务（`cs_demo :8788` / `llama.cpp :8080`），默认不收集，用 `pytest -m integration` 显式运行。测试数量以仓库实测为准。
 
 ---
 
