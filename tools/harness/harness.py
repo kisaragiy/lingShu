@@ -76,6 +76,14 @@ def now_iso() -> str:
 
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 PLACEHOLDER = {"done", "ok", "yes", "fixed", "n/a", "na", "none", "-", "todo"}
+# 长度已达标但零信息的「糊弄话」整串（只做整串匹配：写成
+# "pytest -q => 全绿 41 passed" 不会被误伤，那是合格的输出摘要）。
+# 存在理由：PLACEHOLDER 里全是 <8 字符，会被长度门抢先拦下，
+# 于是「占位符」这条守卫实际只对短词生效，长糊弄话曾是合法证据。
+FAKE_EVIDENCE = {
+    "no evidence", "see logs", "verified", "already verified", "test pass",
+    "tests pass", "lgtm", "all good", "全绿", "已完成", "测试通过", "没问题",
+}
 
 TEMPLATE_FEATURES = [
     {"id": "f1", "desc": "替换为一条可验收的行为（做什么 + 怎么算成功）", "passes": False,
@@ -147,8 +155,10 @@ def require_evidence(ev: str | None) -> str | None:
     if ev is None:
         return "拒绝：`pass` 必须带 --evidence \"<命令或输出摘要>\"（没验证证据不许标完成）"
     s = ev.strip()
-    if s.lower() in PLACEHOLDER:
-        return f"拒绝：证据 {s!r} 是占位符，不算验证"
+    norm = " ".join(s.split()).lower()          # 折叠空白 + 统一小写，再判整串
+    if norm in PLACEHOLDER or norm in FAKE_EVIDENCE:
+        return (f"拒绝：证据 {s!r} 是占位符/糊弄话，不算验证。"
+                f"写成命令或输出摘要，例如 --evidence \"python t.py => 42\"")
     if len(s) < 8:
         return f"拒绝：证据太短（{len(s)} 字符，至少 8）。写成命令或输出摘要，例如 --evidence \"python t.py => 42\""
     return None
