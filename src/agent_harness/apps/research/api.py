@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from agent_harness.core.auth import auth_db as _auth_db
+from agent_harness.core.config import SKILLS_DIR as _LINGSHU_SKILLS_DIR
 from agent_harness.core.auth import auth_jwt as _auth_jwt
 from agent_harness.core.auth.api_security import (
     load_or_generate_token,
@@ -1311,19 +1312,19 @@ async def admin_delete_user(user_id: str, request: Request):
 
 # ─── Skills Management API ───
 
-_HERMES_SKILLS_DIR = Path(os.environ.get("HOME", "~")) / "AppData" / "Local" / "hermes" / "skills"
-if not _HERMES_SKILLS_DIR.exists():
-    _HERMES_SKILLS_DIR = Path.home() / "AppData" / "Local" / "hermes" / "skills"
+# 灵枢自有技能目录（core.config.SKILLS_DIR，可用 HARNESS_SKILLS_DIR 覆盖）。
+# 历史实现硬编码 Hermes 数据目录 = 把灵枢当 Hermes 下游（ADR-001 记录的耦合污点），已解耦。
+_SKILLS_DIR = _LINGSHU_SKILLS_DIR
 
 
 def _scan_skills() -> list[dict]:
     skills = []
-    if not _HERMES_SKILLS_DIR.exists():
+    if not _SKILLS_DIR.exists():
         return skills
-    for d in sorted(_HERMES_SKILLS_DIR.iterdir()):
+    for d in sorted(_SKILLS_DIR.iterdir()):
         if d.is_dir() and not d.name.startswith("_") and not d.name.startswith("."):
             skills.append({"name": d.name, "enabled": True, "builtin": False})
-    disabled_dir = _HERMES_SKILLS_DIR / "_disabled"
+    disabled_dir = _SKILLS_DIR / "_disabled"
     if disabled_dir.exists():
         for d in sorted(disabled_dir.iterdir()):
             if d.is_dir() and not d.name.startswith("."):
@@ -1340,10 +1341,10 @@ async def list_skills():
 async def toggle_skill(request: Request, name: str):
     if _capability_denied("write_host_state"):
         return JSONResponse({"error": "演示模式禁止修改宿主技能库"}, status_code=403)
-    enabled_dir = _HERMES_SKILLS_DIR / name
-    disabled_dir = _HERMES_SKILLS_DIR / "_disabled" / name
+    enabled_dir = _SKILLS_DIR / name
+    disabled_dir = _SKILLS_DIR / "_disabled" / name
     if enabled_dir.exists():
-        target = _HERMES_SKILLS_DIR / "_disabled"
+        target = _SKILLS_DIR / "_disabled"
         target.mkdir(exist_ok=True)
         enabled_dir.rename(disabled_dir)
         return {"name": name, "enabled": False}

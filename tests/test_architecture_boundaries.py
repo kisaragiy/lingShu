@@ -346,7 +346,6 @@ PLATFORM_LITERAL_PINNED = {
                                                  # 绝对路径（C:\llama\、C:\DrawingLive\ComfyUI\、
                                                  # D:\、E:\）——别人机器上这份"可启动应用白名单"
                                                  # 既不匹配也没意义；正解：白名单从配置读 + which 解析
-    ("apps/research/api.py", "AppData"),         # 写宿主 Hermes 技能目录（跨产品边界）
 }
 
 
