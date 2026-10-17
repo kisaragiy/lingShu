@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # init.sh — 灵枢长任务 harness 的「怎么启动 + 怎么冒烟」固化脚本
-# 移植自 Hermes WP5 harness（2026-10-14），并修 D3（默认 harness 路径）/D4（缺 PROGRESS.json 应 ALERT）/D5（用项目 venv）。
+# 长任务 harness 初始化：校验 PROGRESS.json、定位项目 venv、确认默认路径。
 # 契约: 0=READY / 2=ALERT（能起但冒烟失败，或依赖缺失）/ 1=ERROR（脚本自身故障）
 set -uo pipefail
 

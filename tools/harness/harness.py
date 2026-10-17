@@ -41,10 +41,11 @@ from datetime import datetime, timezone
 
 OK, ERROR, ALERT = 0, 1, 2
 
-# 尽量复用 Hermes 契约库（emit/exit 常量）；独立运行（如 demo）时退回本地等价物。
+# 优先复用仓库内统一的契约库（scripts/lib/contract.py）；
+# 外部环境可用 LINGSHU_HARNESS_LIB 指定；都没有时退回本地等价物。
 try:  # pragma: no cover
     _HERE = pathlib.Path(__file__).resolve()
-    for _cand in (_HERE.parent.parent / "scripts", os.environ.get("HERMES_HOME", "")):
+    for _cand in (_HERE.parent.parent / "scripts", os.environ.get("LINGSHU_HARNESS_LIB", "")):
         if not _cand:
             continue
         _p = pathlib.Path(_cand)
