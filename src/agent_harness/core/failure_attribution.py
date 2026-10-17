@@ -386,8 +386,10 @@ def attribute_from_run_result(result: dict, *,
     数据依赖（灵枢默认并行 → 为空）。
     """
     result = result if isinstance(result, dict) else {}
-    worker_results = result.get("worker_results") or {}
-    worker_tasks = result.get("worker_tasks") or {}
+    worker_results = result.get("worker_results")
+    worker_results = worker_results if isinstance(worker_results, dict) else {}
+    worker_tasks = result.get("worker_tasks")
+    worker_tasks = worker_tasks if isinstance(worker_tasks, dict) else {}
 
     steps: list[AttributionStep] = []
     order: list[str] = []
