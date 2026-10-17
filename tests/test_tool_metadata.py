@@ -1,8 +1,8 @@
 """工具元数据契约（#2/#16 的施工清单 + 防漂移门禁）。
 
 @user 的体验清单里 #2（工具平铺无分类）与 #16（无说明入口）是同一条根因：
-**注册表缺 `category` 字段**（实测 0/39），而 `description`/`privilege` 早就齐了
-（39/39 非空；read-only 26 / irreversible 9 / reversible 4）。
+**注册表缺 `category` 字段**（实测 0/37），而 `description`/`privilege` 早就齐了
+（37/37 非空；read-only 25 / irreversible 8 / reversible 4）。
 
 所以缺口只有一个字段 + UI 入口，不是"要补一套元数据"。本文件按 ADR#10 的 ratchet 落：
   * `category` 缺失 = **登记进 allowlist（只许减）** —— 上线即绿，施工中逐条减到清零；
@@ -24,9 +24,9 @@ MIN_DESCRIPTION_LEN = 12
 # 缺失 category 的施工清单（只许减：给某个工具补上 category 后，把它的名字删掉）。
 PINNED_CATEGORY_MISSING = {
     "agent_browser", "app_launch", "browser_automation", "chat_send", "code_execute", "datetime",
-    "desktop_diagnose", "desktop_gui", "fetch", "file_read", "file_write", "frida_stalker",
+    "desktop_diagnose", "desktop_gui", "fetch", "file_read", "file_write",
     "github_issues", "mcp_health", "memory_import", "pattern_scan", "permission_gate",
-    "protobuf_recover", "qq_send", "query_decompose", "rag_index", "rag_query", "reason_ensemble",
+    "qq_send", "query_decompose", "rag_index", "rag_query", "reason_ensemble",
     "reflect", "search", "stock_alert_condition", "stock_compare", "stock_financial",
     "stock_history", "stock_indicator", "stock_market_index", "stock_realtime", "stock_search",
     "summarize", "think", "verify", "web_browse", "web_scrape", "wechat_send",
