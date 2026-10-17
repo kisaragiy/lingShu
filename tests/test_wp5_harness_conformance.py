@@ -16,7 +16,7 @@
   ④ 不变量：passes=true ⇒ evidence 非空；id 唯一合法；desc 非空
 
 `HARNESS_PY` 环境变量可指向另一份 harness.py（用于验证移植副本之间的
-行为一致，例如 Hermes 侧 `$HERMES_HOME/harness/harness.py`）。
+行为一致，例如宿主环境侧 `$LINGSHU_HARNESS_LIB/harness/harness.py`）。
 """
 import json
 import os

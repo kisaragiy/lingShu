@@ -1,6 +1,6 @@
 """灵枢自有技能层（LWP19）。
 
-本包把「skill 库」从产品侧（Hermes 的 skills 目录）收回到 harness 内核：
+本包把「skill 库」从产品侧（外部 agent 的 skills 目录）收回到 harness 内核：
 
 * :mod:`.loader` —— 扫描 ``roots/*/SKILL.md`` → :class:`~agent_harness.core.skill_lifecycle.SkillRecord`
   列表；按 fitness + token 预算挑选可注入 prompt 的子集；渲染成 system prompt 片段。

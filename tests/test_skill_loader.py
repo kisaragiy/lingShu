@@ -87,15 +87,15 @@ def test_parse_frontmatter_ignores_nested_mapping():
     """真实 SKILL.md 形态：metadata 下嵌套 tags 不得被误当成 trigger_keywords。"""
     meta = parse_frontmatter(
         "---\n"
-        "name: hermes-agent\n"
-        "description: Configure or extend Hermes\n"
+        "name: sample-agent\n"
+        "description: Configure or extend a sample agent\n"
         "metadata:\n"
-        "  hermes:\n"
-        "    tags: [hermes, setup]\n"
+        "  agent:\n"
+        "    tags: [agent, setup]\n"
         "---\n"
     )
     assert meta is not None
-    assert meta["description"] == "Configure or extend Hermes"
+    assert meta["description"] == "Configure or extend a sample agent"
     assert "trigger_keywords" not in meta
 
 

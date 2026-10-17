@@ -1313,7 +1313,7 @@ async def admin_delete_user(user_id: str, request: Request):
 # ─── Skills Management API ───
 
 # 灵枢自有技能目录（core.config.SKILLS_DIR，可用 HARNESS_SKILLS_DIR 覆盖）。
-# 历史实现硬编码 Hermes 数据目录 = 把灵枢当 Hermes 下游（ADR-001 记录的耦合污点），已解耦。
+# 历史实现硬编码外部产品的数据目录 = 把灵枢当外部产品的下游（ADR-001 记录的耦合污点），已解耦。
 _SKILLS_DIR = _LINGSHU_SKILLS_DIR
 
 

@@ -4,7 +4,7 @@
 ----------
 生命周期原语已在 :mod:`agent_harness.core.skill_lifecycle` 齐备（四态机、fitness、
 ``loadable_skills`` 闸门），但灵枢**没有自己的加载器**：``apps/research/api.py`` 的
-``_scan_skills()`` 直接指向 **Hermes 的 skills 目录**（跨产品耦合），而且只列目录名，
+``_scan_skills()`` 曾直接指向 **外部产品级的 skills 目录**（跨产品耦合），而且只列目录名，
 从不把 skill 内容送进 prompt。于是「skill 库」在灵枢里只是一张列表，不是能力。
 
 本模块补上缺的那一段，且只补一段：
@@ -116,7 +116,7 @@ def parse_frontmatter(text: str) -> dict[str, Any] | None:
             - 分镜
 
     * 块标量 ``key: |`` / ``key: >`` —— 收集后续更深缩进的行，按空格拼接（折叠）。
-    * **缩进的嵌套映射一律忽略**（真实 SKILL.md 里的 ``metadata:\\n  hermes:\\n    tags: ...``
+    * **缩进的嵌套映射一律忽略**（真实 SKILL.md 里的 ``metadata:\\n  agent:\\n    tags: ...``
       会走到这里），只保留顶层键；这样不会把 ``tags`` 误当成 ``trigger_keywords``。
     """
     block = _split_frontmatter(text)

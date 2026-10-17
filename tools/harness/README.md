@@ -72,7 +72,7 @@ $PY harness/harness.py --dir <项目目录> check [--json]     # watchdog：不�
 
 **C. 通用**
 - 新项目从 `PROGRESS.example.json` 复制，或 `harness.py init --feature ...`。
-- `harness.py` 是全局单副本（放 `HERMES_HOME/harness/`），每个项目只多一个 `PROGRESS.json`。
+- `harness.py` 是全局单副本（放 `~/.lingshu/harness/`），每个项目只多一个 `PROGRESS.json`。
 
 ## 设计上不成立 / 需要注意的地方（诚实声明）
 
