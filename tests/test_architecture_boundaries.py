@@ -413,7 +413,6 @@ SUBPROCESS_CALL_PINNED: set[tuple[str, str]] = {
     ("core/tools/desktop.py", "_tool_app_launch"),        # ← 同时是 shell=True 那处（P0）
     ("core/tools/mcp_utils.py", "call_mcp_tool"),
     ("core/tools/mcp_utils.py", "call_playwright"),
-    ("core/tools/rev_utils.py", "_tool_protobuf_recover"),
 }
 
 # `shell=True` = P0 形状（list 会被拼成一行交给 shell，白名单子串匹配即 RCE）。

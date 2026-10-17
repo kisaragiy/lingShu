@@ -14,7 +14,6 @@ from . import (
     web as _web,
 )
 from . import (
-    rev_utils as _rev_utils,
     pattern_scan as _pattern_scan,
     mcp_health as _mcp_health,
     reasoning as _reasoning,
@@ -49,6 +48,6 @@ __all__ = [
     "register_semantic_validator", "unregister_semantic_validator",
     "clear_semantic_validators", "run_semantic_validators",
     "non_negative", "numeric_range", "matches_type", "one_of", "monotonic",
-    "_desktop", "_misc", "_web", "_rev_utils", "_pattern_scan",
+    "_desktop", "_misc", "_web", "_pattern_scan",
     "_mcp_health", "_reasoning", "_parallel",
 ]
