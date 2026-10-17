@@ -653,13 +653,23 @@ def _apply_fact_check(report: str, state) -> tuple[str, dict]:
 # ——feature 列表 + 每项 `passes` 布尔；`supervisor_finalize` 输出必带「未完成项」显式列表
 # （无未完成则明确声明「无」）。保守原则：**未经验证不得置 passes=true**。
 
+def _worker_results_dict(state: SupervisorState) -> dict:
+    """安全取出 worker_results：外部脏数据（str/list/None）一律当空 dict。
+
+    supervisor 的输入可能来自反序列化/上游节点，不能假设类型正确——
+    非 dict 时若直接迭代或 .get() 会在收尾链路抛异常，把"脏输入"升级成"整体失败"。
+    """
+    results = state.get("worker_results") if isinstance(state, dict) else None
+    return results if isinstance(results, dict) else {}
+
+
 def _feature_verified(state: SupervisorState, worker: str) -> bool:
     """保守判据：仅当有明确证据证明该 worker 交付了实质产物时才认为 feature 完成。
 
     未验证 / 失败 / 空输出 / 带错误 / 无进展熔断 / 部分步骤失败 → False。
     整体任务被判 infeasible 时全部 False（见 build_completion_contract）。
     """
-    r = (state.get("worker_results") or {}).get(worker)
+    r = _worker_results_dict(state).get(worker)
     if not isinstance(r, dict):
         return False
     if not r.get("success"):
@@ -699,7 +709,7 @@ def build_completion_contract(state: SupervisorState) -> dict:
             feats.append({"feature": name or worker, "worker": worker, "passes": bool(passes)})
     else:
         order = list(state.get("workers_assigned") or [])
-        for w in (state.get("worker_results") or {}):
+        for w in _worker_results_dict(state):
             if w not in order:
                 order.append(w)
         tasks = state.get("worker_tasks") or {}
@@ -771,7 +781,7 @@ def supervisor_finalize(state: SupervisorState) -> dict:
     contract_text = render_completion_contract(contract)
     contract_trace = _contract_trace(contract)
 
-    worker_results = state.get("worker_results", {})
+    worker_results = _worker_results_dict(state)
 
     # ─── LWP17: 失败归因（仅当完成契约未完成；纯确定性、零 LLM 调用）───
     attribution_trace: dict | None = None
