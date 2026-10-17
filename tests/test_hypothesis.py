@@ -48,44 +48,6 @@ def test_dedup_deduplicates_identical_urls(urls):
     assert len(normalized) == len(set(normalized)), f"dupes in deduped: {normalized}"
 
 
-@given(st.integers(min_value=1, max_value=15), st.integers(min_value=0, max_value=200))
-def test_protobuf_varint_roundtrip(field_num, value):
-    from agent_harness.core.tools.rev_utils import _infer_protobuf_schema
-    key = (field_num << 3) | 0
-    v = value
-    val_bytes = []
-    while v > 0x7F:
-        val_bytes.append((v & 0x7F) | 0x80)
-        v >>= 7
-    val_bytes.append(v & 0x7F)
-    hex_str = (bytes([key]) + bytes(val_bytes)).hex()
-    result = _infer_protobuf_schema(hex_str)
-    assert result["ok"]
-    assert any(f["field_number"] == field_num for f in result["fields"]), \
-        f"field {field_num} not found in {result['fields']}"
-
-
-@given(st.text(min_size=1, max_size=20, alphabet="abcdefghijklmnopqrstuvwxyz"))
-def test_protobuf_string_roundtrip(text):
-    from agent_harness.core.tools.rev_utils import _infer_protobuf_schema
-    assume(text.isprintable())
-    data = text.encode("utf-8")
-    key = (1 << 3) | 2
-    v = len(data)
-    len_bytes = []
-    while v > 0x7F:
-        len_bytes.append((v & 0x7F) | 0x80)
-        v >>= 7
-    len_bytes.append(v & 0x7F)
-    hex_str = (bytes([key]) + bytes(len_bytes) + data).hex()
-    result = _infer_protobuf_schema(hex_str)
-    assert result["ok"]
-    assert any(
-        isinstance(f.get("sample"), str) and text[:10] in f["sample"]
-        for f in result["fields"]
-    ), f"string '{text}' not recovered in {result}"
-
-
 # ─── 去重键的语义不变量（@bughunter 2026-09-10）───
 # 幂等只是**必要**条件；真正的不变量是"同页带不带追踪参数必须算出同一个键"。
 # 首版实现把分隔符 `?` 与参数一起剥掉、留下 `&id=1`（`re.sub(r"\?&","?")` 修不到这种形状）

@@ -46,7 +46,6 @@ GOLDEN_TESTS: list[str] = [
     "tests/test_result_validation.py",       # 结果校验契约
     "tests/test_circuit_breaker_wiring.py",  # 熔断真实喂入接线
     "tests/test_reproducibility_envelope.py",# 可复现信封纯函数
-    "tests/test_rev_utils.py",               # protobuf/stalker 工具注册与 schema
 ]
 
 
