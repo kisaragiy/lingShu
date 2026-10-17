@@ -746,6 +746,22 @@ def _contract_trace(contract: dict) -> dict:
     }
 
 
+def _render_attribution_section(report) -> str:
+    """LWP17: 渲染「失败归因」小节（仅在存在决定性根因时由调用方调用）。"""
+    decisive = report.decisive
+    if decisive is None:
+        return ""
+    agent, action = decisive
+    lines = [
+        "", "---", "", "## 🔍 失败归因", "",
+        f"- **决定性步骤**: `{agent}` :: `{action}`",
+        f"- **置信度**: {report.confidence:.2f}",
+    ]
+    if report.explanation:
+        lines.append(f"- **症状链**: {report.explanation}")
+    return "\n".join(lines)
+
+
 def supervisor_finalize(state: SupervisorState) -> dict:
     """Synthesize all worker results into a final response."""
     print("\n[Supervisor] 生成最终回复...")
@@ -756,6 +772,21 @@ def supervisor_finalize(state: SupervisorState) -> dict:
     contract_trace = _contract_trace(contract)
 
     worker_results = state.get("worker_results", {})
+
+    # ─── LWP17: 失败归因（仅当完成契约未完成；纯确定性、零 LLM 调用）───
+    attribution_trace: dict | None = None
+    attribution_section = ""
+    if not contract.get("complete") and state.get("feasibility") != "infeasible":
+        try:
+            from ..failure_attribution import attribute_from_run_result
+            _attr = attribute_from_run_result(state)
+            attribution_trace = {"step": "failure_attribution", **_attr.to_dict()}
+            if _attr.decisive is not None:
+                attribution_section = _render_attribution_section(_attr)
+        except Exception as _e:  # 保守原则：归因失败绝不中断收尾
+            print(f"[Supervisor] 失败归因跳过（异常）: {_e}", file=sys.stderr)
+            attribution_trace = None
+            attribution_section = ""
 
     # ─── WP16: infeasible → declare inability, do NOT call the report LLM ───
     if state.get("feasibility") == "infeasible":
@@ -853,6 +884,10 @@ def supervisor_finalize(state: SupervisorState) -> dict:
     # P1-6: 收尾附显式完成契约（feature + passes + 未完成项列表）
     final = final + "\n" + contract_text
 
+    # LWP17: 仅当存在决定性根因时，追加「失败归因」小节
+    if attribution_section:
+        final = final + "\n" + attribution_section
+
     trace_steps: list[dict] = [{
         "step": "finalize",
         "total_elapsed": round(total_elapsed, 1),
@@ -866,6 +901,8 @@ def supervisor_finalize(state: SupervisorState) -> dict:
             "unverified": [_fmt_num(n) for n in fact_info["unverified"][:12]],
         })
     trace_steps.append(contract_trace)
+    if attribution_trace:
+        trace_steps.append(attribution_trace)
 
     return {
         "final_output": final,
