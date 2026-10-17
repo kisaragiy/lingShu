@@ -8,7 +8,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-1c3d5a?logo=langchain)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-f5de17)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-703%20passed-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-769%20passed-brightgreen)]()
 [![GitHub stars](https://img.shields.io/github/stars/kisaragiy/lingShu?style=flat&logo=github)](https://github.com/kisaragiy/lingShu)
 
 > **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
@@ -75,7 +75,7 @@
 | 层 | 灵枢落位 |
 |---|---|
 | **E**xecution | 安全模式（沙箱优先 / 全权审计）+ 写前自动备份 + 危险操作确认矩阵 + 幂等 key |
-| **T**ool | 工具注册表（40+ 工具六大类）+ MCP 协议暴露 + 插件加载 + MCP 健康治理 |
+| **T**ool | 工具注册表（37 个工具六大类）+ MCP 协议暴露 + 插件加载 + MCP 健康治理 |
 | **C**ontext | Token 预算 + RAG 检索（向量 → BM25 降级）+ 会话持久化 |
 | **L**ifecycle-Orchestration ★ | Supervisor-Worker **真并行 fan-out**（只读并行 / 副作用串行）+ 三重熔断 + 降级链 + provider 对冲 + 任务队列 + 可取消 |
 | **O**bservability | run 轨迹 + API 审计 + Prometheus 指标 + 轨迹冻结回放 + 失败归因 |
@@ -134,7 +134,7 @@ agent-harness serve
 | **全链路自动化** | 搜索 → 分析 → 排版精美的 HTML 报告（A4 打印优化），一条指令完成 |
 | **OpenAI 兼容 API** | `/v1/chat/completions` + `/v1/models`，支持 SSE 流式 |
 | **三模型群回退** | 本地 llama.cpp → WSL Ollama → DeepSeek Flash API 自动降级 |
-| **39 个工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类（实测注册数） |
+| **37 个工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类（实测注册数） |
 | **防复现知识管道** | 把高频技术/求职知识沉淀为结构化规则库（35 条）· 中文 2-gram 检索 · 每日笔记自动抽候选 · 38 测试通过 |
 | **三重熔断** | Token 预算 / 超时 / 无进展 自动熔断保护 |
 | **RAG 知识库** | 上传 PDF/DOCX/TXT → 向量搜索 + BM25 关键词降级 |
@@ -205,7 +205,7 @@ agent-harness eval          # 运行回归测试
 
 覆盖：搜索、RAG、代码执行、桌面操作、多轮对话、客服场景等。
 
-> 项目共 703 个测试用例通过（`pytest`，2026-10-17 实测 **701 passed / 2 skipped**），覆盖工具链路、鉴权与安全护栏、架构边界与数据根隔离、HTTP 契约、可观测性、RAG、成本控制、推理缓存等模块；其中 8 个集成用例需本地起服务（`cs_demo :8788` / `llama.cpp :8080`），默认不收集，用 `pytest -m integration` 显式运行。测试数量以仓库实测为准。
+> 项目共 769 个测试用例通过（`pytest`，2026-10-18 实测 **769 passed / 2 skipped**，收集 779、8 个 integration 默认 deselect），覆盖工具链路、鉴权与安全护栏、架构边界与数据根隔离、HTTP 契约、可观测性、RAG、成本控制、推理缓存等模块；其中 8 个集成用例需本地起服务（`cs_demo :8788` / `llama.cpp :8080`），默认不收集，用 `pytest -m integration` 显式运行。测试数量以仓库实测为准。
 
 ---
 

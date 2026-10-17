@@ -38,9 +38,9 @@
 | **网页抓取** | fetch/web_scrape/agent_browser 三级抓取，Playwright 兜底 |
 | **RAG 知识库** | PDF/DOCX/TXT → 向量搜索 / BM25 关键词降级 + 嵌入状态提示 |
 | **JWT 认证 + RBAC** | HMAC-SHA256 双 token + admin/user 两角色 + CSP + 审计日志 |
-| **39 个工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类 |
+| **37 个工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类 |
 | **核心+场景分层** | `core/` 共享基础设施 + `apps/research` 调研 + `apps/cs_demo` 客服 |
-| **测试体系** | 325 单元测试 + CI 集成 |
+| **测试体系** | 769 单元测试 + CI 集成 |
 | **exe 打包** | PyInstaller 单文件夹 exe，开箱即用 |
 | **Docker 部署** | 多阶段构建 + docker-compose（LingShu + SearXNG） |
 | 微信小程序 | 7 页面移动端（对话/报告/客服/个人中心），4 tab，对接灵枢 API | v0.63 |
@@ -239,7 +239,7 @@ v0.75.2 安全护栏 fail-closed — registry 两处 ImportError 不再静默裸
 第二层（60 秒）：
   "核心架构是 Supervisor-Worker 模式，用 LangGraph 定义工作流图。
    Worker 并行跑搜索/分析/执行，Supervisor 验收结果。做了三重熔断防失控。
-   前端 pywebview，后端 FastAPI，JWT 认证，RAG 知识库，361 个测试。"  
+   前端 pywebview，后端 FastAPI，JWT 认证，RAG 知识库，769 个测试。"  
 
 第三层（3 分钟）：
   "迭代了 50+ 版本，重构过一次架构（从单体到 core+apps 分层）。
