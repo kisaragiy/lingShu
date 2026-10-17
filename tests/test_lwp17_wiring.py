@@ -122,3 +122,24 @@ def test_deterministic():
     a = _find_trace(gm.supervisor_finalize(_state()), "failure_attribution")
     b = _find_trace(gm.supervisor_finalize(_state()), "failure_attribution")
     assert a == b, "同输入两次归因 trace 必须一致"
+
+
+# ═══════════ ⑥ 脏 state（worker_results 非 dict）不得炸收尾 ═══════════
+
+@pytest.mark.parametrize("junk", ["这不是 dict", ["w1"], 42, None])
+def test_malformed_worker_results_does_not_raise(junk):
+    """上游给脏数据（反序列化失败/节点写错类型）时，收尾必须照常完成。
+
+    修复前：``_feature_verified`` 对 str 直接 ``.get()`` → AttributeError，
+    把「一条脏数据」升级成「整个任务失败」。守卫必须在取值处，不能靠调用方自觉。
+    """
+    state = {
+        "session_id": "test-lwp17-junk",
+        "request": "调研 junk",
+        "round": 1,
+        "worker_results": junk,
+        "feasibility": "feasible",
+    }
+    out = gm.supervisor_finalize(state)  # 不应抛出
+    assert isinstance(out.get("final_output"), str)
+    assert "completion_contract" in out
