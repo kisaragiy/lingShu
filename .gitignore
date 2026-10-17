@@ -42,3 +42,7 @@ htmlcov/
 # harness 的机器可读载体必须入库（上面的 `*.json` 黑名单会静默吃掉它）
 !PROGRESS.json
 !tools/harness/*.json
+
+# 内部设计稿/对账文档不进公开仓库（对外只展示 README 与对外架构文档）
+docs/a-line-*.md
+docs/*-closeout-design.md
