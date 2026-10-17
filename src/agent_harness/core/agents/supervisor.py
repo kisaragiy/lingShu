@@ -251,6 +251,34 @@ def _fallback_plan(user_request: str) -> dict:
 
 # ─── Supervisor nodes ───
 
+def _render_skills_hint(token_budget: int = 800) -> str:
+    """把可加载的 skill 渲染成 prompt 片段（LWP19 接线）。
+
+    语义上是**建议**不是硬约束：技能只影响 supervisor 怎么拆子任务，
+    不改调度规则。任何异常都降级为空串 —— 技能注入不能成为主链路的失败点。
+    """
+    try:
+        from ..config import SKILLS_DIR
+        from ..skills.loader import render_skills_prompt, scan, select_prompt_skills
+
+        records = scan([SKILLS_DIR])
+        if not records:
+            return ""
+        rendered = render_skills_prompt(
+            select_prompt_skills(records, token_budget=token_budget)
+        )
+        if not rendered:
+            return ""
+        return (
+            "\n\n🧩 可用技能（供分配参考，不是硬约束）:\n"
+            f"{rendered}\n"
+            "如果子任务与某技能的触发词匹配，在分配的 task 里要求 worker 遵循该技能。"
+        )
+    except Exception as exc:  # noqa: BLE001 — 技能注入失败必须静默降级
+        print(f"[Supervisor] 技能注入跳过: {exc}", file=sys.stderr)
+        return ""
+
+
 def supervisor_analyze(state: SupervisorState) -> dict:
     """Analyze request and determine which workers to assign."""
     request = state["request"]
@@ -290,10 +318,13 @@ def supervisor_analyze(state: SupervisorState) -> dict:
     except Exception:
         pass
 
+    skills_hint = _render_skills_hint()
+
     system = (
         "你是一个任务调度主管。分析用户请求，决定需要哪些 Worker 来处理。\n\n"
         f"可用的 Worker:\n{workers_desc}\n"
         f"{kb_hint}"
+        f"{skills_hint}"
         "规则:\n"
         "1. 需要搜索信息 → 分配 search worker，给它具体的多角度搜索指令\n"
         "2. 需要分析/计算/总结/翻译/列举 → 分配 analyze worker\n"
