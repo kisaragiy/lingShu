@@ -46,3 +46,6 @@ htmlcov/
 # 内部设计稿/对账文档不进公开仓库（对外只展示 README 与对外架构文档）
 docs/a-line-*.md
 docs/*-closeout-design.md
+
+# 内部工作准则/自查文档：只留本地，不进公开仓库
+docs-internal/
