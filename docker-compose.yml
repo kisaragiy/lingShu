@@ -34,9 +34,13 @@ services:
       # 容器内无代理时 bing/google 一律返回空文档（"parsing error"），只剩国内引擎，
       # 而国内引擎高频抓取会立刻 CAPTCHA 封禁 → 表现为 HTTP 200 + results=0 的"假成功"。
       # 指向宿主代理（Docker Desktop 的 host.docker.internal）。
+      # 注意：宿主代理若只监听 127.0.0.1（本机 smart-proxy 就是），
+      # 容器经 host.docker.internal 访问会全部 timeout —— 此时引擎状态是
+      # "timeout" 而不是 CAPTCHA。要么让代理监听网关地址，要么接受 SearXNG 出不了网。
       - HTTP_PROXY=${SEARXNG_HTTP_PROXY:-http://host.docker.internal:7899}
       - HTTPS_PROXY=${SEARXNG_HTTP_PROXY:-http://host.docker.internal:7899}
-      - NO_PROXY=localhost,127.0.0.1
+      # 国内引擎直连：走境外出口会被识别成异常 IP，百度/搜狗立刻 CAPTCHA
+      - NO_PROXY=localhost,127.0.0.1,baidu.com,sogou.com,so.com,360.cn,quark.cn,sm.cn,cn.bing.com
     volumes:
       - searxng_data:/etc/searxng:rw
     cap_drop:

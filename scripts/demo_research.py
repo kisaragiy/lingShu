@@ -140,6 +140,13 @@ def main(argv: list[str] | None = None) -> int:
             "按契约以退出码 2 告警。",
             file=sys.stderr,
         )
+        print(
+            "[demo] 排查顺序：① SearXNG 是否在跑（curl 127.0.0.1:4000/search?q=test&format=json）"
+            "② SearXNG 的 settings.yml 里 search.formats 是否含 json（否则 403）"
+            "③ 容器能否出网 / 引擎是否被 CAPTCHA（响应里的 unresponsive_engines 字段）"
+            "④ 是否配了 TAVILY_API_KEY。",
+            file=sys.stderr,
+        )
         return EXIT_ALERT
     return EXIT_OK
 
