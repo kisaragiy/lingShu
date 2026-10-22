@@ -26,6 +26,9 @@ from agent_harness.core.auth.api_security import (
 from agent_harness.core.tools.tool_config import is_tool_enabled
 from agent_harness.core.tools.tool_config import list_disabled as _list_disabled_tools
 from agent_harness.core.tools.tool_config import toggle_tool as _toggle_tool
+from agent_harness.core.pipeline.cancel import cancel_task as _cancel_task
+from agent_harness.core.pipeline.cancel import register_task as _register_cancel_task
+from agent_harness.core.pipeline.cancel import unregister_task as _unregister_cancel_task
 from agent_harness.core.pipeline.session_store import (
     delete_session as _delete_session,
 )
@@ -98,12 +101,42 @@ MAX_HISTORY_MSGS = MAX_HISTORY_ROUNDS * 2
 SESSION_TRIM_AT = MAX_HISTORY_ROUNDS * 4
 
 # ─── Running task registry (for cancellation) ───
+# session_id → 该会话自己的取消信号。信号本体注册在 core.pipeline.cancel 的注册表里
+# （ENG-21：按 session 作用域，取消 A 不会波及 B），这里只是同对象的索引 + 列表展示用。
 _running_tasks: dict[str, threading.Event] = {}
 _running_tasks_lock = threading.Lock()
+
+
+def _register_running_task(session_id: str) -> threading.Event | None:
+    """登记一个运行中任务，返回它的取消信号（同一 session 复用同一个 event）。"""
+    if not session_id:
+        return None
+    with _running_tasks_lock:
+        event = _running_tasks.get(session_id)
+        if event is None:
+            event = _register_cancel_task(session_id)
+            _running_tasks[session_id] = event
+        return event
+
+
+def _unregister_running_task(session_id: str) -> None:
+    """任务收尾：两处注册表都清掉，避免残留（ENG-19 断开/结束路径共用）。"""
+    if not session_id:
+        return
+    with _running_tasks_lock:
+        _running_tasks.pop(session_id, None)
+    _unregister_cancel_task(session_id)
+
 
 # ─── Agent concurrency control ───
 _MAX_CONCURRENT_AGENTS = int(os.environ.get("HARNESS_MAX_CONCURRENT_AGENTS", "5"))
 _agent_semaphore = threading.Semaphore(_MAX_CONCURRENT_AGENTS) if _MAX_CONCURRENT_AGENTS > 0 else None
+# 排队上限：等不到名额就 503，而不是无限挂住请求（流式/非流式共用）
+_SEMAPHORE_TIMEOUT_S = 300
+# 客户端断开后给 worker 的收尾窗口
+_STREAM_JOIN_TIMEOUT_S = 5.0
+# 排队超时后的统一回复（worker 侧；handler 侧返回 503 JSON）
+_BUSY_REPLY = f"⚠️ 服务器繁忙，当前有 {_MAX_CONCURRENT_AGENTS} 个任务在执行中，请稍后重试。"
 
 _LLM_UNREACHABLE_REPLY = (
     "⚠️ LLM 后端不可用，无法生成回复。\n\n"
@@ -187,7 +220,8 @@ def _execute_multi(prompt: str, history_context: str, session_id: str = "", kb_s
                     })
     except Exception:
         pass
-    return run_multi_agent(enhanced)
+    # session_id 作为 task_id 透传到 supervisor/worker，取消信号才按会话生效（ENG-21）
+    return run_multi_agent(enhanced, task_id=session_id)
 
 
 def _execute_single(prompt: str, history_context: str, kb_scope: str = "") -> str:
@@ -217,18 +251,29 @@ def _execute_single(prompt: str, history_context: str, kb_scope: str = "") -> st
     return run_single(enhanced)
 
 
-def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, session_id: str = "", kb_scope: str = ""):
+def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, session_id: str = "",
+                    kb_scope: str = "", pre_acquired: bool = False):
+    """Worker 线程体：把 agent 事件塞进 queue。
+
+    pre_acquired=True 表示并发名额已由调用方（流式 handler）acquire 过：这里既不再
+    acquire，也**不 release** —— 计数由持有者配平；否则信号量被过度释放，
+    `_MAX_CONCURRENT_AGENTS` 形同失效。
+    """
+    acquired_here = False
     try:
         from agent_harness.core.graph.graph_multi import clear_progress_queue, set_progress_queue
-        from agent_harness.core.pipeline.cancel import clear_cancel_event, set_cancel_event
         set_progress_queue(q)
-        if _agent_semaphore is not None:
-            _agent_semaphore.acquire()
+        if not pre_acquired and _agent_semaphore is not None:
+            # 必须检查返回值：acquire 超时返回 False，此时既没拿到名额，
+            # 也绝不能在 finally 里 release —— 否则每超时一次就把并发上限放大 1，
+            # 最后一道闸门自己漏光。
+            acquired_here = _agent_semaphore.acquire(timeout=_SEMAPHORE_TIMEOUT_S)
+            if not acquired_here:
+                q.put({"type": "error", "content": _BUSY_REPLY})
+                q.put({"type": "done"})
+                return
         if session_id:
-            cancel_event = threading.Event()
-            with _running_tasks_lock:
-                _running_tasks[session_id] = cancel_event
-            set_cancel_event(cancel_event)
+            _register_running_task(session_id)
         q.put({"type": "status", "content": "🤔 分析请求中...\n"})
         if model in ("agent-harness", "agent-harness-single", "lingShu-fast"):
             q.put({"type": "status", "content": "⚡ 快模式（单 Agent）处理中...\n"})
@@ -259,50 +304,73 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
         q.put({"type": "done"})
     finally:
         try:
-            if _agent_semaphore is not None:
+            if acquired_here and _agent_semaphore is not None:
                 _agent_semaphore.release()
             from agent_harness.core.graph.graph_multi import clear_progress_queue
-            from agent_harness.core.pipeline.cancel import clear_cancel_event
             clear_progress_queue()
-            clear_cancel_event()
             if session_id:
-                with _running_tasks_lock:
-                    _running_tasks.pop(session_id, None)
+                _unregister_running_task(session_id)
         except Exception:
             pass
 
 
-async def _stream_progress(prompt: str, history: str, model: str, session_id: str, kb_scope: str = "", owner_id: str = ""):
+async def _stream_progress(prompt: str, history: str, model: str, session_id: str, kb_scope: str = "",
+                           owner_id: str = "", sem_acquired: bool = False):
+    """SSE generator：转发 worker 事件，并在收尾时把任务资源全部还回去。
+
+    sem_acquired=True 表示 handler 层已经 acquire 过并发名额（ENG-19）——释放由这里
+    在 finally 里做一次，worker 那边（pre_acquired=True）不碰信号量，计数才配平。
+
+    客户端断开时 Starlette 会 `aclose()` 这个 generator（CancelledError/GeneratorExit），
+    finally 因此一定会跑：先 cancel 掉本 session 的任务（worker 里已有 is_cancelled
+    checkpoint，会早退省 token），再等它收尾、清注册表。
+    """
     q = queue.Queue()
+    _register_running_task(session_id)
     t = threading.Thread(
-        target=_run_with_queue, args=(prompt, history, model, q, session_id, kb_scope), daemon=True
+        target=_run_with_queue,
+        args=(prompt, history, model, q, session_id, kb_scope),
+        kwargs={"pre_acquired": sem_acquired},
+        daemon=True,
     )
     t.start()
-    yield _sse_chunk("", role="assistant")
     result_text = ""
-    while True:
-        try:
-            event = q.get(timeout=0.5)
-        except queue.Empty:
-            if not t.is_alive():
+    finished = False
+    try:
+        yield _sse_chunk("", role="assistant")
+        while True:
+            try:
+                event = q.get(timeout=0.5)
+            except queue.Empty:
+                if not t.is_alive():
+                    break
+                continue
+            if event["type"] == "done":
                 break
-            continue
-        if event["type"] == "done":
-            break
-        elif event["type"] in ("error", "status", "progress"):
-            content = event["content"]
-            result_text += content
-            yield _sse_chunk(content)
-        elif event["type"] == "result":
-            content = event["content"]
-            result_text = content
-            yield _sse_chunk(content)
-    session = _load_session(session_id) or []
-    session.append({"role": "user", "content": prompt, "ts": time.time()})
-    session.append({"role": "assistant", "content": result_text, "ts": time.time()})
-    # 流式路径此前不写 owner → 会话无主，用户自己回看会被 404（与非流式不一致）
-    _save_session(session_id, session, owner_id=owner_id)
-    yield _sse_done(result_text)
+            elif event["type"] in ("error", "status", "progress"):
+                content = event["content"]
+                result_text += content
+                yield _sse_chunk(content)
+            elif event["type"] == "result":
+                content = event["content"]
+                result_text = content
+                yield _sse_chunk(content)
+        session = _load_session(session_id) or []
+        session.append({"role": "user", "content": prompt, "ts": time.time()})
+        session.append({"role": "assistant", "content": result_text, "ts": time.time()})
+        # 流式路径此前不写 owner → 会话无主，用户自己回看会被 404（与非流式不一致）
+        _save_session(session_id, session, owner_id=owner_id)
+        finished = True
+        yield _sse_done(result_text)
+    finally:
+        if not finished:
+            # 半截 session 不保存；只发取消信号，让 worker 在下一个 checkpoint 早退
+            _cancel_task(session_id)
+        # 给 worker 收尾窗口（有界，避免无限等一个卡死的工具调用）
+        t.join(timeout=_STREAM_JOIN_TIMEOUT_S)
+        _unregister_running_task(session_id)
+        if sem_acquired and _agent_semaphore is not None:
+            _agent_semaphore.release()
 
 
 # ─── FastAPI router ───
@@ -414,9 +482,23 @@ async def chat_completions(req: ChatRequest, request: Request):
     print(f"[Harness] [{session_id[:8]}] model={req.model} stream={req.stream} msg={last_user_msg[:60]}... history={len(history_messages)}")
 
     if req.stream:
+        # ENG-19：默认路径（前端 stream=true）也必须过并发闸门。信号量是 threading 的，
+        # 直接在 async handler 里 acquire 会阻塞 event loop —— 必须 to_thread。
+        sem_acquired = False
+        if _agent_semaphore is not None:
+            # 注意：Semaphore.acquire 的首个位置参数是 blocking，timeout 必须用关键字
+            sem_acquired = await asyncio.to_thread(
+                lambda: _agent_semaphore.acquire(timeout=_SEMAPHORE_TIMEOUT_S)
+            )
+            if not sem_acquired:
+                return JSONResponse(
+                    {"error": f"服务器繁忙，当前有 {_MAX_CONCURRENT_AGENTS} 个任务在执行中，请稍后重试"},
+                    status_code=503,
+                )
         return StreamingResponse(
             _stream_progress(last_user_msg, history_context, req.model, session_id,
-                             _kb_scope_prefix(request), getattr(request.state, "user", {}).get("id", "")),
+                             _kb_scope_prefix(request), getattr(request.state, "user", {}).get("id", ""),
+                             sem_acquired=sem_acquired),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -436,11 +518,7 @@ async def chat_completions(req: ChatRequest, request: Request):
                     {"error": f"服务器繁忙，当前有 {_MAX_CONCURRENT_AGENTS} 个任务在执行中，请稍后重试"},
                     status_code=503,
                 )
-        cancel_event = threading.Event()
-        with _running_tasks_lock:
-            _running_tasks[session_id] = cancel_event
-        from agent_harness.core.pipeline.cancel import set_cancel_event
-        set_cancel_event(cancel_event)
+        _register_running_task(session_id)
 
         if req.model in ("agent-harness", "agent-harness-single", "lingShu-fast"):
             response_text = await asyncio.get_event_loop().run_in_executor(
@@ -450,7 +528,7 @@ async def chat_completions(req: ChatRequest, request: Request):
             workers = []
         else:
             result = await asyncio.get_event_loop().run_in_executor(
-                None, _execute_multi, last_user_msg, history_context, "", _kb_scope_prefix(request)
+                None, _execute_multi, last_user_msg, history_context, session_id, _kb_scope_prefix(request)
             )
             response_text = result.get("final_output", "") or _LLM_UNREACHABLE_REPLY
             rounds = result.get("rounds", 1)
@@ -485,10 +563,7 @@ async def chat_completions(req: ChatRequest, request: Request):
     finally:
         if acquired and _agent_semaphore is not None:
             _agent_semaphore.release()
-        with _running_tasks_lock:
-            _running_tasks.pop(session_id, None)
-        from agent_harness.core.pipeline.cancel import clear_cancel_event
-        clear_cancel_event()
+        _unregister_running_task(session_id)
 
     return {
         "id": f"chatcmpl-{int(time.time())}",
@@ -994,14 +1069,12 @@ async def list_running_tasks():
 
 @router.post("/v1/tasks/{session_id}/cancel")
 async def cancel_task(session_id: str):
-    with _running_tasks_lock:
-        event = _running_tasks.get(session_id)
-    if not event:
+    # 只 set 这个 session 自己的信号（ENG-21）——不能碰全局兜底事件，否则会错杀别的会话
+    if not _cancel_task(session_id):
         return JSONResponse(
             {"error": f"No running task for session: {session_id}"},
             status_code=404,
         )
-    event.set()
     return {"status": "cancelled", "session_id": session_id}
 
 

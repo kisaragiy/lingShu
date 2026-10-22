@@ -276,8 +276,8 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
     workers_assigned = state.get("workers_assigned", [])
     worker_tasks = state.get("worker_tasks", {})
 
-    # Check cancellation before dispatching
-    if is_cancelled():
+    # Check cancellation before dispatching（ENG-21：只查本 session 的信号）
+    if is_cancelled(state.get("task_id", "")):
         print("[Supervisor] ⛔ 用户取消了任务")
         if _progress_queue:
             _progress_queue.put({"type": "progress", "content": "⛔ 任务已取消\n"})
@@ -322,12 +322,13 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
                 "type": "progress",
                 "content": f"▶️ {wname} 开始工作: {task[:60]}...\n"
             })
+        task_id = state.get("task_id", "")
         if _trace_collector:
             with _trace_collector.span(f"worker:{wname}", "worker", task=task[:80]):
-                result = run_worker(wname, task)
+                result = run_worker(wname, task, task_id=task_id)
                 _trace_collector.record_metadata("output_preview", str(result.get("output", ""))[:100])
                 return result
-        return run_worker(wname, task)
+        return run_worker(wname, task, task_id=task_id)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(parallel_workers)) as pool:
         futures = {}
@@ -346,7 +347,7 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
 
         for future in concurrent.futures.as_completed(futures):
             # Check cancellation
-            if is_cancelled():
+            if is_cancelled(state.get("task_id", "")):
                 print("[Supervisor] ⛔ 取消检测到，停止等待 Worker")
                 for f in futures:
                     f.cancel()
@@ -374,7 +375,7 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
 
     # Serial tail: remaining side-effect workers run one by one (Cognition P2)
     for wname in serial_workers:
-        if is_cancelled():
+        if is_cancelled(state.get("task_id", "")):
             print("[Supervisor] ⛔ 取消检测到，跳过串行 Worker")
             break
         task = worker_tasks.get(wname, state["request"])
@@ -1213,6 +1214,7 @@ def run_multi_agent(
     goal: str = "",
     trace_id: str = "",
     enable_tracing: bool = False,
+    task_id: str = "",
 ) -> dict[str, Any]:
     """Run the multi-agent pipeline from a single request.
 
@@ -1221,6 +1223,7 @@ def run_multi_agent(
         goal: Optional explicit goal description
         trace_id: Optional trace ID for logging
         enable_tracing: If True, collect detailed trace spans
+        task_id: 取消作用域 ID（API 传 session_id）。空串 → 回落全局兜底事件（CLI）
 
     Returns:
         Dict with final_output, trace_steps, errors, elapsed, trace_tree (if enabled)
@@ -1260,6 +1263,7 @@ def run_multi_agent(
         "final_output": "",
         "errors": [],
         "trace_id": trace_id,
+        "task_id": task_id,
         "trace_steps": [],
         "circuit_breaker": CircuitBreaker(),
         # 会话级 token 预算（WARN/ASK/STOP 三层软限制）；水位线每次 run 重置

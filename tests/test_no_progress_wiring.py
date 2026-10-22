@@ -100,7 +100,7 @@ def _disp_state(round_: int = 1, tasks=None) -> dict:
 def test_dispatch_trips_on_repeated_rounds(monkeypatch):
     calls = []
 
-    def fake_run_worker(wname, task):
+    def fake_run_worker(wname, task, task_id=""):
         calls.append((wname, task))
         return _ok(wname, task)
 
@@ -123,7 +123,7 @@ def test_dispatch_trips_on_repeated_rounds(monkeypatch):
 def test_dispatch_no_misfire_when_tasks_change(monkeypatch):
     calls = []
 
-    def fake_run_worker(wname, task):
+    def fake_run_worker(wname, task, task_id=""):
         calls.append((wname, task))
         return _ok(wname, task)
 
@@ -139,7 +139,7 @@ def test_dispatch_no_misfire_when_tasks_change(monkeypatch):
 def test_dispatch_untouched_when_disabled(monkeypatch):
     calls = []
     monkeypatch.setattr(gm, "run_worker",
-                        lambda w, t: (calls.append((w, t)), _ok(w, t))[1])
+                        lambda w, t, task_id="": (calls.append((w, t)), _ok(w, t))[1])
     gm.set_no_progress_detection(False)
     for _ in range(5):
         out = gm.supervisor_dispatch(_disp_state())

@@ -134,7 +134,7 @@ def test_dispatch_serializes_side_effect_workers(monkeypatch):
     lock = threading.Lock()
     active = {"n": 0, "max": 0}
 
-    def fake_run_worker(wname: str, task: str):
+    def fake_run_worker(wname: str, task: str, task_id: str = ""):
         with lock:
             active["n"] += 1
             active["max"] = max(active["max"], active["n"])
