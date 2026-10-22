@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed — 评测口径加事实性维度（ENG-40）
+- ⚖️ 原评分 keyword 独占 40 分：「市值 1 亿」和「市值 1 万亿」只要都含关键词就同分——测的是「输出了相关词」，不是「内容对」。现拆为 keyword 20 + **factual 20**（总分仍 100）
+- 断言写在任务里（`task["factual"]`）：`must_have_numbers`（该说的没说）/ `must_not_have_numbers`（编造数字）/ `must_cite_domains`（无来源裸答）/ `requires_fact_check_note`（无来源不自标未核验）
+- 数字口径复用 `_normalize_number_tokens`：`1.2万亿` ↔ `1200000000000` 同口径；年份按既有判据剔除
+- 无断言的任务给满分且 `asserted: False`，不假装测了；0-9 个位数断言被数字提取器剔除 → 显式跳过并记 `skipped_insignificant`，不静默判 fail
+- 🧪 `tests/test_eval_factual.py` 12 用例（全量 864 passed）
+
 ### Fixed — 静默产出错误三连（L2 P1）
 - 🧠 **ENG-23**：`call_llama` 在 `content` 为空时曾取 `reasoning_content[-200:]` 当答案返回 —— Qwen3 系默认思考模式下 `content` 恒空，用户拿到的是半截推理。改为返回空串信号（与后端不可达路径同构，上层已有降级语义）+ stderr 提示；`reasoning > max_tokens*0.8`（R1 系被截断）才返回但加前缀 `[推理截断输出]`，且不进缓存。`_post_cloud` payload 补 `thinking:{"type":"disabled"}`（此前只有本地路径有）
 - 📄 **ENG-18**：`source_map` 循环内 `title = url.rsplit(...)` 覆盖了已转义的报告标题 → `<h1>` 与页面 `<title>` 变成最后一个引用的 URL 路径尾部且未转义。改用独立变量 `ref_title`
