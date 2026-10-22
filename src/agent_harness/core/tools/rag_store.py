@@ -63,9 +63,26 @@ _lock = threading.RLock()
 
 # ─── Path helpers ───
 
-def _coll_dir(collection: str) -> str:
-    d = os.path.join(RAG_DIR, str(collection))
-    os.makedirs(d, exist_ok=True)
+def _safe_collection_name(collection: str) -> str:
+    """collection 名即物理目录名 —— 拒绝路径穿越/保留名（否则 API 可写任意路径）。"""
+    name = str(collection or "")
+    if (
+        not name
+        or name in (".", "..")
+        or any(ch in name for ch in ("/", "\\", ":", "\x00"))
+    ):
+        raise ValueError(f"非法 collection 名: {collection!r}")
+    return name
+
+
+def _coll_dir(collection: str, create: bool = False) -> str:
+    """物理目录。默认不建目录：读路径（query/info/delete/list）绝不能制造空目录。
+
+    create=True 只给写路径用（_save_chunks / _save_embeddings 内部已自行 makedirs）。
+    """
+    d = os.path.join(RAG_DIR, _safe_collection_name(collection))
+    if create:
+        os.makedirs(d, exist_ok=True)
     return d
 
 
