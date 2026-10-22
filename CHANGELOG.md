@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed — 前端 PWA 与会话恢复（FRONT-1/2/3）
+- 📱 **FRONT-1**：`sw.js` 预缓存指向**旧客服应用**的路径，主应用 PWA 实际没生效（装着旧 SW 时还可能回错资源）。现对齐当前应用资源、`allSettled` 逐个 add（单个 404 不再搞挂整单安装）、导航请求网络优先、`activate` 清理旧缓存 + `clients.claim()`；后端对 `sw.js` 回 `Service-Worker-Allowed: /` 与 `Cache-Control: no-cache`——sw.js 位于 `/static/` 下，不发该头则 `register(scope:'/')` 被浏览器拒绝；SW 脚本本身被 HTTP 缓存时 bump `CACHE_NAME` 也推不下去。补 `manifest.json` 并给 `.gitignore` 的 `*.json` 加豁免（否则部署后仍 404）
+- ✂️ **FRONT-2**：会话恢复时助手消息被 `slice(0, 500)` 腰斩——长调研报告回到界面只剩残句，DOM 里也拿不到后半段（复制/搜索都丢）。改为渲染全文
+- ⚡ **FRONT-3**（低风险部分）：7 个脚本加 `defer`，内联 `init()` 挪到 `DOMContentLoaded`（defer 脚本执行完才触发，顺序语义不变；只加 defer 不改内联会白屏）。1196 行的 `tabs.js` 不拆——重构风险大于收益
+- 🧪 `tests/test_frontend_contract.py` 10 用例
+
 ### Changed — 思考模式按需开启，不再全局禁用
 - 🧠 此前 `call_llama` / `_post_cloud` 硬编码 `thinking:{"type":"disabled"}` —— 等于**对所有请求永久禁思考**，需要推理的任务也拿不到思考带来的质量。现改为按 `HARNESS_LLM_THINKING=on` 开启：开启时不发 disabled 字段，且 `max_tokens` 自动抬到 ≥4096（思考与答案共用预算，不抬就等于让思考把答案挤掉）
 - 🔁 新增预算不足识别与重试：`content` 为空 + `finish_reason=length` + 有思考轨迹 → 判为「思考吃光预算」，加预算重试一次（上限 8192）；仍失败则明确报错并**不写缓存**。普通模型截断（无思考轨迹）不重试，避免盲目烧钱
