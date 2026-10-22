@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed — 静默产出错误三连（L2 P1）
+- 🧠 **ENG-23**：`call_llama` 在 `content` 为空时曾取 `reasoning_content[-200:]` 当答案返回 —— Qwen3 系默认思考模式下 `content` 恒空，用户拿到的是半截推理。改为返回空串信号（与后端不可达路径同构，上层已有降级语义）+ stderr 提示；`reasoning > max_tokens*0.8`（R1 系被截断）才返回但加前缀 `[推理截断输出]`，且不进缓存。`_post_cloud` payload 补 `thinking:{"type":"disabled"}`（此前只有本地路径有）
+- 📄 **ENG-18**：`source_map` 循环内 `title = url.rsplit(...)` 覆盖了已转义的报告标题 → `<h1>` 与页面 `<title>` 变成最后一个引用的 URL 路径尾部且未转义。改用独立变量 `ref_title`
+- 📊 **ENG-26**：Markdown 表格遇到 `| --- |` 分隔行直接 `continue`，上一行表头被渲染成 `<td>` —— 表格没有表头。改为暂存上一行、遇分隔行转 `<th>`；无分隔行的表格不误判；文末残留行与表格闭合补齐
+- 🧪 `tests/test_l2p1_llm_report.py` 10 用例（回退源码 4 条转红）
+
 ### Added — 溯源三态与数字核验（ENG-29/32/33/34）
 - 🔗 **provenance**：从 worker 成功步骤解析一手来源（工具名 + URL + 抓取时间 + snippet）；`search` 对齐 `标题: 摘要 [url]`、`web_scrape` 对齐 `{"title","body","url"}` JSON（含被截断 JSON 的字段兜底）——**模型自述不算证据**
 - ✅ **v2 核验**：报告数字与来源正文双向归一比对，差集即「未找到依据」；有 provenance 走 v2，无则回落 v1
