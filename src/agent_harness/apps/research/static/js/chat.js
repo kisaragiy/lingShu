@@ -122,7 +122,11 @@ function renderMessages(msgs) {
   }
   msgs.forEach(m => {
     if (m.role === 'user') addChatBubble('user', m.content || '');
-    else if (m.role === 'assistant') addChatBubble('assistant', (m.content || '').slice(0, 500));
+    else if (m.role === 'assistant') {
+      // 恢复历史会话必须渲染全文：这里曾按 500 字硬截断，长调研报告恢复后被腰斩，
+      // 且 DOM 里只剩残句 —— 复制/搜索都拿不到后半段。
+      addChatBubble('assistant', m.content || '');
+    }
   });
   container.scrollTop = container.scrollHeight;
 }

@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>灵枢 — AI 调研助手</title>
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#6366f1">
 <link rel="stylesheet" href="/static/css/lingShu.css">
 </head>
 <body>
@@ -25,13 +27,30 @@
 <!-- ═══════════ TOAST ═══════════ -->
 <div id="toast" class="toast"></div>
 
-<script src="/static/js/api.js"></script>
-<script src="/static/js/ui.js"></script>
-<script src="/static/js/chat.js"></script>
-<script src="/static/js/sidebar.js"></script>
-<script src="/static/js/tabs.js"></script>
-<script src="/static/js/safety-ui.js"></script>
-<script src="/static/js/orchestrator.js"></script>
-<script>init();</script>
+<!-- defer：不阻塞 HTML 解析，且按文档顺序在 DOMContentLoaded 之前执行完 -->
+<script defer src="/static/js/api.js"></script>
+<script defer src="/static/js/ui.js"></script>
+<script defer src="/static/js/chat.js"></script>
+<script defer src="/static/js/sidebar.js"></script>
+<script defer src="/static/js/tabs.js"></script>
+<script defer src="/static/js/safety-ui.js"></script>
+<script defer src="/static/js/orchestrator.js"></script>
+<script>
+// 内联脚本在解析期立即执行，defer 脚本要等解析完才跑 —— 所以不能直接 init()，
+// 必须挂到 DOMContentLoaded（defer 脚本都执行完之后才触发），顺序语义与原来一致。
+document.addEventListener('DOMContentLoaded', function () {
+  init();
+
+  // PWA 注册放到 load 之后，别和首屏资源抢带宽。
+  // scope:'/' 依赖后端对 /static/sw.js 回 Service-Worker-Allowed: '/'（main.py）。
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/static/sw.js', { scope: '/' }).catch(function () {
+        /* 无 SW 环境（http 非 localhost / 老浏览器）静默降级，不影响主流程 */
+      });
+    });
+  }
+});
+</script>
 </body>
 </html>
