@@ -8,13 +8,21 @@
 - 🎯 **越权抛 `PermissionError` 而不是返回空结果**：空结果会被调用方理解成「这个库是空的」，和「你没权限」修法完全不同，必须区分
 - 🧵 `graph_multi._run_with_trace` 改用 `contextvars.copy_context()`：`ThreadPoolExecutor` **不传播** contextvars，不显式 copy 的话 worker 线程里 scope 是空串（=全见），闸门等于没装
 - 🔙 空 scope = 全见，因此 admin / CLI / demo 零回归（单测把这条钉成红线）
-- 🧪 `tests/test_rag_scope.py` 9 用例：含**反证**（裸提交丢 scope、copy_context 保留）和**接线测试**（证明 `_execute_multi` / `_execute_single` 真的调了 `set_scope` 并 reset —— 只写闸门没人调用是最容易自我欺骗的「修好了」）
+- 🧪 `tests/test_rag_scope.py` 10 用例：含**反证**（裸提交丢 scope、copy_context 保留）和**接线测试**（证明 `_execute_multi` / `_execute_single` 真的调了 `set_scope` 并 reset —— 只写闸门没人调用是最容易自我欺骗的「修好了」）
 
 ### Fixed — SEC-5 API Key 角色硬编码 admin
 - 🔑 认证中间件里 `"role": "admin"` 是字面量：单 token 自托管下算设计意图，但**脚本 / CI / 网关转发用的 token 无法降权**，配置错了也没法纠正
 - ⚙️ 改为 `HARNESS_API_KEY_ROLE`（`admin` / `user`）显式决定，默认 `admin` 保持现有客户端零改动
 - 🚨 **非法值一律降级为 `user`** 并 stderr 告警：配置失误不该变成提权（fail-closed）
-- 🧪 `tests/test_api_key_role.py` 11 用例（默认值 / 显式降权 / 6 种非法输入 fail-closed / stderr 留痕 / 白名单封闭）
+- 🧪 `tests/test_api_key_role.py` 10 用例（默认值 / 显式降权 / 6 种非法输入 fail-closed / stderr 留痕 / 白名单封闭）
+
+### Fixed — SEC-20 demo / 共享实例下写类工具全开
+- 🚨 **清单原方案有漏洞，没有照抄**：它建议 `reversible` 走 `return auto_confirm`，但 `auto_confirm` **默认就是 True** → demo 下仍然全开，等于没修。实际要防的是「访客能写盘」，与「是否弹窗确认」无关
+- 🔍 先盘清真实暴露面：`reversible` 只有 5 个且**全是写盘**（`file_write` / `memory_import` / `permission_gate` / `rag_index` / `skill_generate`），`irreversible` 8 个含 `code_execute`（任意代码执行）、`qq_send` / `wechat_send`（对外发消息）
+- 🛡️ 改为 `DISABLE_AUTH=1` 时写类工具**一律拒绝**，由 `HARNESS_DEMO_ALLOW_WRITE_TOOLS`（逗号分隔工具名，默认空）逐个点名放开；read-only（`search` / `fetch` / `rag_query` 等 25 个）不受影响 —— demo 的调研主流程零误伤
+- 🔙 本地单机（`DISABLE_AUTH=0`）行为完全不变，`irreversible` 仍按 `auto_confirm` 语义
+- 📝 拒绝写审计日志（`denied in demo mode`），事后可追溯谁试图写盘
+- 🧪 `tests/test_permission_demo_gate.py` 20 用例（本地零变化 / demo 全拒 / 白名单精确匹配 / read-only 不误伤 / 拒绝留痕）
 
 ### Added — BYOK 前端入口（用户能自己填搜索 key 了）
 - 🔑 设置页新增「搜索来源（自带 Key）」：选服务商（DeepSeek / Tavily）→ 粘贴 key → 密文落盘；界面只显示「已配置 / 未配置」，**不回显任何片段**（与 `redact_config` 同口径 —— 前4后4 也算泄掉一半密钥）

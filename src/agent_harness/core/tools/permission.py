@@ -70,6 +70,18 @@ def log_audit(tool_name: str, source: str, args: dict, result: str = "",
         )
 
 
+def _demo_mode() -> bool:
+    """demo / 共享实例（DISABLE_AUTH=1）—— 访客不等于部署者。"""
+    from agent_harness.core.config import DISABLE_AUTH
+    return bool(DISABLE_AUTH)
+
+
+def _demo_write_tool_allowed(tool_name: str) -> bool:
+    """demo 下允许的写类工具白名单（逗号分隔，默认空 = 全拒，fail-closed）。"""
+    raw = os.environ.get("HARNESS_DEMO_ALLOW_WRITE_TOOLS", "")
+    return tool_name in {t.strip() for t in raw.split(",") if t.strip()}
+
+
 def check_permission(tool_name: str, source: str = "harness",
                      auto_confirm: bool = True) -> bool:
     """检查是否允许调用指定工具
@@ -85,11 +97,21 @@ def check_permission(tool_name: str, source: str = "harness",
 
     Returns:
         True 允许调用，False 拒绝
+
+    权限分级之外的**第二道闸**：demo / 共享实例（DISABLE_AUTH=1）下，写类工具
+    （reversible + irreversible）一律拒绝，除非在 HARNESS_DEMO_ALLOW_WRITE_TOOLS 里
+    逐个点名。为什么不再走 auto_confirm：它默认 True，靠它兜底等于默认全开 ——
+    而 reversible 里是 file_write / rag_index / skill_generate（写盘），irreversible 里
+    是 code_execute（任意代码执行）。公网 demo 的访客拿到这些就是拿服务器。
     """
     level = get_tool_privilege(tool_name)
 
     if level == "read-only":
         return True
+
+    if _demo_mode() and not _demo_write_tool_allowed(tool_name):
+        log_audit(tool_name, source, {}, f"{level} denied in demo mode")
+        return False
 
     if level == "reversible":
         return True
