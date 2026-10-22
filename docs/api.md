@@ -4,8 +4,8 @@ Agent Harness 提供完整的 RESTful API，所有接口均返回 JSON 格式响
 
 ## 基础信息
 
-- **基础路径**：`http://localhost:8000`
-- **认证方式**：Bearer Token（可选，通过 `AUTH_TOKEN` 配置）
+- **基础路径**：`http://127.0.0.1:8788`
+- **认证方式**：`Authorization: Bearer <JWT>`（`POST /v1/auth/login` 获取）或 `X-API-Key: <启动时打印的 token>`；未认证请求返回 401（API Key 的角色由 `HARNESS_API_KEY_ROLE` 控制，默认 `admin`，非法值降级 `user`）
 - **内容类型**：`application/json`
 
 ---

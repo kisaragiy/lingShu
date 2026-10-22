@@ -49,7 +49,7 @@ agent-harness cs-demo run \
 ### 方式二：通过 Web UI 运行
 
 1. 启动服务：`agent-harness serve`
-2. 访问 `http://localhost:8000/cs-demo`
+2. 访问 `http://127.0.0.1:8788/cs-demo`
 3. 在下拉菜单中选择演示场景
 4. 填写必要参数
 5. 点击「开始演示」
@@ -60,12 +60,12 @@ agent-harness cs-demo run \
 import requests
 
 # 获取场景列表
-scenarios = requests.get("http://localhost:8000/cs-demo/scenarios")
+scenarios = requests.get("http://127.0.0.1:8788/cs-demo/scenarios")
 print(scenarios.json())
 
 # 运行场景
 response = requests.post(
-    "http://localhost:8000/cs-demo/run",
+    "http://127.0.0.1:8788/cs-demo/run",
     json={
         "scenario_id": "customer-support",
         "params": {
