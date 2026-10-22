@@ -219,8 +219,31 @@ async def _client_disconnect_handler(request: Request, exc: Exception):
 
 # ─── Static files (灵枢 frontend) ───
 RESEARCH_STATIC_DIR = Path(__file__).resolve().parent / "apps" / "research" / "static"
+
+
+class _ServiceWorkerAwareStaticFiles(StaticFiles):
+    """静态站直出，但 sw.js 需要两处特殊处理，否则 PWA 装了等于没装：
+
+    1) ``Service-Worker-Allowed: /``：sw.js 物理位置在 /static/ 下，浏览器默认只允许
+       它控制 /static/ 前缀；注册时传 scope:'/' 会因超出默认 scope 被拒。
+    2) ``Cache-Control: no-cache``：SW 脚本本身被浏览器 HTTP 缓存时，bump
+       CACHE_NAME 也推不下去，用户会长期停在旧 Service Worker 上。
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if path == "sw.js" or path.endswith("/sw.js"):
+            response.headers["Service-Worker-Allowed"] = "/"
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 if RESEARCH_STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(RESEARCH_STATIC_DIR)), name="static")
+    app.mount(
+        "/static",
+        _ServiceWorkerAwareStaticFiles(directory=str(RESEARCH_STATIC_DIR)),
+        name="static",
+    )
 
 
 @app.get("/", include_in_schema=False)
