@@ -18,6 +18,12 @@ from agent_harness.core.health import run_health_checks, get_cached_report
 from agent_harness.core.metrics import metrics_middleware, metrics_endpoint
 from agent_harness.core.tasks import register_task_routes
 from agent_harness.apps.research.api import router as research_router, HOST, PORT, _API_TOKEN, _check_rate_limit, _RATE_LIMIT_WINDOW, _RATE_LIMIT_MAX, _AUTH_EXEMPT_PREFIXES, _AUTH_EXEMPT_EXACT, _AUTH_EXEMPT_V1
+
+# API Key 持有的角色：单 token 自托管模型下默认 admin（合法客户端零改动），
+# 但**显式可配**而不是写死在认证分支里 —— 多实例/网关部署时脚本 token 往往要降权。
+# 非法配置一律降级到最小权限（见 resolve_api_key_role）。
+from agent_harness.core.auth.api_security import resolve_api_key_role as _resolve_api_key_role
+_API_KEY_ROLE = _resolve_api_key_role(os.environ.get("HARNESS_API_KEY_ROLE"))
 from agent_harness.apps.cs_demo.api import router as cs_demo_router
 from agent_harness.apps.knowledge_qa.api import router as knowledge_qa_router
 
@@ -161,7 +167,7 @@ async def _api_auth_middleware(request: Request, call_next):
         request.state.user = {
             "id": "__api_key__",
             "username": "api",
-            "role": "admin",
+            "role": _API_KEY_ROLE,
             "display_name": "API Client",
         }
         return await call_next(request)

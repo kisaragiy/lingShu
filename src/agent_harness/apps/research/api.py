@@ -221,7 +221,14 @@ def _execute_multi(prompt: str, history_context: str, session_id: str = "", kb_s
     except Exception:
         pass
     # session_id 作为 task_id 透传到 supervisor/worker，取消信号才按会话生效（ENG-21）
-    return run_multi_agent(enhanced, task_id=session_id)
+    # SEC-2：把可见作用域交给数据层兜底 —— worker 线程经 copy_context 继承，
+    # 因此 agent 工具（rag_query/rag_index）即使被诱导传别人的 collection 名也会被拒。
+    from agent_harness.core.tools import rag_store as _rag_scope_store
+    _scope_tok = _rag_scope_store.set_scope(kb_scope)
+    try:
+        return run_multi_agent(enhanced, task_id=session_id)
+    finally:
+        _rag_scope_store.reset_scope(_scope_tok)
 
 
 def _execute_single(prompt: str, history_context: str, kb_scope: str = "") -> str:
@@ -248,7 +255,12 @@ def _execute_single(prompt: str, history_context: str, kb_scope: str = "") -> st
                 enhanced = f"知识库信息:\n{kb_context}\n\n{enhanced}"
     except Exception:
         pass
-    return run_single(enhanced)
+    from agent_harness.core.tools import rag_store as _rag_scope_store
+    _scope_tok = _rag_scope_store.set_scope(kb_scope)
+    try:
+        return run_single(enhanced)
+    finally:
+        _rag_scope_store.reset_scope(_scope_tok)
 
 
 def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, session_id: str = "",

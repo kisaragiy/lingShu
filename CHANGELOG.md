@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed — SEC-2 知识库越权读取（隔离下沉到数据层）
+- 🕳️ **两个真实越权点，都不在 API 层**：① `supervisor.py` 把 `list_collections()` 的返回值直接拼进 system prompt，**所有用户的 collection 物理名都会送给模型和用户**（信息泄露）；② `_tool_rag_query(collection=...)` 完全信任模型传进来的名字 —— 模型被检索内容诱导后传别人的物理名就能读到。API 层原有的 `_user_collection()` 只保护「API 自己拼出来的名字」，管不到这两条路径
+- 🛡️ **修法：校验下沉到数据层**。`rag_store` 新增 `contextvars` 作用域（`set_scope` / `reset_scope` / `current_scope`），全部读写只经过 `_coll_dir()` 一处，在那里做 `_check_scope()`；`list_collections()` 同一处过滤。任何调用方（API / agent 工具 / 脚本）都绕不过去
+- 🎯 **越权抛 `PermissionError` 而不是返回空结果**：空结果会被调用方理解成「这个库是空的」，和「你没权限」修法完全不同，必须区分
+- 🧵 `graph_multi._run_with_trace` 改用 `contextvars.copy_context()`：`ThreadPoolExecutor` **不传播** contextvars，不显式 copy 的话 worker 线程里 scope 是空串（=全见），闸门等于没装
+- 🔙 空 scope = 全见，因此 admin / CLI / demo 零回归（单测把这条钉成红线）
+- 🧪 `tests/test_rag_scope.py` 9 用例：含**反证**（裸提交丢 scope、copy_context 保留）和**接线测试**（证明 `_execute_multi` / `_execute_single` 真的调了 `set_scope` 并 reset —— 只写闸门没人调用是最容易自我欺骗的「修好了」）
+
+### Fixed — SEC-5 API Key 角色硬编码 admin
+- 🔑 认证中间件里 `"role": "admin"` 是字面量：单 token 自托管下算设计意图，但**脚本 / CI / 网关转发用的 token 无法降权**，配置错了也没法纠正
+- ⚙️ 改为 `HARNESS_API_KEY_ROLE`（`admin` / `user`）显式决定，默认 `admin` 保持现有客户端零改动
+- 🚨 **非法值一律降级为 `user`** 并 stderr 告警：配置失误不该变成提权（fail-closed）
+- 🧪 `tests/test_api_key_role.py` 11 用例（默认值 / 显式降权 / 6 种非法输入 fail-closed / stderr 留痕 / 白名单封闭）
+
 ### Added — BYOK 前端入口（用户能自己填搜索 key 了）
 - 🔑 设置页新增「搜索来源（自带 Key）」：选服务商（DeepSeek / Tavily）→ 粘贴 key → 密文落盘；界面只显示「已配置 / 未配置」，**不回显任何片段**（与 `redact_config` 同口径 —— 前4后4 也算泄掉一半密钥）
 - 🌐 后端两端点：`GET /v1/setup/search-key`（只报布尔）、`POST /v1/setup/search-key`（加密落盘；传空串 = 清除）；`GET /v1/setup/config` 同步抹掉 `search` 段的密钥字段，连密文都不外传
