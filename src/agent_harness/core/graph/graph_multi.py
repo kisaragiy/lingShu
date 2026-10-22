@@ -71,7 +71,7 @@ def _feed_breaker_tokens(cb: CircuitBreaker) -> None:
 
 def _feed_breaker_output(cb: CircuitBreaker, wname: str, output: Any) -> None:
     """Record a worker's output for no-progress detection."""
-    cb.record_output(f"{wname}:{str(output)[:100]}")
+    cb.record_output(wname, str(output)[:200])
 
 
 def _breaker_tripped(cb: CircuitBreaker | None) -> bool:

@@ -30,13 +30,13 @@ def test_token_budget_trips_when_fed():
 
 def test_no_progress_trips_when_fed():
     cb = CircuitBreaker(max_no_progress=3)
-    cb.record_output("same")
-    cb.record_output("same")
+    cb.record_output("w1", "same")
+    cb.record_output("w1", "same")
     assert cb.check()["tripped"] is False
-    cb.record_output("same")
+    cb.record_output("w1", "same")
     r = cb.check()
     assert r["tripped"] is True
-    assert any("无变化" in x for x in r["reasons"])
+    assert any("无实质变化" in x for x in r["reasons"])
 
 
 def test_reset_clears_trip():
