@@ -8,7 +8,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-1c3d5a?logo=langchain)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-f5de17)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-915%20passed-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-933%20passed-brightgreen)]()
 [![GitHub stars](https://img.shields.io/github/stars/kisaragiy/lingShu?style=flat&logo=github)](https://github.com/kisaragiy/lingShu)
 
 > **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
@@ -115,6 +115,22 @@ pip install -e ".[dev]"       # 只跑服务可省去 [dev]（pytest/ruff/mypy �
 python -m agent_harness.main
 # → http://127.0.0.1:8788
 ```
+
+### 一条命令看证据链
+
+```bash
+python scripts/demo_research.py "2025 年中国新能源汽车销量"
+```
+
+跑完在 `outputs/` 下得到一份 HTML 报告：每条引用带**工具名 + 原始 URL + 抓取时间**，文末「事实核验说明」按三态标注——核对通过 / 未找到依据 / 未执行（并给出原因）。
+
+退出码是契约的一部分，可直接被 CI 断言：
+
+| 退出码 | 含义 |
+|---|---|
+| `0` | 报告已生成，且有可追溯来源 |
+| `2` | 报告已生成，但**零来源**——可读不可核对，按告警处理 |
+| `1` | 未生成（LLM 不可用 / 内容为空），不落半截文件 |
 
 ### 跑测试
 
@@ -240,7 +256,7 @@ agent-harness eval          # 运行回归测试
 
 覆盖：搜索、RAG、代码执行、桌面操作、多轮对话、客服场景等。
 
-> 项目共 769 个测试用例通过（`pytest`，2026-10-18 实测 **769 passed / 2 skipped**，收集 779、8 个 integration 默认 deselect），覆盖工具链路、鉴权与安全护栏、架构边界与数据根隔离、HTTP 契约、可观测性、RAG、成本控制、推理缓存等模块；其中 8 个集成用例需本地起服务（`cs_demo :8788` / `llama.cpp :8080`），默认不收集，用 `pytest -m integration` 显式运行。测试数量以仓库实测为准。
+> 项目共 933 个测试用例通过（`pytest`，2026-10-22 实测 **933 passed / 3 skipped**，收集 936、8 个 integration 默认 deselect），覆盖工具链路、鉴权与安全护栏、架构边界与数据根隔离、HTTP 契约、可观测性、RAG、成本控制、推理缓存、评测口径（事实性断言）、SSE 并发与取消、密钥与日志脱敏等模块；其中 8 个集成用例需本地起服务（`cs_demo :8788` / `llama.cpp :8080`），默认不收集，用 `pytest -m integration` 显式运行。测试数量以仓库实测为准。
 
 ---
 

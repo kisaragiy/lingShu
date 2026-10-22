@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed — 思考模式按需开启，不再全局禁用
+- 🧠 此前 `call_llama` / `_post_cloud` 硬编码 `thinking:{"type":"disabled"}` —— 等于**对所有请求永久禁思考**，需要推理的任务也拿不到思考带来的质量。现改为按 `HARNESS_LLM_THINKING=on` 开启：开启时不发 disabled 字段，且 `max_tokens` 自动抬到 ≥4096（思考与答案共用预算，不抬就等于让思考把答案挤掉）
+- 🔁 新增预算不足识别与重试：`content` 为空 + `finish_reason=length` + 有思考轨迹 → 判为「思考吃光预算」，加预算重试一次（上限 8192）；仍失败则明确报错并**不写缓存**。普通模型截断（无思考轨迹）不重试，避免盲目烧钱
+- 🔤 思考字段兼容三家命名：`reasoning_content`（DeepSeek/vLLM）、`reasoning`（ollama 新版 `/v1`）、`thinking`
+- 🧪 `tests/test_llm_thinking_mode.py` 10 用例（开关、字段兼容、预算重试、达到上限后不再重试、截断不误重试）
+
 ### Security — 密钥与日志落盘（SEC-18/19）
 - 🔐 **SEC-18**：`config.json` 曾把 `llm.api_key` 明文 `json.dump` 落盘。新增 `core/pipeline/keystore.py`，用 `PBKDF2(machine_id|username)` 派生本机 KEK 对单字段加密，落盘 `api_key_enc`，启动解密回内存。**否决了「剥离到环境变量」方案**——环境变量是进程内存态，重启全丢，桌面应用每次重开都要重填 key。老明文配置读一次即迁移（幂等）；解密失败明确 ERROR 并置空，不静默降级；配置目录 best-effort 收紧（POSIX 700 / Windows `icacls`，失败只 warning 不阻断启动）。防的是「配置文件被拷走」，不是「本机同账户被攻破」——后者要 OS keychain/TPM，明确不做
 - 🧼 **SEC-19**：`audit()` 曾把工具实参（含 key、URL 签名）明文写盘。新增 `core/safety/pii_redact.py` 双层规则：键名（`api_key`/`token`/`secret`/`password`/`authorization`/`cookie` 及变体）+ 值形态（`sk-*`/`Bearer`/长 hex/长 base64/手机号/身份证/邮箱/银行卡）。单独成函数可单测，`HARNESS_AUDIT_REDACT=0` 可关
