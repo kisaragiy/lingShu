@@ -6,8 +6,10 @@ Storage: ~/.agent-harness/reports/
 Supports owner_id for multi-user isolation.
 """
 
+import contextlib
 import json
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -21,27 +23,120 @@ INDEX_FILE = REPORTS_DIR / "index.json"
 _lock = threading.RLock()   # 可重入：save_report/index_report/delete_report 都在持锁状态下
                             # 调 _load_index()/_save_index()，用非重入 Lock 会同线程自死锁
                             # （HEAD 版真实缺陷：POST /v1/reports 永久挂住请求线程）。
+_local = threading.local()
 
 
 def _ensure():
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+@contextlib.contextmanager
+def _file_lock():
+    """跨进程排他锁（同一线程可重入）。
+
+    进程内的 `_lock`（RLock）只挡同进程并发。server 与 CLI 同时写、或多 worker
+    部署时，两个进程各自 load→modify→_save_index 会互相覆盖（后写者赢，前者的
+    报告从索引里消失——文件还在，但 list/get 都找不到）。
+
+    可重入靠线程局部深度计数：外层已持锁时，内层 `_save_index` 直接放行，
+    否则同线程二次 msvcrt.locking 会自死锁。
+    """
+    depth = getattr(_local, "depth", 0)
+    if depth:
+        _local.depth = depth + 1
+        try:
+            yield
+        finally:
+            _local.depth = depth + 1 - 1
+        return
+
+    _ensure()
+    fh = open(REPORTS_DIR / ".index.lock", "a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            while True:
+                try:
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.02)   # LK_LOCK 自带约 10s 重试，这里兜住极端争抢
+            _local.depth = 1
+            try:
+                yield
+            finally:
+                _local.depth = 0
+                try:
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            _local.depth = 1
+            try:
+                yield
+            finally:
+                _local.depth = 0
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
+
+def _quarantine_index(exc: Exception) -> None:
+    """索引读不出来时先隔离坏文件，再按空索引继续。
+
+    原实现损坏就 return []，而下一次保存会把空列表写回 → 历史索引永久消失
+    （报告 .md 还在，但全部从列表里消失，且没有任何痕迹）。隔离后至少留证。
+    """
+    try:
+        bad = INDEX_FILE.with_name(f"index.json.corrupt-{int(time.time())}")
+        os.replace(INDEX_FILE, bad)
+        print(f"[report_store] 索引文件损坏（{exc}），已隔离为 {bad.name}，按空索引继续",
+              file=sys.stderr)
+    except OSError as e:
+        print(f"[report_store] 索引损坏（{exc}）且隔离失败（{e}），按空索引继续", file=sys.stderr)
+
+
 def _load_index() -> list[dict]:
     _ensure()
-    if INDEX_FILE.exists():
-        try:
-            with _lock, open(INDEX_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return []
+    if not INDEX_FILE.exists():
+        return []
+    try:
+        with _lock, open(INDEX_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        _quarantine_index(exc)
+        return []
+    if not isinstance(data, list):
+        _quarantine_index(ValueError(f"索引顶层应为列表，实际是 {type(data).__name__}"))
+        return []
+    return data
 
 
 def _save_index(index: list[dict]):
+    """原子写：tmp + os.replace。
+
+    直接 open(INDEX_FILE, "w") 会先截断文件，此刻崩溃/断电 → 索引只剩半截 JSON
+    （或空文件）→ 下次读取当空索引 → 所有报告从列表里消失。
+    """
     _ensure()
-    with _lock, open(INDEX_FILE, "w", encoding="utf-8") as f:
-        json.dump(index, f, ensure_ascii=False, indent=2)
+    tmp = INDEX_FILE.with_suffix(".json.tmp")
+    with _lock, _file_lock():
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(index, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, INDEX_FILE)
+        except BaseException:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
 
 
 def save_report(title: str, content: str, tags: list[str] = None,
@@ -64,18 +159,23 @@ def save_report(title: str, content: str, tags: list[str] = None,
     filename = f"{report_id}.md"
     filepath = REPORTS_DIR / filename
 
-    # Write markdown file
+    # Write markdown file（原子：tmp + replace，避免留下半截报告）
     content.encode("utf-8")
-    with _lock, open(filepath, "w", encoding="utf-8") as f:
-        f.write("---\n")
-        f.write(f"title: {title}\n")
-        f.write(f"created: {timestamp}\n")
-        f.write(f"tags: {json.dumps(tags or [], ensure_ascii=False)}\n")
-        f.write(f"owner_id: {owner_id}\n")
-        f.write("---\n\n")
-        f.write(content)
+    tmp_md = filepath.with_suffix(".md.tmp")
+    with _lock, _file_lock():
+        with open(tmp_md, "w", encoding="utf-8") as f:
+            f.write("---\n")
+            f.write(f"title: {title}\n")
+            f.write(f"created: {timestamp}\n")
+            f.write(f"tags: {json.dumps(tags or [], ensure_ascii=False)}\n")
+            f.write(f"owner_id: {owner_id}\n")
+            f.write("---\n\n")
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_md, filepath)
 
-    # Update index (atomic: write to tmp then replace)
+    # Update index — 跨进程锁内做 load→modify→save，否则并发写会互相覆盖
     meta = {
         "id": report_id,
         "title": title,
@@ -86,7 +186,7 @@ def save_report(title: str, content: str, tags: list[str] = None,
         "filename": filename,
         "chars": len(content),
     }
-    with _lock:
+    with _lock, _file_lock():
         index = _load_index()
         index.insert(0, meta)
         _save_index(index)
@@ -159,7 +259,7 @@ def index_report(meta: dict) -> None:
     path). Indexing them keeps every report addressable through get_report()
     with ownership enforced in one place.
     """
-    with _lock:
+    with _lock, _file_lock():
         index = _load_index()
         if any(m.get("id") == meta.get("id") for m in index):
             return
@@ -173,7 +273,7 @@ def delete_report(report_id: str, owner_id: str | None = None) -> bool:
     owner_id: None = unrestricted (admin); a user id = only that owner's
     report may be deleted (returns False otherwise → route answers 404).
     """
-    with _lock:
+    with _lock, _file_lock():
         index = _load_index()
         for i, meta in enumerate(index):
             if meta["id"] != report_id:
