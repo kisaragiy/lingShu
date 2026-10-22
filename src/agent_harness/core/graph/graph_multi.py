@@ -669,7 +669,9 @@ def _fmt_num(v: float) -> str:
 # search/fetch → data 是 list[str]（"标题: 摘要 [url]"）；web_scrape → JSON str。
 _YEAR_RE = re.compile(r"(?:19|20)\d{2}\s*年")   # 「2024 年」→ 时间限定，不作数据核验
 _PROV_LINE = re.compile(
-    r"^(?P<title>[^:]+?):\s*(?P<snippet>.*?)\s*\[(?P<url>https?://[^\]]+)\]\s*$"
+    # title 用 .+? 而不是 [^:]+? —— 真实网页标题大量含冒号（'销量榜: 2025 年度盘点'），
+    # 原写法会直接失配，整条来源被丢弃，表现为「搜索明明有结果却零 provenance」。
+    r"^(?P<title>.+?):\s*(?P<snippet>.*?)\s*\[(?P<url>https?://[^\]]+)\]\s*$"
 )
 _PROV_JSON_URL_RE = re.compile(r'"url"\s*:\s*"(?P<url>[^"]+)"')
 _PROV_JSON_TITLE_RE = re.compile(r'"title"\s*:\s*"(?P<title>[^"]*)"')

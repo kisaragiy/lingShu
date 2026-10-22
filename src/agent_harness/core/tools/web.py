@@ -25,7 +25,7 @@ _USER_AGENTS = [
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
 ]
 _UA_INDEX = 0
-_TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
+# Tavily key 改为运行时读 get_search_config() —— 模块级快照会让用户后填的 key 不生效
 
 
 def _pick_user_agent() -> str:
@@ -151,14 +151,85 @@ def _fetch_fallback(url: str, max_chars: int = 8000) -> str:
 # Tavily
 # ═══════════════════════════════════════
 
+def _search_deepseek(query: str, max_results: int = 5) -> list[str]:
+    """DeepSeek 自研搜索（`POST /v1/tools/search`）。
+
+    为什么排在最前：它直接返回**权威性信号** —— `rerank_score`（0-3，≥1.5 优质）
+    与 `authority`（0-4，≥3 极权威），provenance 门禁据此判「高可信 / 需复核」，
+    这是裸 HTML 拿不到的。`summary` 字段（600-800 字）也是专为给模型读设计的。
+
+    key 来自 get_search_config()（BYOK：用户自己的 key）。没配置就明确 skip，
+    不要伪装成「搜到 0 条」。DeepSeek API 在国内，**显式绕开代理**——
+    否则本机 7899 会把国内请求塞给境外节点。
+    """
+    from ..config import get_search_config
+
+    key = (get_search_config() or {}).get("deepseek_key") or ""
+    if not key:
+        _log_search_diag(query, "DeepSeek", "skip", 0, "no API key")
+        return []
+    try:
+        import urllib.request as _ur
+
+        body = json.dumps({
+            "query": query[:128],
+            "count": max(1, min(50, max_results)),
+            "need_content": False,
+        }).encode()
+        req = _ur.Request(
+            "https://api.deepseek.com/v1/tools/search",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}",
+            },
+        )
+        # 空 ProxyHandler = 强制直连（国内 API，不该走境外代理）
+        opener = _ur.build_opener(_ur.ProxyHandler({}))
+        with opener.open(req, timeout=20) as resp:
+            data = json.loads(resp.read())
+
+        items = data.get("results") or []
+        if not items:
+            _log_search_diag(query, "DeepSeek", "empty", 0)
+            return []
+
+        out: list[str] = []
+        for r in items[:max_results]:
+            # 单行化 + 截断：provenance 的正则按「一行一条」解析，
+            # DeepSeek 的 summary 是 600-800 字且常含换行，原样塞进去会断行失配。
+            def _oneline(v) -> str:
+                return " ".join(str(v or "").split())
+
+            title = _oneline(r.get("title"))
+            text = _oneline(r.get("summary") or r.get("snippet"))[:400]
+            meta = []
+            auth = r.get("authority")
+            if isinstance(auth, int) and auth >= 0:
+                meta.append(f"权威性{auth}/4")
+            score = r.get("rerank_score")
+            if isinstance(score, (int, float)):
+                meta.append(f"相关{score}")
+            suffix = f"（{'，'.join(meta)}）" if meta else ""
+            out.append(f"{title}: {text}{suffix} [{r.get('url', '')}]")
+        _log_search_diag(query, "DeepSeek", "ok", len(out))
+        return out
+    except Exception as e:  # noqa: BLE001
+        _log_search_diag(query, "DeepSeek", "error", 0, str(e)[:60])
+        return []
+
+
 def _search_tavily(query: str, max_results: int = 5) -> list[str]:
-    if not _TAVILY_API_KEY:
+    from ..config import get_search_config
+
+    key = (get_search_config() or {}).get("tavily_key") or ""
+    if not key:
         _log_search_diag(query, "Tavily", "skip", 0, "no API key")
         return []
     try:
         import urllib.request as _ur
         body = json.dumps({
-            "api_key": _TAVILY_API_KEY, "query": query,
+            "api_key": key, "query": query,
             "max_results": max_results, "search_depth": "basic",
             "include_answer": False, "include_raw_content": False,
         }).encode()
@@ -196,22 +267,29 @@ def _tool_search(query: str, max_results: int = 5) -> list:
     all_results: list[str] = []
     seen_urls: set[str] = set()
 
-    # 1. SearXNG
-    try:
-        r = _session.get("http://127.0.0.1:4000/search",
-                         params={"q": query, "format": "json", "language": "zh-CN"},
-                         timeout=10)
-        if r.status_code == 200:
-            sr = r.json().get("results", [])
-            if sr:
-                raw = [f"{i.get('title','')}: {i.get('content','')} [{i.get('url','')}]"
-                       for i in sr[:max_results]]
-                all_results = _dedup_results(raw, seen_urls)
-                _log_search_diag(query, "SearXNG", "ok", len(all_results))
-            else:
-                _log_search_diag(query, "SearXNG", "empty", 0)
-    except Exception as e:
-        _log_search_diag(query, "SearXNG", "error", 0, str(e)[:60])
+    # 0. DeepSeek 自研搜索 —— BYOK 用户填了 key 就走它，带权威性/相关性信号
+    if not all_results:
+        deepseek = _search_deepseek(query, max_results)
+        if deepseek:
+            all_results = _dedup_results(deepseek, seen_urls)
+
+    # 1. SearXNG（本机实例，常常没起 / 引擎被 CAPTCHA）
+    if not all_results:
+        try:
+            r = _session.get("http://127.0.0.1:4000/search",
+                             params={"q": query, "format": "json", "language": "zh-CN"},
+                             timeout=10)
+            if r.status_code == 200:
+                sr = r.json().get("results", [])
+                if sr:
+                    raw = [f"{i.get('title','')}: {i.get('content','')} [{i.get('url','')}]"
+                           for i in sr[:max_results]]
+                    all_results = _dedup_results(raw, seen_urls)
+                    _log_search_diag(query, "SearXNG", "ok", len(all_results))
+                else:
+                    _log_search_diag(query, "SearXNG", "empty", 0)
+        except Exception as e:
+            _log_search_diag(query, "SearXNG", "error", 0, str(e)[:60])
 
     # 2. DuckDuckGo
     if not all_results:

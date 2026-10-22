@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Added — 搜索 BYOK（用户自带 key）+ DeepSeek 搜索源
+- 🔑 **代码里零 key 字面量**：新增 `config.get_search_config()`，优先级 `config.json` 的 `search.api_key` / `search.api_key_enc`（复用 keystore 加密落盘）→ `llm.api_key` → 环境变量 `DEEPSEEK_API_KEY` / `HARNESS_DEEPSEEK_API` / `TAVILY_API_KEY`。真实用户填自己的 key 即可用，不改代码
+- 🔐 密文落盘、明文不存：`search.api_key_enc` / `search.tavily_key_enc`，读回时解密
+- 🔎 搜索链第 0 位接入 DeepSeek `POST /v1/tools/search`：返回 `summary`(600-800 字) + `rerank_score`(0-3) + `authority`(0-4)，强于裸 HTML；显式绕开代理（API 在国内）；无 key 时记 `skip` 诊断并返回空，不伪造结果
+- 🧹 删掉 `web.py` 的 `_TAVILY_API_KEY` 模块级快照（「配置快照」缺陷族第 6 处）
+- 🧪 `tests/test_search_byok.py` 7 用例（key 三层优先级 / 无 key 明确 skip / 解析保留 rerank+authority+URL / provenance 正则回归）
+
+### Fixed — 报告永远零来源（LangGraph 静默丢弃未声明的 state key）
+- 🕳️ **最隐蔽的一处**：`finalize` 已算出 15 条 provenance 并 `return`，但 `provenance` / `factcheck` 未在 `SupervisorState` 声明 → **LangGraph 直接丢弃**，不报错不告警。计算没错，是传输层丢的；调用方 `.get()` 拿到空列表，报告就写「没有任何可追溯来源」
+- 🔧 `state.py` 补声明两字段
+- 🧪 `tests/test_state_schema_contract.py`：AST 静态比对 finalize 返回的 key 是否全在 state 声明里，新增 state key 忘声明会当场挂
+
+### Fixed — provenance 正则漏掉真实网页标题
+- 📏 `_PROV_LINE` 的 title 段写死 `[^:]+?`，标题含冒号（`销量榜: 2025 年度盘点`）整条失配；且 `.*?` 不跨行，而 DeepSeek 的 summary 是 600-800 字、常含换行
+- 🔧 title 改 `.+?`；provider 侧把标题/摘要压成单行再交付，摘要截 400 字
+- 🧪 2 用例（含冒号标题可解析 / 断行行必须解析失败，锁住 provider 单行化）
+
+### Changed — demo 证据链端到端实测
+- ✅ `scripts/demo_research.py "2025 年中国新能源汽车销量"` → **退出码 0**，一手来源 **15 条 / 15 个去重 URL**，`factcheck_checked: true`、`not_found: 0`；来源含工信部（authority 4/4）、上海证券报
+- 此前同一命令三次运行皆为 `provenance_count: 0` + 退出码 2
+
 ### Fixed — wheel 不含静态资源（pip/Docker 安装后前端 404，ENG-5/6）
 - 📦 **`pyproject.toml` 没有 `package-data`**：setuptools 默认不打包非 `.py` 文件，所以 wheel 里既没有主前端 `apps/research/static`（`main.py` 的 `RESEARCH_STATIC_DIR`）、也没有管理后台 `static/admin`
 - 🧱 **Dockerfile 的手工兜底漏了主前端**：`COPY src/agent_harness/static/` 只补了管理后台，主前端整个目录无人管 → 容器里首页 404

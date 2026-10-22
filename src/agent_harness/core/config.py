@@ -177,3 +177,53 @@ def get_llm_config() -> dict:
         "api_key": CLOUD_API_KEY,
         "model": MODEL_DEEPSEEK or MODEL_LLAMA,
     }
+
+
+def get_search_config() -> dict:
+    """搜索后端配置（BYOK —— 用户填自己的 key）。
+
+    优先级（每个后端独立）：
+      1. config.json 的 `search.api_key(_enc)` —— 前端设置里填的，复用 SEC-18 keystore 加密落盘
+      2. `llm.api_key` —— 同一个 DeepSeek key 通常兼作搜索 key
+      3. 环境变量 `DEEPSEEK_API_KEY` / `HARNESS_DEEPSEEK_API` / `TAVILY_API_KEY`
+
+    为什么要独立一段而不是复用 llm：本地 ollama 用户没有 `llm.api_key`，
+    但他们仍可能想用云搜索——反过来说，填了搜索 key 也不该被当成模型 key 用。
+    全部为空时返回空串，由调用方明确跳过（记 skip 诊断），绝不伪装成「搜到 0 条」。
+    """
+    import json as _json
+
+    deepseek_key = ""
+    tavily_key = ""
+    try:
+        from agent_harness.core.pipeline.config_manager import CONFIG_PATH as config_path
+        if config_path.exists():
+            with open(config_path, encoding="utf-8") as _f:
+                cfg = _json.load(_f)
+            s = cfg.get("search") or {}
+            k = s.get("api_key") or ""
+            if not k and s.get("api_key_enc"):
+                try:
+                    from agent_harness.core.pipeline.keystore import decrypt_key
+                    k = decrypt_key(s["api_key_enc"])
+                except Exception:  # noqa: BLE001  机器身份变了 → 当未配置，提示重填
+                    k = ""
+            deepseek_key = k
+            tavily_key = s.get("tavily_key") or ""
+            if not tavily_key and s.get("tavily_key_enc"):
+                try:
+                    from agent_harness.core.pipeline.keystore import decrypt_key
+                    tavily_key = decrypt_key(s["tavily_key_enc"])
+                except Exception:  # noqa: BLE001
+                    tavily_key = ""
+    except (_json.JSONDecodeError, OSError):
+        pass
+
+    if not deepseek_key:
+        deepseek_key = (get_llm_config() or {}).get("api_key") or ""
+    if not deepseek_key:
+        deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("HARNESS_DEEPSEEK_API", "")
+    if not tavily_key:
+        tavily_key = os.environ.get("TAVILY_API_KEY", "")
+
+    return {"deepseek_key": deepseek_key, "tavily_key": tavily_key}

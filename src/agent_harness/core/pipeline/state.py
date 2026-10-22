@@ -44,6 +44,8 @@ class SupervisorState(TypedDict, total=False):
     feasibility_reason: str            # why the task is infeasible (when feasibility=infeasible)
     features: list[dict]               # P1-6: 调用方声明的 feature 列表（显式完成契约）
     completion_contract: dict          # P1-6: 收尾产物 —— feature + passes 布尔 + 未完成项
+    factcheck: dict                    # ENG-29: 数字核验结果（checked/skipped/reason/backing）
+    provenance: list[dict]             # ENG-29: 一手来源记录（url/tool/title/snippet/fetched_at）
     final_output: str
     errors: list[str]
     trace_id: str
