@@ -147,6 +147,68 @@ _LLM_UNREACHABLE_REPLY = (
 )
 
 
+# ─── 证据链落盘 ───
+# 为什么要在会话里存 provenance/factcheck：此前只存 role/content/ts，刷新页面后
+# 来源与核验结果全丢 —— 「每条结论可回溯」就只在单次请求的生命周期内成立。
+# session_store 的 message 事件会保留消息的全部字段，所以挂上就能落盘 + 原样读回。
+
+_PROV_MAX_ITEMS = 40      # 每轮最多存多少条来源（防止会话 JSONL 无界膨胀）
+_PROV_TEXT_LIMIT = 200    # snippet/title 截断长度
+
+
+def _slim_provenance(provenance) -> list[dict]:
+    """瘦身 provenance：只留可核对字段，长文本截断。"""
+    out: list[dict] = []
+    for p in (provenance or [])[:_PROV_MAX_ITEMS]:
+        if not isinstance(p, dict):
+            continue
+        out.append({
+            "url": str(p.get("url") or "")[:500],
+            "title": str(p.get("title") or "")[:_PROV_TEXT_LIMIT],
+            "tool": str(p.get("tool") or "")[:40],
+            "fetched_at": str(p.get("fetched_at") or "")[:40],
+            "snippet": str(p.get("snippet") or "")[:_PROV_TEXT_LIMIT],
+            "status": str(p.get("status") or "")[:20],
+        })
+    return out
+
+
+def _sources_from_provenance(provenance) -> list[dict]:
+    """provenance → 引用列表（按 URL 去重，保留首个标题）。与 demo 脚本同口径。"""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for p in provenance or []:
+        if not isinstance(p, dict):
+            continue
+        url = str(p.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        out.append({"url": url, "title": str(p.get("title") or "")[:120]})
+    return out
+
+
+def _evidence_from_session(session_id: str, owner_id: str, role: str):
+    """从会话最后一条带 provenance 的 assistant 消息里取证据链。
+
+    返回 (provenance, factcheck, error_response)。owner 校验在这里做：
+    会话里含 URL 与摘录，取错人等于数据泄露。
+    """
+    from agent_harness.core.pipeline.session_store import get_session_summary
+
+    summary = get_session_summary(session_id)
+    if not summary:
+        return None, None, JSONResponse({"error": "来源会话不存在"}, status_code=404)
+    sess_owner = summary.get("owner_id", "")
+    if sess_owner and sess_owner != owner_id and role != "admin":
+        return None, None, JSONResponse({"error": "无权访问该会话"}, status_code=403)
+
+    for msg in reversed(_load_session(session_id) or []):
+        if msg.get("role") == "assistant" and msg.get("provenance"):
+            return msg.get("provenance"), msg.get("factcheck"), None
+    return None, None, None
+
+
 def _build_history_context(messages: list[dict]) -> str:
     if not messages:
         return ""
@@ -308,6 +370,11 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
                 q.put({"type": "result", "content": final})
             else:
                 q.put({"type": "result", "content": final or _LLM_UNREACHABLE_REPLY})
+            # 证据链随事件交给 SSE 侧落盘（流式路径此前只传文本，刷新后来源全丢）
+            _prov = _slim_provenance(result.get("provenance"))
+            if _prov:
+                q.put({"type": "evidence", "provenance": _prov,
+                       "factcheck": result.get("factcheck") or {}})
         q.put({"type": "done"})
     except Exception as e:
         import traceback
@@ -347,6 +414,7 @@ async def _stream_progress(prompt: str, history: str, model: str, session_id: st
     )
     t.start()
     result_text = ""
+    _stream_evidence = None   # 收到 evidence 事件才会被赋值；单 Agent / 失败路径保持 None
     finished = False
     try:
         yield _sse_chunk("", role="assistant")
@@ -367,9 +435,20 @@ async def _stream_progress(prompt: str, history: str, model: str, session_id: st
                 content = event["content"]
                 result_text = content
                 yield _sse_chunk(content)
+            elif event["type"] == "evidence":
+                # 不推给前端（前端只需要正文），只留在服务端用于落盘
+                _stream_evidence = {
+                    "provenance": event.get("provenance") or [],
+                    "factcheck": event.get("factcheck") or {},
+                }
         session = _load_session(session_id) or []
         session.append({"role": "user", "content": prompt, "ts": time.time()})
-        session.append({"role": "assistant", "content": result_text, "ts": time.time()})
+        _assistant_msg = {"role": "assistant", "content": result_text, "ts": time.time()}
+        if _stream_evidence and _stream_evidence.get("provenance"):
+            _assistant_msg["provenance"] = _stream_evidence["provenance"]
+            if _stream_evidence.get("factcheck"):
+                _assistant_msg["factcheck"] = _stream_evidence["factcheck"]
+        session.append(_assistant_msg)
         # 流式路径此前不写 owner → 会话无主，用户自己回看会被 404（与非流式不一致）
         _save_session(session_id, session, owner_id=owner_id)
         finished = True
@@ -533,6 +612,8 @@ async def chat_completions(req: ChatRequest, request: Request):
         _register_running_task(session_id)
 
         if req.model in ("agent-harness", "agent-harness-single", "lingShu-fast"):
+            # 单 Agent 分支不产出结构化结果：显式初始化，避免下面取 provenance 时 NameError
+            result: dict = {}
             response_text = await asyncio.get_event_loop().run_in_executor(
                 None, _execute_single, last_user_msg, history_context, _kb_scope_prefix(request)
             )
@@ -551,7 +632,15 @@ async def chat_completions(req: ChatRequest, request: Request):
 
         session = _load_session(session_id) or []
         session.append({"role": "user", "content": last_user_msg, "ts": time.time()})
-        session.append({"role": "assistant", "content": response_text, "ts": time.time()})
+        _assistant_msg = {"role": "assistant", "content": response_text, "ts": time.time()}
+        # 证据链随消息落盘：否则刷新页面后来源与核验结果全丢
+        _prov = _slim_provenance(result.get("provenance") if isinstance(result, dict) else None)
+        if _prov:
+            _assistant_msg["provenance"] = _prov
+        _fc = result.get("factcheck") if isinstance(result, dict) else None
+        if isinstance(_fc, dict) and _fc:
+            _assistant_msg["factcheck"] = _fc
+        session.append(_assistant_msg)
         if len(session) > SESSION_TRIM_AT:
             session = session[-SESSION_TRIM_AT:]
         _save_session(session_id, session, owner_id=owner_id)
@@ -932,13 +1021,25 @@ async def formalize_report(request: Request):
     tags = body.get("tags", [])
     source_session = body.get("source_session", "")
     sources = body.get("sources", [])
+    provenance = body.get("provenance")
+    factcheck = body.get("factcheck")
+
+    # ENG-29 完整闭环：调用方没显式传证据 → 从来源会话取（证据链已随 assistant 消息落盘）。
+    # 此前这里只能靠调用方传，agent 侧不传 → 正式报告永远没有「事实核验说明」汇总块。
+    if source_session and not provenance:
+        _role = getattr(request.state, "user", {}).get("role", "")
+        provenance, _sess_fc, _err = _evidence_from_session(source_session, owner_id, _role)
+        if _err is not None:
+            return _err
+        factcheck = factcheck or _sess_fc
+        if provenance and not sources:
+            sources = _sources_from_provenance(provenance)
+
     from agent_harness.apps.research.pipeline import report_formatter
-    # ENG-29：provenance/factcheck 可由调用方显式传入（agent 侧 state 未落盘，
-    # 默认不传 → 报告无「事实核验说明」汇总块，只在正文保留文本级标注）。
     html = report_formatter.generate_report_html(
         title, content, sources=sources,
-        provenance=body.get("provenance") or None,
-        factcheck=body.get("factcheck") or None,
+        provenance=provenance or None,
+        factcheck=factcheck or None,
     )
     meta = report_formatter.save_formal_report(
         title=title,
