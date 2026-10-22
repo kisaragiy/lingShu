@@ -14,6 +14,16 @@
 - 🔒 SEC-15：`DELETE /v1/sessions/{id}` 与 `POST /v1/sessions/{id}/meta` 补 owner 校验，与 messages/export/logs 读路径同策略；非 owner 与不存在同回 404（不做存在性 oracle）
 - 🧪 新增 `tests/test_authz_session_write.py`（4 身份 × 删/改 双向矩阵）、`tests/test_auth_session_revocation.py`（登出即失效 + 伪造 token 负向控制）；回退源码验证过 6 用例转红
 
+### Fixed — knowledge 面跨用户隔离（SEC-16）
+- 🔒 collection 改为按用户物理隔离：普通用户 `user_<uid>_<name>`，admin 直通原名；`collections / upload / query / delete / import` 五个端点全部收口，列表剥前缀展示
+- 🔒 非 owner 拿他人物理名删 → 再套一层前缀 → 404（不做存在性 oracle）
+- 🔒 chat 路径的知识库自动注入按 scope 过滤——此前把全库内容注入任意用户的 prompt
+- 🐛 `rag_store._coll_dir()` 内部 `makedirs` → `delete_collection` 对不存在的 collection 也返回成功，且 query/info/delete 等读路径会制造空目录污染列表；改为默认不建目录，仅写路径建
+- 🐛 `_safe_collection_name()`：collection 名即目录名，拒绝 `../` / 盘符 / NUL（路径穿越）
+- 🐛 chat 流式路径 `_save_session` 不写 `owner_id` → 用户回看自己的会话被 404
+- 🐛 补 `python-multipart` 依赖：缺它 upload 端点解析 form 直接 500
+- 🧪 新增 `tests/test_kb_owner_isolation.py`（10 用例：A/B/admin/guest 矩阵 + import 端点 + chat 注入双向断言）
+
 ### Changed — 仓库卫生 / 对外文档
 - 内部工作准则与自查文档移至本地 `docs-internal/`（不再入库）：AGENTS 内部版、用户征集设计、市场对齐、评审记录、架构自查、改造蓝图、升级计划、运维指标
 - `AGENTS.md` 重写为面向开发者的中性约定（结构 / 本地开发 / 测试基线 / ADR / 已知设计边界）
