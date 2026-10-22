@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed — 定时任务不再重复、漏跑、静默停摆（ENG-39 / ENG-35）
+- ⏰ **重复触发**：去重靠比较 `last_run` 与当前 `tm_min`/`tm_hour`，`30 * * * *` 在 xx:31 会再跑一次。改为持久化 `next_run`、只判 `now >= next_run`，触发后从 `now` 重算（不是从错过的槽位）——停机三天也只补一次，不连环补
+- 🔤 **语法缺失**：只认 `*`、`*/n`、单值，`1-5` / `1,3,5` 会 `int()` 抛 `ValueError` 后静默 `return False` —— `0 9 * * 1-5`（工作日简报）永不触发且无任何日志。现支持范围/列表/步长；坏字段只让该字段不命中，不炸 tick。weekday 采用 POSIX 口径（周日=0，7 为别名，周一=1），docstring 写明
+- 🔁 **无补跑**：`next_run` 字段早已存在却从未被赋值。现在 `add_task` / `update_task` 都会计算，`_tick` 发现 `next_run` 已过则补跑一次并 `warning` 记 `missed_at`
+- 🔇 **静默停摆**：`_loop` 的 `contextlib.suppress(Exception)` 吞掉 tick 的一切异常，调度器停了也没痕迹 → 改为 `logger.error` 并继续循环
+- 📝 `update_task` 白名单只放行 `schedule/prompt/enabled`，`last_run`/`next_run`/`run_count` 显式传入会被丢弃 → 扩白名单
+- 🚧 **ENG-35 多 worker 守卫**：`main()` 曾把 `HARNESS_WORKERS` 原样传给 uvicorn，而会话/指标/取消/LLM 缓存与调度器都是进程内状态 —— workers=N 等于 N 份调度线程、cron 成倍触发。新增 `_resolve_workers()`：>1 强制降为 1 并打印说明（不静默）
+- 🧪 `tests/test_eng39_cron.py` 17 用例 + `tests/test_eng35_workers.py` 4 用例
+
 ### Fixed — 前端 PWA 与会话恢复（FRONT-1/2/3）
 - 📱 **FRONT-1**：`sw.js` 预缓存指向**旧客服应用**的路径，主应用 PWA 实际没生效（装着旧 SW 时还可能回错资源）。现对齐当前应用资源、`allSettled` 逐个 add（单个 404 不再搞挂整单安装）、导航请求网络优先、`activate` 清理旧缓存 + `clients.claim()`；后端对 `sw.js` 回 `Service-Worker-Allowed: /` 与 `Cache-Control: no-cache`——sw.js 位于 `/static/` 下，不发该头则 `register(scope:'/')` 被浏览器拒绝；SW 脚本本身被 HTTP 缓存时 bump `CACHE_NAME` 也推不下去。补 `manifest.json` 并给 `.gitignore` 的 `*.json` 加豁免（否则部署后仍 404）
 - ✂️ **FRONT-2**：会话恢复时助手消息被 `slice(0, 500)` 腰斩——长调研报告回到界面只剩残句，DOM 里也拿不到后半段（复制/搜索都丢）。改为渲染全文
