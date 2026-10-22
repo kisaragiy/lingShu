@@ -105,6 +105,28 @@ def _extract_openai_content(data: dict, max_tokens: int) -> tuple[str, str, str,
     return "", reasoning, finish, True
 
 
+# ─── 其它 LLM 调用点唯一允许的入口 ───
+# 背景：supervisor / graph / comic_agent / cs_agent 曾各自 import config 模块常量
+# （进程启动时的快照）并各自用 `content or reasoning[-500:]` 兜底。实测一次调用串里
+# 同时出现 mock / 127.0.0.1:18888 / qwen3.5:9b 三种后端，报告里真实分析与占位内容
+# 混在一起 —— 看起来完整、实际不可核对。下面三个函数是这些点的统一入口。
+
+def runtime_endpoint() -> tuple[str, str]:
+    """返回当前 (端点, 模型)。每次调用重读配置，不吃 import 快照。"""
+    cfg = get_llm_config() or {}
+    return str(cfg.get("api_url") or ""), str(cfg.get("model") or "")
+
+
+def extract_answer(data: dict, max_tokens: int = 2048) -> str:
+    """从 OpenAI 兼容响应里取答案。思考轨迹永不冒充答案（答案空就返回空）。"""
+    return _extract_openai_content(data, max_tokens)[0]
+
+
+def thinking_payload() -> dict:
+    """思考开关 → 请求体片段。off 时显式禁用；on 时不发该字段（交给后端默认）。"""
+    return {} if _thinking_mode() == "on" else {"thinking": {"type": "disabled"}}
+
+
 # Shared HTTP session
 _session = req_lib.Session()
 _session.headers.update({"User-Agent": "agent-harness/0.2.0"})

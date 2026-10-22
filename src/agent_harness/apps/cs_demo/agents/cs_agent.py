@@ -306,7 +306,7 @@ def _call_cs_llm_stream_tokens(
 
     import requests as req_lib
 
-    from agent_harness.core.config import LLAMA_API, MODEL_LLAMA
+    from agent_harness.core.pipeline.llm import runtime_endpoint, thinking_payload
 
     system = (
         "你是灵枢电商平台的智能客服助手。你的风格：专业、耐心、有同理心。\n\n"
@@ -331,8 +331,12 @@ def _call_cs_llm_stream_tokens(
         "请根据以上信息生成客服回复。"
     ).format(message, intent, tool_data, context or "（无）")
 
+    api_url, model = runtime_endpoint()
+    if not api_url:
+        return []
+
     payload = {
-        "model": MODEL_LLAMA,
+        "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -340,12 +344,12 @@ def _call_cs_llm_stream_tokens(
         "max_tokens": 1024,
         "temperature": 0.3,
         "stream": True,
-        "thinking": {"type": "disabled"},
+        **thinking_payload(),
     }
 
     tokens: list[str] = []
     try:
-        resp = req_lib.post(LLAMA_API, json=payload, stream=True, timeout=(5, 60))
+        resp = req_lib.post(api_url, json=payload, stream=True, timeout=(5, 60))
         for line in resp.iter_lines():
             if line:
                 decoded = line.decode("utf-8")

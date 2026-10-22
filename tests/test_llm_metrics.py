@@ -139,14 +139,17 @@ def test_supervisor_main_path_success_is_counted(monkeypatch):
 
     from agent_harness.core.agents import supervisor
 
+    from agent_harness.core.pipeline import llm as _llm
+    monkeypatch.setattr(_llm, "get_llm_config", lambda: {
+        "model": "unit-model", "api_url": "http://unit.test/v1", "api_key": "k"})
     monkeypatch.setattr(requests, "post", lambda *a, **kw: _Resp({
         "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
         "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}}))
 
-    before = _val(supervisor.MODEL_LLAMA, "success")
+    before = _val("unit-model", "success")
     content, fr = supervisor._call_llm_full([{"role": "user", "content": "hi"}])
     assert content == "ok" and fr == "stop"
-    assert _val(supervisor.MODEL_LLAMA, "success") == before + 1, "主链路 LLM 调用未进指标"
+    assert _val("unit-model", "success") == before + 1, "主链路 LLM 调用未进指标"
 
 
 def test_supervisor_main_path_failure_is_counted(monkeypatch):
@@ -158,11 +161,14 @@ def test_supervisor_main_path_failure_is_counted(monkeypatch):
     def _boom(*a, **kw):
         raise ConnectionError("refused")
 
+    from agent_harness.core.pipeline import llm as _llm
+    monkeypatch.setattr(_llm, "get_llm_config", lambda: {
+        "model": "unit-model", "api_url": "http://unit.test/v1", "api_key": "k"})
     monkeypatch.setattr(requests, "post", _boom)
 
-    before = _val(supervisor.MODEL_LLAMA, "error")
+    before = _val("unit-model", "error")
     content, fr = supervisor._call_llm_full([{"role": "user", "content": "hi"}])
     assert content == "" and fr == "error"
-    assert _val(supervisor.MODEL_LLAMA, "error") == before + 1, (
+    assert _val("unit-model", "error") == before + 1, (
         "主链路 LLM 失败未进指标 —— 后端全挂时监控会显示「零调用」而不是「全线失败」"
     )
