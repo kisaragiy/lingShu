@@ -2,7 +2,7 @@
 
 # 🧠 灵枢 (LingShu)
 
-**独立的多 Agent AI 应用工程实践 — Supervisor-Worker 编排 · 搜索分析报告全链路 · 防复现知识管道 · Agent 可靠性工程**
+**本地优先的多 Agent 调研工作台 — 一条指令把「搜索 → 分析 → 带引用报告」自动跑完 · 多 Agent 编排 · 可靠性工程**
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-2b5b84?logo=python&logoColor=white)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-1c3d5a?logo=langchain)](https://langchain-ai.github.io/langgraph/)
@@ -12,9 +12,24 @@
 [![GitHub stars](https://img.shields.io/github/stars/kisaragiy/lingShu?style=flat&logo=github)](https://github.com/kisaragiy/lingShu)
 
 > **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
-> 本地优先、开箱即用。多 Agent 编排 + 知识反哺的完整 AI 应用落地。
+> 本地优先、开箱即用。一个能装、能跑、能给非技术人演示的多 Agent 调研助手。
 
 </div>
+
+---
+
+## 🎯 目标场景
+
+调研类报告的生产场景——尽调 / 研报 / 政策调研 / 竞品研究：
+
+| 场景 | 痛点 | 灵枢对应 |
+|---|---|---|
+| 尽调 · 研报 | 引用的数据无法核实，而报告签的是自己的名字 | 结论带 provenance（工具名 + 原始 URL + 抓取时间）；核验不到的显式标注「未找到强相关依据」 |
+| 政策 · 合规解读 | 来源敏感、数据不能出域 | 本地优先：模型与知识库都可跑在本机 |
+| 竞品研究 | 检索 → 分析 → 排版耗人力 | 一条指令并行执行，输出带引用的 HTML 报告 |
+
+> **可证伪声明**：上表是**场景假设，不是已交付的客户案例**。有效的验证方式是拿一份真实报告看两件事——① 每条数字能否在标注的来源里核对到；② 核验不到时报告是否明确标注原因。
+> 场景来源为 2026-10 公开行业调研（采购公告、从业者一手文章），调研笔记不入库。
 
 ---
 
@@ -130,8 +145,8 @@ agent-harness serve
 
 | 能力 | 说明 |
 |------|------|
+| **调研助手（主应用）** | 一条指令完成 搜索 → 分析 → 出带引用的 HTML 报告（A4 打印优化） |
 | **多 Agent 编排** | Supervisor-Worker 架构，Search/Analyze/Execute 三 Worker 并行执行，支持多轮 Replan |
-| **全链路自动化** | 搜索 → 分析 → 排版精美的 HTML 报告（A4 打印优化），一条指令完成 |
 | **OpenAI 兼容 API** | `/v1/chat/completions` + `/v1/models`，支持 SSE 流式 |
 | **三模型群回退** | 本地 llama.cpp → WSL Ollama → DeepSeek Flash API 自动降级 |
 | **37 个工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类（实测注册数） |
@@ -159,6 +174,26 @@ agent-harness serve
 
 ---
 
+## 🚀 部署
+
+灵枢默认本地运行。部署到公网时，安全边界如下：
+
+1. **必须开启认证**：不要设置 `HARNESS_DISABLE_AUTH=1`；首次访问 `POST /v1/auth/setup-admin` 创建管理员。
+2. **保持默认速率限制**：不要设置 `HARNESS_DISABLE_RATE_LIMIT=1`。
+3. **TLS 在反向代理层终止**（nginx / Caddy），应用本身不监听 443。
+4. **单 worker 部署**：`HARNESS_WORKERS` 保持 1；进程内状态（会话/指标/取消/LLM 缓存）不支持多进程共享。
+5. 仓库不再提供公网 demo 入口（历史无认证部署配置已移除）。
+
+```bash
+# 容器
+docker compose up -d                 # LingShu + SearXNG
+# 或本地源码
+agent-harness serve                  # http://127.0.0.1:8788
+```
+
+
+---
+
 ## 📁 项目结构
 
 ```
@@ -181,7 +216,7 @@ src/agent_harness/
 └── api_fastapi.py               # OpenAI 兼容 API 入口
 ```
 
-> 灵枢的 core 层解耦场景，apps/ 下已有智能客服、知识库问答、调研助手、模板四个独立场景。
+> 灵枢的 core 层解耦场景，apps/ 以调研助手为主应用；底层同时支持 RAG 知识库问答、客服模板降级等能力。
 
 ---
 
