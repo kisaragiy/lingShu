@@ -855,6 +855,8 @@ async def delete_session_endpoint(session_id: str, request: Request):
         _safe_path_param(session_id)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    if _session_access_denied(request, session_id):
+        return JSONResponse({"error": "Session not found"}, status_code=404)
     if _delete_session(session_id):
         return {"status": "deleted", "session_id": session_id}
     return JSONResponse({"error": f"Session not found: {session_id}"}, status_code=404)
@@ -880,6 +882,8 @@ async def update_session_meta_endpoint(session_id: str, request: Request):
         _safe_path_param(session_id)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    if _session_access_denied(request, session_id):
+        return JSONResponse({"error": "Session not found"}, status_code=404)
     body = await request.json()
     kwargs = {}
     if "title" in body:
