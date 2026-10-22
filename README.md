@@ -174,6 +174,23 @@ agent-harness serve
 
 > 工具数量、测试用例、规则库条目均以实测注册数为准，可在仓库中直接核对。
 
+### ⏰ 定时任务
+
+内置 cron 调度器按每任务持久化的 `next_run` 触发，支持 `*/n`、`1-5`、`1,3,5` 与 `every 30m`。行为边界如下，每条都对应一个可直接运行的测试：
+
+| 行为 | 实现方式 | 验证 |
+|---|---|---|
+| 同一个计划点只触发一次 | 触发后从**当前时间**重算 `next_run` 并落盘，不依赖扫描时刻的分钟数比较 | `pytest tests/test_eng39_cron.py -k double_fire -v` |
+| 停机期间错过的任务只补一次 | `next_run` 已过期 → 补跑一次并 `warning` 记录 missed 时间，不连环补（停三天不等于连跑三次） | `pytest tests/test_eng39_cron.py -k catch_up -v` |
+| 调度器异常不静默 | tick 抛异常写 `logger.error` + traceback，循环继续下一轮，不吞掉 | `pytest tests/test_eng39_cron.py -k loop_logs -v` |
+| 非法表达式不拖垮调度 | 单字段解析失败只让该字段不命中，其余任务照常 | `pytest tests/test_eng39_cron.py -k malformed -v` |
+| 工作日语法可用 | `0 9 * * 1-5` = 周一至周五 09:00（POSIX 口径：周日=0/7，周一=1） | `pytest tests/test_eng39_cron.py -k weekday -v` |
+| 单进程运行 | `HARNESS_WORKERS>1` 强制降为 1 并说明原因（会话/指标/取消/缓存/调度均为进程内状态，多进程会让 cron 成倍触发） | `pytest tests/test_eng35_workers.py -v` |
+
+**为什么是自研而不是 APScheduler**：调度要跑在单进程桌面应用内，且"重启后补跑一次而非补 N 次"是这里的硬需求 —— APScheduler 的 `BackgroundScheduler` 同样是进程内线程，同样不解决重启补跑，还要额外引入 `jobstore` 与持久化语义的一致性成本。核心逻辑（字段解析 / 下次触发时间 / 补跑判定）约 100 行纯函数，行为由测试定义而非库版本定义。
+
+**不做什么**：秒级 cron（6 字段）、`?`/`L`/`W` 修饰符、分布式锁与多实例互斥 —— 都需要跨进程协调，与单进程设计直接冲突；需要这些时应换成熟调度服务（如系统 cron / systemd timer）而不是在本项目里补。
+
 ---
 
 ## 🛠️ 技术栈
