@@ -151,7 +151,7 @@ def _sse_done(result_text: str) -> str:
 
 # ─── Execute harness ───
 
-def _execute_multi(prompt: str, history_context: str, session_id: str = "") -> dict:
+def _execute_multi(prompt: str, history_context: str, session_id: str = "", kb_scope: str = "") -> dict:
     from agent_harness.core.graph.graph_multi import _progress_queue, run_multi_agent
     enhanced = prompt
     if history_context:
@@ -162,7 +162,7 @@ def _execute_multi(prompt: str, history_context: str, session_id: str = "") -> d
     try:
         from agent_harness.core.tools.rag_store import list_collections
         from agent_harness.core.tools.rag_store import query as rag_query
-        kb_cols = list_collections()
+        kb_cols = [c for c in list_collections() if not kb_scope or c.startswith(kb_scope)]
         if kb_cols:
             kb_results = []
             for col in kb_cols:
@@ -190,7 +190,7 @@ def _execute_multi(prompt: str, history_context: str, session_id: str = "") -> d
     return run_multi_agent(enhanced)
 
 
-def _execute_single(prompt: str, history_context: str) -> str:
+def _execute_single(prompt: str, history_context: str, kb_scope: str = "") -> str:
     from agent_harness.core.graph import run as run_single
     enhanced = prompt
     if history_context:
@@ -198,7 +198,7 @@ def _execute_single(prompt: str, history_context: str) -> str:
     try:
         from agent_harness.core.tools.rag_store import list_collections
         from agent_harness.core.tools.rag_store import query as rag_query
-        kb_cols = list_collections()
+        kb_cols = [c for c in list_collections() if not kb_scope or c.startswith(kb_scope)]
         if kb_cols:
             kb_results = []
             for col in kb_cols:
@@ -217,7 +217,7 @@ def _execute_single(prompt: str, history_context: str) -> str:
     return run_single(enhanced)
 
 
-def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, session_id: str = ""):
+def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, session_id: str = "", kb_scope: str = ""):
     try:
         from agent_harness.core.graph.graph_multi import clear_progress_queue, set_progress_queue
         from agent_harness.core.pipeline.cancel import clear_cancel_event, set_cancel_event
@@ -232,11 +232,11 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
         q.put({"type": "status", "content": "🤔 分析请求中...\n"})
         if model in ("agent-harness", "agent-harness-single", "lingShu-fast"):
             q.put({"type": "status", "content": "⚡ 快模式（单 Agent）处理中...\n"})
-            result = _execute_single(prompt, history)
+            result = _execute_single(prompt, history, kb_scope=kb_scope)
             q.put({"type": "result", "content": result})
         else:
             q.put({"type": "status", "content": "🧠 深模式（多 Agent 编排）执行中...\n"})
-            result = _execute_multi(prompt, history, session_id=session_id)
+            result = _execute_multi(prompt, history, session_id=session_id, kb_scope=kb_scope)
             rounds = result.get("rounds", 1)
             worker_results = result.get("worker_results", {})
             workers = list(worker_results.keys())
@@ -272,10 +272,10 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
             pass
 
 
-async def _stream_progress(prompt: str, history: str, model: str, session_id: str):
+async def _stream_progress(prompt: str, history: str, model: str, session_id: str, kb_scope: str = "", owner_id: str = ""):
     q = queue.Queue()
     t = threading.Thread(
-        target=_run_with_queue, args=(prompt, history, model, q, session_id), daemon=True
+        target=_run_with_queue, args=(prompt, history, model, q, session_id, kb_scope), daemon=True
     )
     t.start()
     yield _sse_chunk("", role="assistant")
@@ -300,7 +300,8 @@ async def _stream_progress(prompt: str, history: str, model: str, session_id: st
     session = _load_session(session_id) or []
     session.append({"role": "user", "content": prompt, "ts": time.time()})
     session.append({"role": "assistant", "content": result_text, "ts": time.time()})
-    _save_session(session_id, session)
+    # 流式路径此前不写 owner → 会话无主，用户自己回看会被 404（与非流式不一致）
+    _save_session(session_id, session, owner_id=owner_id)
     yield _sse_done(result_text)
 
 
@@ -414,7 +415,8 @@ async def chat_completions(req: ChatRequest, request: Request):
 
     if req.stream:
         return StreamingResponse(
-            _stream_progress(last_user_msg, history_context, req.model, session_id),
+            _stream_progress(last_user_msg, history_context, req.model, session_id,
+                             _kb_scope_prefix(request), getattr(request.state, "user", {}).get("id", "")),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -442,13 +444,13 @@ async def chat_completions(req: ChatRequest, request: Request):
 
         if req.model in ("agent-harness", "agent-harness-single", "lingShu-fast"):
             response_text = await asyncio.get_event_loop().run_in_executor(
-                None, _execute_single, last_user_msg, history_context
+                None, _execute_single, last_user_msg, history_context, _kb_scope_prefix(request)
             )
             rounds = 1
             workers = []
         else:
             result = await asyncio.get_event_loop().run_in_executor(
-                None, _execute_multi, last_user_msg, history_context
+                None, _execute_multi, last_user_msg, history_context, "", _kb_scope_prefix(request)
             )
             response_text = result.get("final_output", "") or _LLM_UNREACHABLE_REPLY
             rounds = result.get("rounds", 1)
@@ -998,16 +1000,49 @@ async def cancel_task(session_id: str):
 
 
 # ─── Knowledge Base API ───
+#
+# SEC-16：collection 是物理目录名（RAG_DIR/<collection>），此前四个端点全无 owner 概念
+# → 任意登录用户可列出/查询/上传/删除任意 collection（越权读 + 越权删库）。
+# 修法：API 层把普通用户的 collection 名加上 `user_<uid>_` 前缀，admin 直通原名
+# （运维视图；demo 模式注入的 guest 也是 admin 角色）。物理层不动，避免迁移。
+
+def _user_collection(request: Request, collection: str) -> str:
+    """把用户给的 collection 名映射为物理目录名。admin → 原名；普通用户 → user_<uid>_<name>。"""
+    user = getattr(request.state, "user", None) or {}
+    if user.get("role") == "admin":
+        return collection
+    return f"user_{user.get('id') or 'guest'}_{collection}"
+
+
+def _kb_scope_prefix(request: Request | None) -> str:
+    """当前请求可见的 collection 前缀。admin/None → ""（全见）。"""
+    if request is None:
+        return ""
+    user = getattr(request.state, "user", None) or {}
+    if user.get("role") == "admin" or not user:
+        return ""
+    return f"user_{user.get('id') or 'guest'}_"
+
+
+def _strip_kb_prefix(request: Request, name: str) -> str:
+    """物理目录名 → 展示名（只剥当前用户自己的前缀，不泄露别人的 uid）。"""
+    prefix = _kb_scope_prefix(request)
+    return name[len(prefix):] if prefix and name.startswith(prefix) else name
+
 
 @router.get("/v1/knowledge/collections")
-async def kb_list_collections():
+async def kb_list_collections(request: Request):
     try:
         from agent_harness.core.tools.rag_store import collection_info, list_collections
-        cols = list_collections()
-        return {
-            "collections": [collection_info(c) for c in cols],
-            "count": len(cols),
-        }
+        prefix = _kb_scope_prefix(request)
+        cols = [c for c in list_collections() if not prefix or c.startswith(prefix)]
+        items = []
+        for c in cols:
+            info = collection_info(c)
+            info["name"] = _strip_kb_prefix(request, c)   # 展示名
+            info["physical_name"] = c
+            items.append(info)
+        return {"collections": items, "count": len(items)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -1024,7 +1059,7 @@ async def kb_upload_file(request: Request):
         upload = form.get("file")
         if not upload:
             return JSONResponse({"error": "No file provided"}, status_code=400)
-        collection = form.get("collection", "default")
+        collection = _user_collection(request, form.get("collection", "default"))
         filename = upload.filename or "unknown"
         content = await upload.read()
         suffix = Path(filename).suffix or ".tmp"
@@ -1037,7 +1072,7 @@ async def kb_upload_file(request: Request):
             resp = {
                 "status": "ok",
                 "filename": filename,
-                "collection": collection,
+                "collection": _strip_kb_prefix(request, collection),
                 "chunks_indexed": result.get("chunks_count", 0),
                 "embedding_status": result.get("embedding_status", "unknown"),
                 "fallback": result.get("fallback", "none"),
@@ -1053,18 +1088,19 @@ async def kb_upload_file(request: Request):
 
 
 @router.delete("/v1/knowledge/collections/{name}")
-async def kb_delete_collection(name: str):
+async def kb_delete_collection(name: str, request: Request):
     try:
         from agent_harness.core.tools.rag_store import delete_collection
     except Exception as e:
         return JSONResponse({"error": f"RAG store not available: {e}"}, status_code=500)
-    if delete_collection(name):
+    # SEC-16：普通用户只能删自己前缀下的 collection；传入别人的物理名会再套一层前缀 → 404
+    if delete_collection(_user_collection(request, name)):
         return {"status": "deleted", "collection": name}
     return JSONResponse({"error": f"Collection not found: {name}"}, status_code=404)
 
 
 @router.get("/v1/knowledge/query")
-async def kb_query(q: str = "", collection: str = "default", top_k: int = 5):
+async def kb_query(request: Request, q: str = "", collection: str = "default", top_k: int = 5):
     try:
         from agent_harness.core.tools.rag_store import query as rag_query
     except Exception as e:
@@ -1072,7 +1108,7 @@ async def kb_query(q: str = "", collection: str = "default", top_k: int = 5):
     if not q:
         return {"results": []}
     try:
-        results = rag_query(q, collection=collection, top_k=top_k)
+        results = rag_query(q, collection=_user_collection(request, collection), top_k=top_k)
         return {"results": results, "count": len(results)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -1630,7 +1666,7 @@ async def kb_import_memory(request: Request):
     body = await request.json()
     text = (body or {}).get("text", "")
     source = (body or {}).get("source", "")
-    collection = (body or {}).get("collection", "memory")
+    collection = _user_collection(request, (body or {}).get("collection", "memory"))
     if not text:
         return JSONResponse({"error": "缺少 text 参数"}, status_code=400)
     try:
