@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed — LLM 配置收敛到单一入口（4 处调用点，3 处在主链路）
+- 🔍 **同一处缺陷有 4 个副本**：`supervisor.py`（模块级 import 快照，docstring 自认「绕过 `pipeline/llm.py`」）、`graph.py`、`comic_agent.py`（同为模块级）、`cs_agent.py`（函数内 import，同样只在首次生效）。修好 `workers.py` 并不够——规划层仍读进程启动时的配置
+- 🚫 **思考轨迹不再冒充答案**：另有 3 处 `content or reasoning_content[-500:]`，答案为空就把思考尾段当答案返回（`supervisor.py` / `graph.py` / `comic_agent.py`）
+- 🔧 在 `pipeline/llm.py` 收口三个入口，其余模块只许用它们：`runtime_endpoint()`（每次调用重读配置）、`extract_answer()`（复用 `_extract_openai_content`，答案与思考两通道永不合并）、`thinking_payload()`（`off` 显式禁用 / `on` 不发该字段）
+- 📢 未配置端点时打印原因并返回空，不再向空 URL 发请求
+- 🧪 `tests/test_llm_single_source.py` 9 用例
+
 ### Fixed — Worker 层 LLM 配置分裂（信任级：报告混入占位内容）
 - 🎭 **一次调研里跑了三种后端**：实测一次 demo 调用串里同时出现 `model: "mock"`、`127.0.0.1:18888`（连接被拒）、`qwen3.5:9b` —— 报告里真实分析与占位内容混在一起。根因是 `workers.py` 用 `config` 模块的 **import 快照**（进程启动那一刻的 `.env`），而 `llm.py` 已改为运行时 `get_llm_config()`：同一进程两套配置来源
 - 🔧 改为 `get_llm_config()`；简单任务只降预算、**不再切到第二个端点**（切端点正是配置分裂的成因）；未配置时直接说明并返回空，不发请求
