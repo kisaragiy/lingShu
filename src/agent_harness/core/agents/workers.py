@@ -317,8 +317,11 @@ def _worker_executor(state: WorkerState) -> dict:
     new_results = list(state.get("results", []))
     # Truncate tool output to save tokens (strategy #3)
     truncated_result = dict(result)
+    # 只读抓取类工具的正文需要更长摘要（500 字会把年报类正文拦腰截断，
+    # 导致 provenance snippet 里查不到报告数字）；其余工具维持原 500 字上限省 token。
+    _cap = 2000 if tool_name in {"web_scrape", "fetch", "web_browse"} else 500
     if isinstance(truncated_result.get("data"), str):
-        truncated_result["data"] = truncate_output(truncated_result["data"])
+        truncated_result["data"] = truncate_output(truncated_result["data"], max_chars=_cap)
     elif isinstance(truncated_result.get("output"), str):
         truncated_result["output"] = truncate_output(truncated_result["output"])
     new_results.append({
@@ -326,6 +329,8 @@ def _worker_executor(state: WorkerState) -> dict:
         "result": truncated_result,
         "validation": validation,
         "elapsed": round(elapsed, 2),
+        # ENG-29: provenance 需要「抓取时间」——此前只有 elapsed，无绝对时间戳
+        "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     })
 
     trace = list(state.get("trace_steps", []))

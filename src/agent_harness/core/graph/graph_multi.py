@@ -545,7 +545,71 @@ def _build_abstention_output(state: SupervisorState) -> dict:
 
 _CITE_RE = re.compile(r"\[[^\]]*\]")      # [来源 12] / [15] / [url]
 _URL_RE = re.compile(r"https?://\S+")
+# v1 旧正则：只认裸数字，保留给 verify_report_facts（既有通过路径不动）。
 _NUM_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+# ─── ENG-34: 中文单位归一（供 v2 核验 / claim_verifier adapter 共用） ───
+# 单位组把「万亿」放最前（正则交替按顺序匹配，先长后短），
+# 否则 1.2万亿 会被先吃成 1.2万，漏了「亿」。
+_NUM_UNIT_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(万亿|万|亿|千|w|k|m)?", re.IGNORECASE)
+_UNIT_MULTIPLIER = {
+    "千": 1e3, "k": 1e3,
+    "万": 1e4, "w": 1e4,
+    "亿": 1e8,
+    "万亿": 1e12,
+}
+
+
+def _normalize_number_tokens(text: str) -> set:
+    """报告与 provenance snippet 共用的同一口径数字提取。
+
+    返回 float 集合；容差 round(..., 2) 对齐 6489.61万↔64896100 这类浮点漂移。
+    不做全量中文数词（「一千二百」→1200），留后续接口。
+    """
+    if not text:
+        return set()
+    cleaned = _URL_RE.sub(" ", text)       # 剔除 URL
+    cleaned = _CITE_RE.sub(" ", cleaned)   # 剔除 [N]/[来源 N]
+    # 年份是时间限定不是数据：「2024 年营收 5 亿」不应因来源是 2023 年报就报「2024 未找到依据」
+    cleaned = _YEAR_RE.sub(" ", cleaned)
+    out: set = set()
+    for m in _NUM_UNIT_RE.finditer(cleaned):
+        raw = m.group(1).replace(",", "")
+        unit = (m.group(2) or "").lower()
+        try:
+            val = float(raw) * _UNIT_MULTIPLIER.get(unit, 1.0)
+        except ValueError:
+            continue
+        if val == int(val) and 0 <= val <= 9:
+            continue  # 单位数不显著，对齐 _extract_checkable_numbers 的保守判据
+        out.add(round(val, 2))
+    return out
+
+
+def _normalize_sources_numbers(sources: list) -> list:
+    """喂 RuleBasedJudge 前的 notation 对齐 adapter —— 只追加对照串、不改原句。
+
+    claim_verifier._numbers()（只抽裸数字）遇到报告写「987 亿」、来源写
+    「98700000000」会误判数字锚点不支撑。本 adapter 在来源正文末尾追加
+    「裸数字 + 中文单位简写」对照行，使两边裸数字串同口径；词面覆盖分只增不减，
+    不会把无源判成有源（覆盖率阈值仍由 RuleBasedJudge 把关）。
+    """
+    out = []
+    for src in (sources or []):
+        text = (src.get("text") or src.get("content")
+                or src.get("body") or src.get("snippet") or "")
+        extras = []
+        for n in sorted(_normalize_number_tokens(text)):
+            extras.append(_fmt_num(n))
+            if n >= 1e12:
+                extras.append(f"{n / 1e12:g} 万亿")
+            elif n >= 1e8:
+                extras.append(f"{n / 1e8:g} 亿")
+            elif n >= 1e4:
+                extras.append(f"{n / 1e4:g} 万")
+        merged = f"{text}\n[numbers] {' '.join(extras)}" if extras else text
+        out.append({**src, "text": merged})
+    return out
 
 
 def _extract_checkable_numbers(text: str) -> list[float]:
@@ -596,6 +660,89 @@ def _fmt_num(v: float) -> str:
     return str(int(v)) if v == int(v) else str(v)
 
 
+# ─── ENG-29: provenance（引用溯源：工具名 + URL + 抓取时间 + 摘要） ───
+# 数据形状（workers.py 的 worker executor / run_worker）：
+#   worker_results[wn]["data"] = [{"step": {"tool": ...},
+#                                  "result": {"success": True, "data": [...] 或 JSON str},
+#                                  "fetched_at": "2026-10-22T14:30:05+0800"}, ...]
+# search/fetch → data 是 list[str]（"标题: 摘要 [url]"）；web_scrape → JSON str。
+_YEAR_RE = re.compile(r"(?:19|20)\d{2}\s*年")   # 「2024 年」→ 时间限定，不作数据核验
+_PROV_LINE = re.compile(
+    r"^(?P<title>[^:]+?):\s*(?P<snippet>.*?)\s*\[(?P<url>https?://[^\]]+)\]\s*$"
+)
+_PROV_JSON_URL_RE = re.compile(r'"url"\s*:\s*"(?P<url>[^"]+)"')
+_PROV_JSON_TITLE_RE = re.compile(r'"title"\s*:\s*"(?P<title>[^"]*)"')
+_PROV_JSON_BODY_RE = re.compile(r'"body"\s*:\s*"(?P<body>.*)')
+
+
+def _collect_provenance(state) -> list:
+    """从 worker_results 的 step 列表解析带 URL 的一手来源记录。
+
+    只认 success 的步骤；解析不出 URL 的（纯模型自述 output）不进 provenance ——
+    这正是 v2 与 v1 的分界：自述不算证据，带 URL 的来源行才算。
+    """
+    out: list = []
+    results = state.get("worker_results") if isinstance(state, dict) else None
+    if not isinstance(results, dict):
+        results = {}
+    for wn, r in results.items():
+        if not isinstance(r, dict):
+            continue
+        for step in (r.get("data") or []):
+            if not isinstance(step, dict):
+                continue
+            tool = (step.get("step") or {}).get("tool", "")
+            res = step.get("result") or {}
+            if not res.get("success"):
+                continue
+            fetched_at = step.get("fetched_at", "")
+            raw = res.get("data")
+            # 分支1：search —— list[str]，每行 "标题: 摘要 [url]"
+            if isinstance(raw, list):
+                for line in raw:
+                    m = _PROV_LINE.match(str(line).strip())
+                    if not m:
+                        continue
+                    out.append({
+                        "url": m.group("url"), "tool": tool,
+                        "fetched_at": fetched_at, "engine": "",
+                        "title": m.group("title").strip(),
+                        "snippet": m.group("snippet").strip(),
+                        "source_worker": wn, "status": "unknown",
+                    })
+            # 分支2：web_scrape —— JSON str {"title","body","url"}
+            elif isinstance(raw, str):
+                text = raw
+                obj = None
+                try:
+                    obj = json.loads(text)
+                except (ValueError, TypeError):
+                    obj = None         # 可能被 truncate_output 截断成半截 JSON
+                if isinstance(obj, dict) and obj.get("url"):
+                    out.append({
+                        "url": str(obj["url"]), "tool": tool,
+                        "fetched_at": fetched_at, "engine": "",
+                        "title": str(obj.get("title", "")),
+                        "snippet": str(obj.get("body", ""))[:2000],
+                        "source_worker": wn, "status": "unknown",
+                    })
+                    continue
+                # 截断容错：用字段正则捞 url/title/body，不让长正文被截断就整条丢
+                mu = _PROV_JSON_URL_RE.search(text)
+                if not mu:
+                    continue
+                mt = _PROV_JSON_TITLE_RE.search(text)
+                mb = _PROV_JSON_BODY_RE.search(text)
+                out.append({
+                    "url": mu.group("url"), "tool": tool,
+                    "fetched_at": fetched_at, "engine": "",
+                    "title": mt.group("title") if mt else "",
+                    "snippet": (mb.group("body") if mb else "")[:2000],
+                    "source_worker": wn, "status": "unknown",
+                })
+    return out
+
+
 def verify_report_facts(report: str, state) -> dict:
     """反编造校验：报告的显著数字须能在 state 证据里找到依据。
 
@@ -635,8 +782,33 @@ def verify_report_facts(report: str, state) -> dict:
         return result
 
 
+# ─── ENG-33: skip 四种情况 → 用户可读文案（skipped 不再静默通过） ───
+_SKIP_REASON_CN = {
+    "round 触顶，跳过事实校验": "本轮达到最大轮次 {max_rounds}，事实校验未执行",
+    "报告无可核对数字": "报告正文无可核对数字，未做数字核验",
+    "无证据可核对": "未检索到可用来源正文（provenance 为空），无法比对",
+}
+
+
+def _skip_reason_cn(reason: str) -> str:
+    """四种 skip reason → 用户可读文案；未知 reason（异常分支）兜底。"""
+    tmpl = _SKIP_REASON_CN.get(reason)
+    if tmpl:
+        return tmpl.format(max_rounds=SUPERVISOR_MAX_ROUNDS)
+    return f"校验流程异常，已跳过：{reason}"
+
+
+def _skip_note(reason: str) -> str:
+    """统一的「未核验」标注块（skipped 时报告末尾必带原因）。"""
+    return (
+        "\n\n---\n"
+        f"⚠️ 未核验：未经数字核验（原因：{_skip_reason_cn(reason)}）。"
+        "以下内容未经过事实校验，请谨慎采信。\n"
+    )
+
+
 def _apply_fact_check(report: str, state) -> tuple[str, dict]:
-    """跑 facts 校验；对不上的数字在报告末尾标「未核实」（不调报告 LLM）。"""
+    """跑 facts 校验；对不上的数字在报告末尾标「未核实」；skipped 也显式标「未核验」。"""
     info = verify_report_facts(report, state)
     if info["checked"] and info["unverified"]:
         nums = "、".join(_fmt_num(n) for n in info["unverified"][:12])
@@ -645,6 +817,70 @@ def _apply_fact_check(report: str, state) -> tuple[str, dict]:
             "⚠️ 未核实数据：以下数字未能在 Worker 产出/中间事实中找到依据，"
             f"请谨慎采信 —— {nums}\n"
         )
+    elif info["skipped"]:
+        report = report + _skip_note(info.get("reason", ""))
+    return report, info
+
+
+# ─── ENG-32: v2 —— 证据基准换成带 URL 的一手来源 snippet ───
+# 目标场景（如金融研报类尽调，仅作可证伪的演示场景）：报告数字不再拿 worker
+# 自述 output 当证据，必须在 >=1 条 provenance snippet 里核对得上，源头错误当场可抓。
+
+def verify_report_facts_v2(report: str, state) -> dict:
+    """v2：报告数字必须在 provenance 一手来源 snippet 里核对得上。
+
+    返回 {"checked", "skipped", "reason", "not_found", "provenance_count", "backing"}；
+    保守判据同 v1（round 触顶/无数字/provenance 为空/异常 → skip 不误判）。
+    """
+    result: dict = {"checked": False, "skipped": True, "reason": "",
+                    "not_found": [], "provenance_count": 0, "backing": {}}
+    try:
+        if int(state.get("round", 0) or 0) >= SUPERVISOR_MAX_ROUNDS:
+            result["reason"] = "round 触顶，跳过事实校验"
+            return result
+        # 顺序对齐 v1：先查报告有无数字，再看来源
+        report_nums = sorted(_normalize_number_tokens(report))
+        if not report_nums:
+            result["reason"] = "报告无可核对数字"
+            return result
+        provenance = _collect_provenance(state)
+        result["provenance_count"] = len(provenance)
+        if not provenance:
+            result["reason"] = "无证据可核对"
+            return result
+        evidence_nums: set = set()
+        backing: dict = {}
+        for p in provenance:
+            # 来源标题也是来源正文的一部分（「2023 年报」这类数字不该误报）
+            src_text = f"{p.get('title', '')} {p.get('snippet', '')}"
+            for n in _normalize_number_tokens(src_text):
+                evidence_nums.add(n)
+                backing.setdefault(n, p.get("url", ""))
+        not_found = [{"num": n, "url": backing.get(n, "")}
+                     for n in report_nums if n not in evidence_nums]
+        result.update(checked=True, skipped=False, reason="",
+                      not_found=not_found, backing=backing)
+        return result
+    except Exception as exc:  # 解析失败绝不误判
+        result["reason"] = f"校验异常，已跳过: {exc}"
+        return result
+
+
+def _apply_fact_check_v2(report: str, state) -> tuple[str, dict]:
+    """v2 渲染：❌ 未找到依据 / ⚠️ 未核验（原因）两态标注；全对则原文不动。"""
+    info = verify_report_facts_v2(report, state)
+    if info["checked"] and info["not_found"]:
+        items = "、".join(
+            f"{_fmt_num(x['num'])}" + (f"（来源：{x['url']}）" if x.get("url") else "")
+            for x in info["not_found"][:12]
+        )
+        report = report + (
+            "\n\n---\n"
+            "❌ 未找到依据：以下数字未能在任何一手来源正文里核对上，"
+            f"请谨慎采信 —— {items}\n"
+        )
+    elif info["skipped"]:
+        report = report + _skip_note(info.get("reason", ""))
     return report, info
 
 
@@ -889,7 +1125,12 @@ def supervisor_finalize(state: SupervisorState) -> dict:
     )
 
     # ─── P0-2: 反编造 facts 校验（不改内容结构，仅标注未核实数字；不调报告 LLM）───
-    final, fact_info = _apply_fact_check(final, state)
+    # ENG-32: 有 provenance（带 URL 的一手来源行）时走 v2 —— 证据基准从 worker
+    # 自述 output 换成来源 snippet；无 provenance 时回落 v1，保持既有路径不破。
+    if _collect_provenance(state):
+        final, fact_info = _apply_fact_check_v2(final, state)
+    else:
+        final, fact_info = _apply_fact_check(final, state)
 
     # P1-6: 收尾附显式完成契约（feature + passes + 未完成项列表）
     final = final + "\n" + contract_text
@@ -903,12 +1144,24 @@ def supervisor_finalize(state: SupervisorState) -> dict:
         "total_elapsed": round(total_elapsed, 1),
         "rounds": state.get("round", 1),
     }]
-    if fact_info["checked"]:
+    if fact_info.get("checked"):
+        if "unverified" in fact_info:          # v1
+            unverified = [_fmt_num(n) for n in fact_info["unverified"][:12]]
+        else:                                  # v2：not_found 是 [{num,url}]
+            unverified = [_fmt_num(x["num"]) for x in fact_info.get("not_found", [])[:12]]
         trace_steps.append({
             "step": "finalize_fact_check",
             "checked": True,
-            "unverified_count": len(fact_info["unverified"]),
-            "unverified": [_fmt_num(n) for n in fact_info["unverified"][:12]],
+            "unverified_count": len(unverified),
+            "unverified": unverified,
+        })
+    elif fact_info.get("skipped"):
+        # ENG-33: skipped 不再静默 —— trace 里也留原因，报告正文有「未核验」标注
+        trace_steps.append({
+            "step": "finalize_fact_check",
+            "checked": False,
+            "skipped": True,
+            "reason": fact_info.get("reason", ""),
         })
     trace_steps.append(contract_trace)
     if attribution_trace:
