@@ -9,6 +9,8 @@
 - ✅ 文档里每条数字都附了自查命令（`pytest` / `grep -c '^## ' CHANGELOG.md` / 一行 Python 数工具），对不上就是文档的错
 - 🧭 工具数**核实为 37 正确**（完整应用导入链下的注册数；单独 import 工具模块会多注册，那不是运行时形态）—— 原审计把它列为存疑项，实为误报
 - 📌 保留原有设计取舍：**不提供离线演示模式**（假数据演示与真实能力脱节比演示失败更糟）
+- 🧹 **同族问题在 docs/ 下还有 6 处**：`index.md` 的「零门槛上手 / 生产就绪 / 支持高并发和分布式部署 / 活跃社区 / 谁在使用」（全部无法证实，且「分布式部署」与 AGENTS.md「`HARNESS_WORKERS` 必须为 1」直接矛盾）、`api.md` 的 `AUTH_TOKEN`（代码里根本不存在这个变量）、`api.md` + `cs-demo.md` + `quickstart.md` 共 5 处 `localhost:8000`（实际 8788）、`quickstart.md` 里凭空写的启动终端框（v0.1.0 / 🚀 Service is running）。全部按事实改写，营销词换成可核实的行为描述 + 「明确的边界」
+- 🧨 **`configuration.md` 整篇重写**：原文的配置表基本是虚构的 —— `OPENAI_API_KEY` / `ANTHROPIC_*` / `VECTOR_STORE_TYPE` / `DB_*` / `BROWSER_*` / `SANDBOX_*` / `EVAL_*` 在代码里绝大多数不存在，`AUTH_TOKEN` / `SECRET_KEY` 也不存在；还教用户写 YAML 并用 `agent-harness serve --config`（`serve` 只接受 `-h`）。新版变量表从 `Settings.model_fields` **直接导出**，并标出代码里直接读的那几个（`HARNESS_API_HOST` / `HARNESS_API_PORT` / `HARNESS_WORKERS` / `HARNESS_LLM_THINKING` / `HARNESS_RAG_DIR` / `HARNESS_EMBED_*`），外加三次真跑验证过的 `HARNESS_API_KEY_ROLE` / `HARNESS_DEMO_ALLOW_WRITE_TOOLS`
 
 ### Fixed — SEC-2 知识库越权读取（隔离下沉到数据层）
 - 🕳️ **两个真实越权点，都不在 API 层**：① `supervisor.py` 把 `list_collections()` 的返回值直接拼进 system prompt，**所有用户的 collection 物理名都会送给模型和用户**（信息泄露）；② `_tool_rag_query(collection=...)` 完全信任模型传进来的名字 —— 模型被检索内容诱导后传别人的物理名就能读到。API 层原有的 `_user_collection()` 只保护「API 自己拼出来的名字」，管不到这两条路径

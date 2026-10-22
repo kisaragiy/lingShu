@@ -73,16 +73,9 @@ LOG_LEVEL=INFO
 agent-harness serve
 ```
 
-启动后终端显示如下信息：
+启动后在浏览器打开 `http://127.0.0.1:8788`（端口可用 `HARNESS_API_PORT` 改，默认只绑本机）。
 
-```
-╭──────────────────────────────╮
-│   Agent Harness v0.1.0       │
-│   🚀 Service is running      │
-│   📡 http://localhost:8000    │
-│   📖 Docs: /docs             │
-╰──────────────────────────────╯
-```
+终端会打印监听地址与启动日志；首次启动会提示模型后端是否已配置。
 
 ### 使用 Docker
 
@@ -106,14 +99,11 @@ docker-compose up -d
 
 ## 第四步：验证运行
 
-打开浏览器访问 `http://localhost:8000`，或使用 curl 验证：
+打开浏览器访问 `http://127.0.0.1:8788`，或使用 curl 验证：
 
 ```bash
-# 健康检查
-curl http://localhost:8000/health
-
-# 预期响应
-{"status": "ok", "version": "0.1.0", "uptime": "0:01:23"}
+# 健康检查（返回 JSON：status / version / 各组件检查结果）
+curl http://127.0.0.1:8788/health
 ```
 
 ## 下一步

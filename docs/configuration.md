@@ -1,141 +1,115 @@
-# 配置说明
+# 配置
 
-Agent Harness 通过环境变量和配置文件进行灵活配置。
+灵枢的配置有三个来源，优先级从高到低：
+
+1. **`config.json`**（设置页写的运行时配置，路径 `~/.agent-harness/config.json`）—— 设置页改完立即生效
+2. **环境变量 / `.env`**（进程启动时读取）
+3. **代码默认值**
+
+> 为什么 `config.json` 优先：环境变量对已 import 的模块是快照，设置页填的地址必须立刻生效（ADR-003）。
+
+---
 
 ## 环境变量
 
-所有配置项均可通过环境变量设置，推荐使用 `.env` 文件管理。
+### 服务
 
-### 核心配置
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `HARNESS_API_HOST` | 监听地址 | `127.0.0.1`（绑 `0.0.0.0` 会告警：API 暴露到局域网） |
+| `HARNESS_API_PORT` | 监听端口 | `8788` |
+| `HARNESS_WORKERS` | uvicorn worker 数 | `1`（**传入 >1 会被强制降为 1**，会话/metrics/取消/缓存都是进程内状态） |
 
-| 变量名 | 说明 | 默认值 | 是否必填 |
-|--------|------|--------|----------|
-| `AGENT_HARNESS_PORT` | 服务监听端口 | `8000` | 否 |
-| `AGENT_HARNESS_HOST` | 服务监听地址 | `0.0.0.0` | 否 |
-| `AGENT_HARNESS_WORKERS` | 工作进程数 | `1` | 否 |
-| `LOG_LEVEL` | 日志级别 | `INFO` | 否 |
-| `LOG_FILE` | 日志文件路径 | `logs/agent-harness.log` | 否 |
-| `SECRET_KEY` | 服务端密钥（用于 JWT 加密） | `change-me` | 是（生产环境） |
-| `AUTH_TOKEN` | API 认证 Token | 空（不启用认证） | 否 |
+### 模型后端
 
-### LLM 提供商
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `HARNESS_OLLAMA_API` | Ollama API 地址 | `http://127.0.0.1:11434/api/embed` |
+| `HARNESS_LLAMA_API` | llama.cpp API 地址 | 空 |
+| `HARNESS_DEEPSEEK_API` | DeepSeek API 地址 | 空 |
+| `HARNESS_CLOUD_API` | API 聚合地址 | 空 |
+| `HARNESS_CLOUD_KEY` | 云端 API Key | 空 |
+| `HARNESS_MODEL_LLAMA` | 默认模型名 | 见 `config.json`（设置页可改） |
+| `HARNESS_MODEL_DEEPSEEK` | DeepSeek 模型名 | `deepseek-v4-pro` |
 
-至少需要配置一个 LLM 提供商的 API 密钥。
+### 编排行为
 
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
-| `OPENAI_API_KEY` | OpenAI API 密钥 | - |
-| `OPENAI_BASE_URL` | OpenAI API 基础 URL | `https://api.openai.com/v1` |
-| `OPENAI_MODEL` | 默认 OpenAI 模型 | `gpt-4o` |
-| `ANTHROPIC_API_KEY` | Anthropic Claude API 密钥 | - |
-| `ANTHROPIC_MODEL` | 默认 Claude 模型 | `claude-3-opus-20240229` |
-| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | - |
-| `DEEPSEEK_BASE_URL` | DeepSeek API 基础 URL | `https://api.deepseek.com` |
-| `DEEPSEEK_MODEL` | 默认 DeepSeek 模型 | `deepseek-chat` |
-| `LOCAL_MODEL_URL` | 本地模型 API 地址 | - |
-| `LOCAL_MODEL_NAME` | 本地模型名称 | - |
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `HARNESS_MAX_RETRIES` | 单步重试次数 | `2` |
+| `HARNESS_MAX_ITERATIONS` | 单 Agent 最大迭代 | `10` |
+| `HARNESS_MAX_TOKENS` | 单次请求最大 token | `100000` |
+| `HARNESS_MAX_TIME` | 单任务最大时长（秒） | `600` |
+| `HARNESS_MAX_NO_PROGRESS` | 连续无进展多少次放弃 | `5` |
+| `HARNESS_MAX_WORKERS` | 并行 Worker 数 | `3` |
+| `HARNESS_SUPERVISOR_ROUNDS` | Supervisor 最多轮次 | `3` |
+| `HARNESS_LLM_THINKING` | 思考模式 `off` / `on` | `off` |
 
-### 知识库配置
+### 认证与权限
 
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
-| `VECTOR_STORE_TYPE` | 向量数据库类型 | `chroma` |
-| `VECTOR_STORE_PATH` | 向量数据库存储路径 | `./data/vector_store` |
-| `EMBEDDING_MODEL` | 嵌入模型名称 | `BAAI/bge-small-zh-v1.5` |
-| `EMBEDDING_DIMENSION` | 嵌入向量维度 | `512` |
-| `CHUNK_SIZE` | 文档分块大小 | `512` |
-| `CHUNK_OVERLAP` | 文档分块重叠大小 | `64` |
-| `TOP_K_RESULTS` | 检索返回的最大结果数 | `5` |
-| `RERANK_ENABLED` | 是否启用重排序 | `false` |
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `HARNESS_DISABLE_AUTH` | 关闭认证（**仅本地演示，不得暴露公网**） | `False` |
+| `HARNESS_API_KEY_ROLE` | `X-API-Key` 持有的角色：`admin` / `user` | `admin`（非法值降级为 `user` 并告警） |
+| `HARNESS_DEMO_ALLOW_WRITE_TOOLS` | `DISABLE_AUTH=1` 时允许的写类工具（逗号分隔） | 空 = 全部拒绝 |
 
-### 数据库配置
+### 知识库（RAG）
 
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
-| `DB_TYPE` | 数据库类型 | `sqlite` |
-| `DB_PATH` | SQLite 数据库路径 | `./data/agent-harness.db` |
-| `DB_HOST` | 数据库主机（PostgreSQL/MySQL） | `localhost` |
-| `DB_PORT` | 数据库端口 | `5432` |
-| `DB_NAME` | 数据库名称 | `agent_harness` |
-| `DB_USER` | 数据库用户 | `postgres` |
-| `DB_PASSWORD` | 数据库密码 | - |
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `HARNESS_RAG_DIR` | collection 存储目录 | 仓库根下 `rag_data/` |
+| `HARNESS_EMBED_MODEL` | 嵌入模型 | `nomic-embed-text` |
+| `HARNESS_EMBED_DIM` | 向量维度 | `768` |
 
-### 浏览器配置
+### 搜索与密钥
 
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
-| `BROWSER_HEADLESS` | 是否为无头模式 | `true` |
-| `BROWSER_TIMEOUT` | 浏览器操作超时（秒） | `30` |
-| `BROWSER_VIEWPORT_WIDTH` | 视口宽度 | `1280` |
-| `BROWSER_VIEWPORT_HEIGHT` | 视口高度 | `720` |
+| 变量 | 说明 |
+|---|---|
+| `DEEPSEEK_API_KEY` / `HARNESS_DEEPSEEK_API` | DeepSeek 密钥（同时用于 `/v1/tools/search`） |
+| `TAVILY_API_KEY` | Tavily 搜索密钥 |
 
-### 安全与沙箱
+密钥的完整优先级：`config.json` 的密文字段（`search.api_key_enc` / `search.tavily_key_enc`）→ `llm.api_key` → 环境变量。**界面只显示「已配置 / 未配置」，不回显任何片段**。
 
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
-| `SANDBOX_ENABLED` | 是否启用沙箱 | `true` |
-| `MAX_TOOL_CALLS` | 单次请求最大工具调用次数 | `20` |
-| `MAX_EXECUTION_TIME` | 单次请求最大执行时间（秒） | `120` |
-| `MAX_OUTPUT_SIZE` | 工具输出最大字符数 | `100000` |
-| `ALLOWED_DOMAINS` | 允许访问的域名列表 | `*` |
-| `RATE_LIMIT_ENABLED` | 是否启用限流 | `true` |
-| `RATE_LIMIT_PER_MIN` | 每分钟最大请求数 | `60` |
+### 目录
 
-### 评测配置
+| 变量 | 说明 |
+|---|---|
+| `HARNESS_MEMORY_DIR` | 记忆目录（空 = 默认位置） |
+| `HARNESS_SKILLS_DIR` | 技能目录（空 = 默认位置） |
 
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
-| `EVAL_OUTPUT_DIR` | 评测报告输出目录 | `./eval_reports` |
-| `EVAL_DEFAULT_MODEL` | 评测默认模型 | `gpt-4o` |
-| `EVAL_JUDGE_MODEL` | 评测裁判模型 | `gpt-4o` |
-| `EVAL_MAX_CONCURRENCY` | 最大并行评测数 | `4` |
+---
 
-## 配置文件
+## 运行时配置 `config.json`
 
-除环境变量外，也支持 YAML 配置文件：
+设置页（☰ → 设置）写入，路径 `~/.agent-harness/config.json`。主要字段：
 
-```yaml
-# config.yaml
-server:
-  host: 0.0.0.0
-  port: 8000
-  workers: 2
-
-llm:
-  openai:
-    model: gpt-4o
-    temperature: 0.7
-  deepseek:
-    model: deepseek-chat
-    temperature: 0.7
-
-knowledge:
-  vector_store: chroma
-  embedding_model: BAAI/bge-small-zh-v1.5
-  chunk_size: 512
-
-security:
-  sandbox: true
-  rate_limit: 60
-  max_tool_calls: 20
+```json
+{
+  "api_url": "http://127.0.0.1:11434/v1/chat/completions",
+  "model": "<模型名>",
+  "api_key": "",
+  "search": {
+    "api_key_enc": "<密文>",
+    "tavily_key_enc": "<密文>"
+  }
+}
 ```
 
-使用配置文件启动：
+- 任何 OpenAI 兼容端点都能填（本地 ollama / llama.cpp / DeepSeek / OpenAI）
+- 密钥以密文落盘（keystore），配置文件里看不到明文
+- 写入走临时文件替换，避免半截文件
+
+---
+
+## `.env`
 
 ```bash
-agent-harness serve --config config.yaml
-```
-
-## .env 示例文件
-
-项目根目录下的 `.env.example` 包含了完整的配置模板：
-
-```bash
-# 复制并编辑
 cp .env.example .env
 ```
 
-完整内容请查看项目根目录的 `.env.example` 文件。
+`.env.example` 里只有三个变量（地址与端口），**不含任何密钥** —— 密钥请在设置页填，或自行加进 `.env`（环境变量优先级最低）。
+
+> 没有 YAML 配置文件，也不支持 `agent-harness serve --config`。`serve` 只接受 `-h`。
 
 ---
 
