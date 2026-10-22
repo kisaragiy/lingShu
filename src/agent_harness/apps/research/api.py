@@ -762,7 +762,13 @@ async def formalize_report(request: Request):
     source_session = body.get("source_session", "")
     sources = body.get("sources", [])
     from agent_harness.apps.research.pipeline import report_formatter
-    html = report_formatter.generate_report_html(title, content, sources=sources)
+    # ENG-29：provenance/factcheck 可由调用方显式传入（agent 侧 state 未落盘，
+    # 默认不传 → 报告无「事实核验说明」汇总块，只在正文保留文本级标注）。
+    html = report_formatter.generate_report_html(
+        title, content, sources=sources,
+        provenance=body.get("provenance") or None,
+        factcheck=body.get("factcheck") or None,
+    )
     meta = report_formatter.save_formal_report(
         title=title,
         html=html,

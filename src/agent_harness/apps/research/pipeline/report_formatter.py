@@ -144,7 +144,113 @@ def _safe_href(url: str) -> str:
     return ""
 
 
-def generate_report_html(title: str, content: str, sources: list[dict] = None, tags: list[str] = None) -> str:
+# ─── ENG-29/32/33: 核验三态（provenance → 三态汇总块数据） ───
+
+def _verdict_three_state(report: str, source_map: dict, provenance: list) -> dict:
+    """把 claim_verifier 裁定 + 数字级核验映射成报告三态汇总块数据。
+
+    返回 {"checked","verified","not_found","unknown","unknown_reasons",
+          "provenance_count","not_found_items"}，供 ``_render_factcheck_html`` 渲染。
+    目标场景（如金融研报类尽调，仅作可证伪的演示场景）。
+    """
+    from agent_harness.core.graph.graph_multi import (
+        _normalize_number_tokens, _normalize_sources_numbers)
+
+    provenance = provenance or []
+    source_map = source_map or {}
+    reasons: list[str] = []
+    prov_by_url = {p.get("url", ""): p.get("snippet", "") for p in provenance
+                   if isinstance(p, dict)}
+    source_texts = {n: prov_by_url.get(url, "") for n, url in source_map.items()}
+
+    # ── 数字级三态（ENG-32/34 口径：报告数字 vs 来源 snippet 数字集合）──
+    report_nums = sorted(_normalize_number_tokens(report))
+    prov_nums: set = set()
+    for p in provenance:
+        if isinstance(p, dict):
+            # 标题 + snippet 都算来源正文（「2023 年报」这类标题数字不误报）
+            prov_nums |= _normalize_number_tokens(
+                f"{p.get('title', '')} {p.get('snippet', '')}")
+    not_found_items = [n for n in report_nums if n not in prov_nums]
+
+    verified = not_found = 0
+    if provenance and report_nums:
+        not_found = len(not_found_items)
+        verified = len(report_nums) - not_found
+    elif provenance and not report_nums:
+        reasons.append("报告正文无可核对数字，未做数字核验")
+
+    # ── 断言级裁定（claim_verifier：词面覆盖 + 数字锚点；不判语义等价）──
+    try:
+        from agent_harness.core.safety.claim_verifier import (
+            RuleBasedJudge, sources_from_citation_map, verify_claims)
+        sources = sources_from_citation_map(source_map, source_texts=source_texts)
+        sources = _normalize_sources_numbers(sources)   # ENG-34：中文单位同口径
+        claims = [s for s in re.split(r"(?<=[。！？\n])", report or "") if len(s.strip()) > 15]
+        if claims and sources:
+            verdicts = verify_claims(claims, sources, judge=RuleBasedJudge())
+            supported = sum(1 for v in verdicts if v.status == "supported")
+            unsupported = sum(1 for v in verdicts if v.status in ("partial", "unsupported"))
+            if not not_found_items:
+                verified, not_found = supported, unsupported
+    except Exception as exc:   # 校验异常绝不误判 → 落 v-unknown + 显式原因
+        reasons.append(f"校验流程异常（{exc}），已跳过以避免误判")
+
+    unknown = 0
+    if not provenance:
+        unknown = 1
+        reasons.append("未检索到可用来源正文（provenance 为空），无法比对")
+
+    return {
+        "checked": bool(provenance),
+        "verified": verified,
+        "not_found": not_found,
+        "unknown": unknown,
+        "unknown_reasons": reasons,
+        "provenance_count": len(provenance),
+        "not_found_items": not_found_items[:12],
+    }
+
+
+def _render_factcheck_html(factcheck: dict | None) -> str:
+    """生成 factcheck-summary 块（三态计数 + 未找到依据的数字 + 未核验原因）。
+
+    插在「📎 参考来源」块之前；动态内容全部过 ``_esc``。
+    """
+    if not factcheck:
+        return ""
+    vr = _esc(factcheck.get("verified", 0))
+    mf = _esc(factcheck.get("not_found", 0))
+    un = _esc(factcheck.get("unknown", 0))
+    n_src = _esc(factcheck.get("provenance_count", 0))
+
+    miss_lis = ""
+    items = factcheck.get("not_found_items") or []
+    if items:
+        from agent_harness.core.graph.graph_multi import _fmt_num
+        inner = "、".join(_esc(_fmt_num(n)) for n in items)
+        miss_lis = f'<p class="v v-miss">❌ 未找到依据的数字：{inner}</p>'
+
+    reason_lis = "".join(
+        f"<li>{_esc(r)}</li>" for r in (factcheck.get("unknown_reasons") or [])
+    )
+    reasons_html = f"<ul>{reason_lis}</ul>" if reason_lis else ""
+    return f"""
+        <div class="section factcheck-summary">
+            <h2>🔍 事实核验说明</h2>
+            <p>本报告关键数字已对照 <b>{n_src}</b> 条一手来源（工具名 + URL + 抓取时间）核验：
+               <span class="v v-ok">✅ 已核验 {vr} 条</span> ·
+               <span class="v v-miss">❌ 未找到依据 {mf} 条</span> ·
+               <span class="v v-unknown">⚠️ 未核验 {un} 条</span>。</p>
+            {miss_lis}
+            <p class="factcheck-hint">未找到依据的断言请勿直接采信；未核验项原因见下。</p>
+            {reasons_html}
+        </div>"""
+
+
+def generate_report_html(title: str, content: str, sources: list[dict] = None,
+                         tags: list[str] = None, provenance: list | None = None,
+                         factcheck: dict | None = None) -> str:
     """Generate a professional HTML report with embedded CSS and source citations.
 
     Args:
@@ -152,6 +258,10 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
         content: Markdown-ish content from the agent (may contain [来源 N] markers)
         sources: Optional list of {url, title} for citations
         tags: Optional list of tag strings for the report
+        provenance: Optional 一手来源记录（ENG-29：工具名 + URL + 抓取时间 + snippet）；
+            给了就渲染「事实核验说明」三态块
+        factcheck: Optional 预先算好的三态汇总（见 ``_verdict_three_state``）；
+            缺省且给了 provenance 时自动计算
 
     Returns:
         Complete HTML string ready to view/print
@@ -166,6 +276,16 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
     # Step 1: Convert [url] patterns to [N] numbered citations
     # Also builds a source_map and a "## 参考来源" section to append
     formatted_content, source_map = _format_citations(content)
+
+    # ─── ENG-29: provenance → 核验三态（无 provenance 时不渲染汇总块，旧行为不变）───
+    if factcheck is None and provenance is not None:
+        try:
+            factcheck = _verdict_three_state(content, source_map, provenance)
+        except Exception as exc:      # 渲染路径绝不因核验失败而崩
+            factcheck = {"verified": 0, "not_found": 0, "unknown": 1,
+                         "unknown_reasons": [f"校验流程异常（{exc}），已跳过以避免误判"],
+                         "provenance_count": 0, "not_found_items": []}
+    factcheck_html = _render_factcheck_html(factcheck)
 
     # Step 2: Build reference section from source_map (from [url] → [N] conversion)
     ref_lines = []
@@ -252,12 +372,18 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
                 items += f'<span class="source-plain">{title_text}</span>'
                 items += '<span class="source-meta">（链接已禁用：非 http(s) 协议）</span> '
             items += f'<span class="source-meta"> · {source_type} · {access_date}</span>'
+            if factcheck is None:
+                # ENG-29 第一层：没有任何 provenance/核验数据时，逐条诚实标注「未独立核验」
+                items += '<span class="source-meta"> · <span class="unverified-tag">未独立核验</span></span>'
             items += '</li>'
         sources_html = f"""
         <div class="section">
             <h2>📎 参考来源</h2>
             <ol class="sources">{items}</ol>
         </div>"""
+
+    # factcheck 汇总块插在「📎 参考来源」之前（ENG-33 落位）
+    sources_html = factcheck_html + sources_html
 
     html = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -345,6 +471,18 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None, t
   sup.cite {{ font-size: 11px; vertical-align: super; line-height: 0; margin: 0 2px; }}
   sup.cite a {{ color: #2563eb; text-decoration: none; font-weight: 600; }}
   sup.cite a:hover {{ text-decoration: underline; }}
+  /* ─── Fact-check 三态（ENG-29/33） ─── */
+  .factcheck-summary {{ background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; font-size: 13.5px; }}
+  .factcheck-summary h2 {{ font-size: 16px; border: none; margin: 0 0 8px; padding: 0; }}
+  .factcheck-summary ul {{ font-size: 13px; color: #475569; }}
+  .factcheck-hint {{ font-size: 12px; color: #64748b; margin-top: 6px; }}
+  .v {{ padding: 1px 6px; border-radius: 4px; font-size: 11px; }}
+  .v-ok {{ color: #15803d; background: #dcfce7; }}
+  .v-miss {{ color: #b91c1c; background: #fee2e2; }}
+  .v-unknown {{ color: #a16207; background: #fef9c3; }}
+  .unverified-tag {{ color: #a16207; background: #fef9c3; padding: 1px 6px;
+    border-radius: 4px; font-size: 10.5px; }}
   /* ─── Footer / Print bar ─── */
   .footer {{ text-align: center; font-size: 12px; color: #94a3b8; padding: 24px 0; }}
   .print-bar {{ text-align: center; margin-bottom: 12px; }}
