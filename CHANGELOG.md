@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixed — 报告索引：截断写、损坏即清零、跨进程丢更新
+- 💣 **`_save_index` 注释写着「atomic: write to tmp then replace」，代码却是 `open(INDEX_FILE, "w")` 直接截断写**——注释和实现两张皮，崩溃或断电就留下半截 JSON 或空文件
+- 💣 **索引损坏被静默清零**：`_load_index` 解析失败 `return []`，紧接着一次保存就把空列表写回 → **历史索引永久消失**（报告 `.md` 还在，但列表里全没了，且没有任何痕迹）。这是复利型缺陷：单次看只是"读到空"，实际是不可逆的数据丢失
+- 💣 **只有进程内 `RLock`**：server 与 CLI 同时写、或多 worker 部署时，两个进程各自 load→modify→save 互相覆盖，后写者赢，前者的报告从索引里消失
+- 🧩 修法：`_save_index` 改 tmp + `os.fsync` + `os.replace` 原子替换，失败时清 tmp 且旧索引原封不动；`_load_index` 遇损坏先**隔离**成 `index.json.corrupt-<ts>` 并 stderr 告警，再按空索引继续；`save_report` 的 `.md` 写入同样原子；三个 load-modify-write 入口（`save_report` / `index_report` / `delete_report`）加跨进程文件锁（Windows `msvcrt.locking` / POSIX `fcntl.flock`，同一线程靠深度计数重入，否则内层 `_save_index` 会自死锁）
+- 🧪 `tests/test_report_store_atomicity.py` 7 用例：损坏隔离且报告正文不受牵连、**下行保存不再毁掉历史**、非列表索引同样隔离、写入中途抛异常时旧索引字节级不变且无 tmp 残留、成功路径无残留、4 线程 × 5 次并发全记录、**3 进程 × 5 次跨进程写 15/15 全记录**（这条是文件锁的真正证据）
+
+### Measured — 大报告渲染：判定为边界，不改
+- 实测（`scratch/bench_report.py`）：100KB → 0.10s / 峰值 2.9MB；1MB → 0.95s / 29MB；4MB → 3.65s / 116MB。耗时**线性**（不存在循环内字符串拼接的 O(n²)），峰值约为输入的 29 倍
+- 不改的理由：4MB 正文需要约 100 万 token 的 LLM 输出，而报告正文只来自模型输出、受上下文窗口约束，实际量级在几十 KB。为不存在的输入引入流式渲染，是拿真实复杂度换假想收益
+
 ### Fixed — 证据链在会话持久化层断裂（刷新页面后来源全丢）
 - 🕳️ **真断点**：会话只存 `role` / `content` / `ts` 三个字段，`provenance` 与 `factcheck` 从不落盘 → 刷新页面或重开会话，来源、抓取时间、核验结果**全没了**。「每条结论可回溯」因此只在单次请求的生命周期内成立；`/v1/reports/formalize` 更直接：原代码注释自己写着「agent 侧 state 未落盘，默认不传 → 报告无「事实核验说明」汇总块」
 - 🧩 修法：给 assistant 消息挂 `provenance` / `factcheck` 后一并落盘（`session_store` 的 message 事件本就保留消息全部字段，读回原样），`formalize` 在调用方未显式传证据时从 `source_session` 取最近一条带证据的消息
