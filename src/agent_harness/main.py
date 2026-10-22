@@ -142,6 +142,14 @@ async def _api_auth_middleware(request: Request, call_next):
         jwt_token = auth_header[7:]
         payload = _auth_jwt.verify_token(jwt_token)
         if payload is not None:
+            # 撤销即失效：登出（revoke_session）后 access token 也必须立刻不可用。
+            # 只验签不查会话表 = 撤销语义分裂（refresh 会查、access 不查）。
+            if not _auth_db.is_session_valid(payload.get("jti", "")):
+                return JSONResponse(
+                    {"error": "登录已失效，请重新登录。"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
             user = _auth_db.get_user(payload["sub"])
             if user:
                 request.state.user = user
