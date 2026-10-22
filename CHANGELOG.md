@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Fixed — 熔断器三态状态机（无进展检测真正生效）
+- 🔥 `record_output(wname, output)`：worker 名改作分组 key，不再拼进被比较文本——旧实现每次前缀不同，唯一指纹恒 > 1，**无进展检测实际永不触发**
+- 🔁 新增 CLOSED / OPEN / HALF_OPEN 三态：硬熔断（token 超支/墙钟超时）永久停；软熔断（无进展）冷却 60s 后半开放行一次探测，探测通过恢复 closed、失败重置冷却（原实现触发后**永不恢复**）
+- 🧵 全部可变状态加锁；`_tripped` 属性保留兼容旧读点
+- 🎯 滚动窗口长度跟随 `max_no_progress`（原为模块常量，构造参数是死参数）
+- 🧪 新增 `tests/test_circuit_breaker.py`（10 用例，模块覆盖率 98%）；调用点同步 graph / graph_multi / module_eval
+
+### Fixed — 鉴权撤销语义与写路径越权
+- 🔒 SEC-4：JWT middleware 的 Bearer 分支补 `is_session_valid(jti)` —— 登出后 access token 立即 401（此前只验签不查表，撤销语义与 refresh 侧分裂）
+- 🔒 SEC-15：`DELETE /v1/sessions/{id}` 与 `POST /v1/sessions/{id}/meta` 补 owner 校验，与 messages/export/logs 读路径同策略；非 owner 与不存在同回 404（不做存在性 oracle）
+- 🧪 新增 `tests/test_authz_session_write.py`（4 身份 × 删/改 双向矩阵）、`tests/test_auth_session_revocation.py`（登出即失效 + 伪造 token 负向控制）；回退源码验证过 6 用例转红
+
+### Changed — 仓库卫生 / 对外文档
+- 内部工作准则与自查文档移至本地 `docs-internal/`（不再入库）：AGENTS 内部版、用户征集设计、市场对齐、评审记录、架构自查、改造蓝图、升级计划、运维指标
+- `AGENTS.md` 重写为面向开发者的中性约定（结构 / 本地开发 / 测试基线 / ADR / 已知设计边界）
+- `render.yaml`（`DISABLE_AUTH=1` 公网无认证 demo）出库，存档 `docs-internal/`
+- 移除 `chromadb` 死依赖（全仓库零 import；RAG 实为 numpy 余弦 + BM25）
+- `site/` 52 个生成产物解除跟踪（`.gitignore` 的 `/site/` 对已跟踪文件无效）
+- README：定位收窄到调研主线；新增「目标场景（含可证伪声明）」与「部署安全边界」
+
 ## v0.75.3 — 2026-09-07
 
 ### Fixed — Supervisor-Worker 架构加固（Cognition P1/P2 对照，Day 审查）
