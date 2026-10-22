@@ -329,6 +329,29 @@ app.include_router(knowledge_qa_router)
 
 # ─── Direct entry point ───
 
+def _resolve_workers(raw: str | None) -> int:
+    """Clamp the uvicorn worker count to 1.
+
+    Session store, metrics, cancel registry, LLM cache and the cron scheduler
+    are all in-process state; more than one worker means split state, broken
+    metrics and — worst of all — N copies of the scheduler thread, so every
+    cron task fires N times. Rather than let an env var quietly corrupt state,
+    we refuse the value, say why, and stay single-process.
+    """
+    try:
+        requested = int(raw or "1")
+    except (TypeError, ValueError):
+        requested = 1
+    if requested > 1:
+        msg = (f"HARNESS_WORKERS={requested} 已强制降为 1："
+               "会话/指标/取消/LLM 缓存与定时任务均为进程内状态，多进程会状态分裂且 cron 重复触发")
+        print(f"  ⚠️  {msg}")
+        import logging as _logging
+        _logging.getLogger(__name__).warning(msg)
+        return 1
+    return max(requested, 1)
+
+
 def main():
     import uvicorn
 
@@ -398,7 +421,7 @@ def main():
     except Exception as e:
         print(f"  ⚠️  插件加载失败: {type(e).__name__}: {e}")
 
-    _workers = int(os.environ.get("HARNESS_WORKERS", "1"))
+    _workers = _resolve_workers(os.environ.get("HARNESS_WORKERS"))
     uvicorn.run(
         "agent_harness.main:app",
         host=HOST,
