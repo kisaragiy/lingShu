@@ -81,7 +81,7 @@ def test_supervisor_route_finalizes_when_tripped():
              "request": "x", "plan": [], "current_step": 0, "results": [],
              "errors": [], "retry_count": 0, "final_output": "",
              "conversation_history": [], "goal": "", "stop_conditions": [],
-             "loop_state_path": "", "iteration_count": 0,
+             "iteration_count": 0,
              "stop_conditions_met": False, "should_finalize": False,
              "enable_review": False, "review_passed": False,
              "review_feedback": "", "validator_fixes": [], "trace_id": "",

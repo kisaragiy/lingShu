@@ -135,7 +135,13 @@ def _call_tool_impl(name: str, **kwargs) -> dict:
             raise RuntimeError("权限模块不可用——已按 fail-closed 拒绝调用")
 
         def log_audit(n, s, k, result="", duration_ms=0):  # noqa: F811
-            pass
+            # 权限模块不可用 → 审计本身也写不了。不静默：留一条 stderr 痕迹，
+            # 否则「审计断档」和「没有不可逆操作」在日志里长得一模一样。
+            import sys
+            print(
+                f"[AUDIT] 权限模块不可用，审计记录未写入 — tool={n} source={s}",
+                file=sys.stderr,
+            )
 
         def is_tool_enabled(n):  # noqa: F811
             return True

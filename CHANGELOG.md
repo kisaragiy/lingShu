@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added — BYOK 前端入口（用户能自己填搜索 key 了）
+- 🔑 设置页新增「搜索来源（自带 Key）」：选服务商（DeepSeek / Tavily）→ 粘贴 key → 密文落盘；界面只显示「已配置 / 未配置」，**不回显任何片段**（与 `redact_config` 同口径 —— 前4后4 也算泄掉一半密钥）
+- 🌐 后端两端点：`GET /v1/setup/search-key`（只报布尔）、`POST /v1/setup/search-key`（加密落盘；传空串 = 清除）；`GET /v1/setup/config` 同步抹掉 `search` 段的密钥字段，连密文都不外传
+- 🛡️ demo 能力闸 `write_server_config` fail-closed：公开 demo 里写服务器密钥一律 403
+- 🧪 `tests/test_search_key_api.py` 8 用例：明文不落盘 / 状态只报布尔 / config 不外传密文 / 清除真从磁盘消失 / Tavily 用独立字段 / 短 key 与含空格拒绝 / demo 403 / `get_search_config()` 端到端读回同一 key
+
+### Fixed — 6 条 P2（其中两处是新发现的静默失败）
+- 🔇 **ENG-22 审计日志既会丢记录、又会打断业务**：文件名只用时间戳，Windows 时钟粒度不足以保证同一微秒不重号 → 并发/连发时**后一条覆盖前一条**（丢的是记录，不是顺序）；更严重的是 `_ensure_audit_dir()` 写在 `try` **外面**，权限不足时 `PermissionError` 直接冒泡**打断工具执行** —— 与「审计只是旁路」的定位正好相反。修：ts 追加进程内单调序号 + 目录创建移进 try + 写失败改 stderr 明确告警。同缺陷族第 3 处 `core/auth/api_security.py::log_audit` 一并修（修一处必须 grep 同类）
+- 🧠 **ENG-24 缓存 key 漏两维、且用了配置快照**：不含 thinking / max_tokens → 先跑 thinking=off 再跑 on 会命中同一键、返回参数不同的结果；同时 key 用的是模块级 `MODEL_LLAMA` 快照，而请求体发的是运行时 `_cfg["model"]` → 设置页换模型后会命中旧模型的缓存
+- 🗑️ **ENG-12** 死字段 `loop_state_path`：有声明、有赋值、零消费者（连测试 fixture 里的残留一并清掉）
+- 📏 **ENG-31** 报告页脚字数把 markdown 符号 / 标点 / 表格分隔符全算成「字」，中文报告虚高 → 改中文按字、英文/数字按词，剥离图片/链接 URL/行内代码/裸 URL；阅读时长口径（300 字/分）不变
+- 🐳 **ENG-7** compose 里 `SEARXNG_BASE_URL=http://127.0.0.1:4000` 是**容器内**变量，容器里 127.0.0.1 指自己且内部端口是 8080 → 改 `http://localhost:8080`（宿主仍走 4000 映射）
+- 📝 **ENG-4** `pyproject.toml` 的 description 从「orchestration framework + MCP ecosystem」改成与 README 定位一致的一句话（92 字符）
+
 ### Added — 搜索 BYOK（用户自带 key）+ DeepSeek 搜索源
 - 🔑 **代码里零 key 字面量**：新增 `config.get_search_config()`，优先级 `config.json` 的 `search.api_key` / `search.api_key_enc`（复用 keystore 加密落盘）→ `llm.api_key` → 环境变量 `DEEPSEEK_API_KEY` / `HARNESS_DEEPSEEK_API` / `TAVILY_API_KEY`。真实用户填自己的 key 即可用，不改代码
 - 🔐 密文落盘、明文不存：`search.api_key_enc` / `search.tavily_key_enc`，读回时解密

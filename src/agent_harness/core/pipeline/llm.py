@@ -135,10 +135,22 @@ _session.headers.update({"User-Agent": "agent-harness/0.2.0"})
 _LLM_CACHE: dict[str, tuple[float, str, int]] = {}  # key → (timestamp, content, tokens)
 _LLM_CACHE_TTL = 60  # seconds
 
-def _llm_cache_key(model: str, messages: list[dict], system_prompt: str, temperature: float) -> str:
-    """Generate cache key from deterministic parameters."""
+def _llm_cache_key(model: str, messages: list[dict], system_prompt: str, temperature: float,
+                   thinking: str | None = None, max_tokens: int | None = None) -> str:
+    """Generate cache key from deterministic parameters.
+
+    ENG-24：命中缓存的唯一前提是「请求体完全相同」。thinking 开关会改变请求体
+    （off → 发 {"thinking":{"type":"disabled"}}，on → 不发该字段）并连带把
+    max_tokens 抬到 THINKING_MIN_BUDGET 下限，两条路径的**响应不同**；
+    不把这两维纳入 key，后跑的一侧会命中前一侧的缓存、拿到别的配置的结果。
+    thinking 显式传 None 时回退到当前环境（本文件的缓存写入口都显式传参）。
+    """
     import hashlib
-    raw = json.dumps([model, messages, system_prompt, round(temperature, 2)], sort_keys=True, ensure_ascii=False)
+    mode = _thinking_mode() if thinking is None else thinking
+    raw = json.dumps(
+        [model, messages, system_prompt, round(temperature, 2), mode, max_tokens],
+        sort_keys=True, ensure_ascii=False,
+    )
     return hashlib.md5(raw.encode()).hexdigest()
 
 def _llm_cache_get(key: str) -> tuple[str, int] | None:
@@ -212,19 +224,24 @@ def _emit_llm_envelope(model: str, messages: list[dict] | None = None,
 def call_llama(messages: list[dict], system_prompt: str = "",
                max_tokens: int = 2048, temperature: float = 0.3) -> tuple[str, int]:
     """Call local LLaMA model. Returns (text, tokens_used)."""
-    # Check cache
-    cache_key = _llm_cache_key(MODEL_LLAMA, [{"role": "system", "content": system_prompt}] + messages, system_prompt, temperature) if temperature <= 0.5 else None
+    # 运行时读取：用户在设置页填的 api_url/model 立即生效，不再依赖 import 快照
+    _cfg = get_llm_config()
+    mode = _thinking_mode()
+    # 实际发出的模型名（_cfg 覆盖时常量与 MODEL_LLAMA 不同，key 必须跟请求体一致）
+    _model = _cfg.get("model") or MODEL_LLAMA
+    # 开思考时把预算抬到下限 —— 思考与答案共用 max_tokens，预算不够时答案一个 token 都轮不到
+    budget = max(max_tokens, THINKING_MIN_BUDGET) if mode == "on" else max_tokens
+    # Check cache —— key 带上 thinking 与预算：同消息不同配置的结果不可互换（ENG-24）
+    cache_key = _llm_cache_key(
+        _model, [{"role": "system", "content": system_prompt}] + messages, system_prompt,
+        temperature, thinking=mode, max_tokens=budget,
+    ) if temperature <= 0.5 else None
     if cache_key:
         cached = _llm_cache_get(cache_key)
         if cached:
             return cached
-    # 运行时读取：用户在设置页填的 api_url/model 立即生效，不再依赖 import 快照
-    _cfg = get_llm_config()
-    mode = _thinking_mode()
-    # 开思考时把预算抬到下限 —— 思考与答案共用 max_tokens，预算不够时答案一个 token 都轮不到
-    budget = max(max_tokens, THINKING_MIN_BUDGET) if mode == "on" else max_tokens
     payload = {
-        "model": _cfg.get("model") or MODEL_LLAMA,
+        "model": _model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "max_tokens": budget,
         "temperature": temperature,
@@ -321,8 +338,9 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
         # 云端 Qwen3 系默认开思考模式 → content 恒空、答案全进 reasoning_content。
         # 只有明确「本次不要思考」时才关（ENG-23 / HARNESS_LLM_THINKING）。
         payload["thinking"] = {"type": "disabled"}
-    # Check cache for cloud calls
-    cache_key = _llm_cache_key(model, payload["messages"], system_prompt, 0.7)
+    # Check cache for cloud calls —— key 带上 thinking 与预算（ENG-24：不同配置的结果不可互换）
+    cache_key = _llm_cache_key(model, payload["messages"], system_prompt, 0.7,
+                               thinking=cloud_mode, max_tokens=cloud_budget)
     cached = _llm_cache_get(cache_key)
     if cached:
         return cached

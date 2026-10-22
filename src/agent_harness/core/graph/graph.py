@@ -217,7 +217,6 @@ def run(request: str) -> str:
         "conversation_history": [],
         "goal": request,
         "stop_conditions": [],
-        "loop_state_path": "",
         "iteration_count": 0,
         "stop_conditions_met": False,
         "should_finalize": False,

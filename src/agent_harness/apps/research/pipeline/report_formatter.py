@@ -30,6 +30,28 @@ def _ensure():
     _reports_dir().mkdir(parents=True, exist_ok=True)
 
 
+# ─── 字数统计（ENG-31）───
+# 旧实现 `len(content)` 把 markdown 标记、标点、表格分隔符全算成"字"，中文报告页脚虚高。
+# 口径：中文每字计 1，英文/数字连续串每串计 1 词；markdown 语法符号、纯标点、空白、URL 均不计。
+_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:[.\-_'][A-Za-z0-9]+)*")
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_CODE_RE = re.compile(r"`+([^`]*)`+")
+_URL_RE = re.compile(r"(?:https?://|www\.)\S+")
+
+
+def _count_words(text: str) -> int:
+    """中文按字、英文/数字按词统计；markdown 语法与标点/空白不计入（ENG-31）。"""
+    if not text:
+        return 0
+    s = _MD_IMAGE_RE.sub(" ", text)   # 图片整体不计（alt 不是正文）
+    s = _MD_LINK_RE.sub(r"\1", s)     # 链接只算锚文本，URL 不计
+    s = _MD_CODE_RE.sub(r"\1", s)     # 行内代码只算内容，反引号不计
+    s = _URL_RE.sub(" ", s)           # 裸 URL 不计
+    return len(_CJK_RE.findall(s)) + len(_WORD_RE.findall(s))
+
+
 def _extract_sources_from_text(text: str) -> list[dict]:
     """Extract source URLs from text content.
 
@@ -345,8 +367,8 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None,
 
     body_html = re.sub(r'<(h[23])>(.*?)</\1>', _anchor_header, body_html)
 
-    # Word count + reading time
-    word_count = len(content.replace("\n", ""))
+    # Word count + reading time（ENG-31：中文按字、英文按词，markdown 符号不计）
+    word_count = _count_words(content)
     read_time = max(1, word_count // 300)
 
     # Build sources section with anchor IDs + metadata

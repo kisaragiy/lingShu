@@ -15,7 +15,6 @@ class HarnessState(TypedDict, total=False):
     conversation_history: list[dict]
     goal: str
     stop_conditions: list[str]
-    loop_state_path: str
     iteration_count: int
     stop_conditions_met: bool
     should_finalize: bool
