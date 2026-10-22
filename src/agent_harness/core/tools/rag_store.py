@@ -7,6 +7,8 @@ Stability improvements over v0.16:
   - BM25 keyword search as fallback (character overlap was too weak)
   - Graceful handling of corrupted .npy / .json files
   - Embedding cache: skips re-embedding chunks that already have vectors
+  - Strict embeddings↔chunks alignment (ENG-11/ENG-13): no vstack on misaligned
+    history, quadratic rebuild instead; query degrades to BM25 when rows differ
 
 Storage: JSON chunks + NPY embeddings per collection.
 Supports PDF, DOCX, TXT, Markdown.
@@ -15,14 +17,18 @@ Supports PDF, DOCX, TXT, Markdown.
 import contextlib
 import hashlib
 import json
+import logging
 import math
 import os
 import re
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # ─── Config ───
 
@@ -116,64 +122,79 @@ def _load_embeddings(collection: str) -> np.ndarray | None:
     return None
 
 
-def _save_embeddings(collection: str, embs: np.ndarray):
-    """Save embeddings to temp file then atomic replace."""
+def _save_embeddings(collection: str, embs: np.ndarray) -> None:
+    """Save embeddings to temp file then atomic replace.
+
+    ``tmp`` must end with ``.npy``: numpy's ``save`` appends that suffix on its
+    own when missing, which made ``os.replace(tmp, p)`` look for a file that
+    never existed (embeddings were never persisted — pre-existing ENG-11 bug).
+    """
     p = _embs_path(collection)
-    tmp = p + ".tmp." + hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
+    tmp = p + ".tmp." + hashlib.md5(str(time.time()).encode()).hexdigest()[:8] + ".npy"
     with _lock:
         try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
             np.save(tmp, embs)
             os.replace(tmp, p)
         except Exception:
-            if os.path.exists(tmp + ".npy"):
-                with contextlib.suppress(OSError):
-                    os.unlink(tmp + ".npy")
-            if os.path.exists(tmp):
-                with contextlib.suppress(OSError):
-                    os.unlink(tmp)
+            for candidate in (tmp, tmp[: -len(".npy")], tmp + ".npy"):
+                if os.path.exists(candidate):
+                    with contextlib.suppress(OSError):
+                        os.unlink(candidate)
             raise
 
 
 # ─── Embedding (batched + retry) ───
 
-_EMBED_CACHE: dict[str, np.ndarray] = {}  # md5(text) → vector
+_EMBED_CACHE: dict[str, np.ndarray] = {}  # md5(text) -> real vector (never zero)
 
 
-def _embed(texts: list[str]) -> np.ndarray:
+def _embed(texts: list[str]) -> tuple[np.ndarray, list[str]]:
     """Generate embeddings using Ollama nomic-embed-text (batched, with retry).
 
-    Returns all-zero vectors if Ollama is unreachable after retries.
-    Results are cached by text hash to avoid re-computation.
+    Returns:
+        (vectors, failed_texts)
+        - vectors: ndarray shape (len(texts), EMBED_DIM), 1:1 aligned with texts
+          **by position** (cached and freshly-embedded entries are re-interleaved
+          in the caller's order). Failed entries are zeros.
+        - failed_texts: texts whose embedding call failed (retry candidates).
+
+    Failure contract:
+        - Zero vectors are NEVER written into ``_EMBED_CACHE``, so previously
+          failed texts are re-embedded on the next call after Ollama recovers.
+        - The caller decides whether to save (zeros must not poison the store).
     """
     import requests as req_lib
 
     if not texts:
-        return np.zeros((0, EMBED_DIM), dtype=np.float32)
+        return np.zeros((0, EMBED_DIM), dtype=np.float32), []
 
-    # Check cache first
-    uncached = []
-    cached_vecs = []
-    for t in texts:
-        key = hashlib.md5(t.encode("utf-8")).hexdigest()
-        if key in _EMBED_CACHE:
-            cached_vecs.append(_EMBED_CACHE[key])
+    keys = [hashlib.md5(t.encode("utf-8")).hexdigest() for t in texts]
+    out = np.zeros((len(texts), EMBED_DIM), dtype=np.float32)
+    uncached: list[int] = []
+    for i, key in enumerate(keys):
+        cached = _EMBED_CACHE.get(key)
+        if cached is None:
+            uncached.append(i)
         else:
-            uncached.append((key, t))
+            out[i] = cached
 
     if not uncached:
-        return np.array(cached_vecs)
+        return out, []
 
-    uncached_texts = [t for _, t in uncached]
-    uncached_keys = [k for k, _ in uncached]
+    uncached_texts = [texts[i] for i in uncached]
+    uncached_keys = [keys[i] for i in uncached]
 
     # Quick connectivity check
     base_url = OLLAMA_API.replace("/api/embed", "")
     try:
         req_lib.get(base_url, timeout=2)
     except Exception:
-        # Ollama down — use zeros
-        zeros = np.zeros((len(texts), EMBED_DIM), dtype=np.float32)
-        return zeros
+        logger.warning(
+            "Ollama offline at connectivity check; %d texts unembedded",
+            len(uncached_texts),
+        )
+        return out, uncached_texts
 
     # Batched embedding with retry
     for attempt in range(_EMBED_RETRIES + 1):
@@ -186,24 +207,80 @@ def _embed(texts: list[str]) -> np.ndarray:
             if r.status_code == 200:
                 data = r.json()
                 raw = np.array(data["embeddings"], dtype=np.float32)
-                # Cache and return
-                for i, key in enumerate(uncached_keys):
-                    if i < len(raw):
-                        _EMBED_CACHE[key] = raw[i]
-                all_vecs = cached_vecs + [raw[i] for i in range(len(raw))]
-                return np.array(all_vecs)
-        except Exception:
+                if raw.ndim != 2 or raw.shape[0] != len(uncached_texts):
+                    raise ValueError(
+                        f"embed response misaligned: rows={raw.shape[0] if raw.ndim else 'n/a'} "
+                        f"expected={len(uncached_texts)}"
+                    )
+                for pos, idx in enumerate(uncached):
+                    out[idx] = raw[pos]
+                    if np.any(raw[pos] != 0):
+                        _EMBED_CACHE[uncached_keys[pos]] = raw[pos]
+                return out, []
+            logger.warning("embed http status %s", r.status_code)
+        except Exception as exc:
+            logger.warning(
+                "embed attempt %d failed: %s", attempt + 1, exc
+            )
             if attempt < _EMBED_RETRIES:
                 time.sleep(_EMBED_BACKOFF * (attempt + 1))
             continue
 
-    # All retries exhausted — return zeros for uncached, cached for the rest
-    empty = np.zeros((len(uncached_texts), EMBED_DIM), dtype=np.float32)
-    for i, key in enumerate(uncached_keys):
-        if i < len(empty):
-            _EMBED_CACHE[key] = empty[i]
-    all_vecs = cached_vecs + [empty[i] for i in range(len(empty))]
-    return np.array(all_vecs)
+    # All retries exhausted — zeros for uncached, cached for the rest
+    logger.warning(
+        "Ollama embed retries exhausted; %d texts unembedded", len(uncached_texts)
+    )
+    return out, uncached_texts
+
+
+def _rebuild_all_embeddings(collection: str) -> dict[str, Any]:
+    """Rebuild every embedding of a collection from its chunk texts.
+
+    Must be called while holding ``_lock`` (index calls it inside the lock;
+    ``_embed`` itself does not take the lock, so no deadlock).
+
+    Writes the new embeddings only when at least one real vector came back;
+    otherwise leaves the existing file untouched so BM25 fallback stays active.
+
+    Returns:
+        {"rebuilt": bool, "failed": int, "total": int, "embeddings": ndarray}
+    """
+    chunks = _load_chunks(collection)
+    texts = [c.get("text", "") for c in chunks]
+    if not texts:
+        return {
+            "rebuilt": True,
+            "failed": 0,
+            "total": 0,
+            "embeddings": np.zeros((0, EMBED_DIM), dtype=np.float32),
+        }
+
+    embs, failed = _embed(texts)
+    failed_count = len(failed)
+
+    if bool(np.any(embs != 0)):
+        assert embs.shape[0] == len(texts), (
+            f"rebuild alignment: embs={embs.shape[0]} texts={len(texts)}"
+        )
+        _save_embeddings(collection, embs)
+        logger.info(
+            "collection %r rebuilt: %d chunks, %d failed",
+            collection, len(texts), failed_count,
+        )
+        return {
+            "rebuilt": True,
+            "failed": failed_count,
+            "total": len(texts),
+            "embeddings": embs,
+        }
+
+    logger.warning("rebuild %r skipped: Ollama still offline", collection)
+    return {
+        "rebuilt": False,
+        "failed": len(texts),
+        "total": len(texts),
+        "embeddings": np.zeros((len(texts), EMBED_DIM), dtype=np.float32),
+    }
 
 
 # ─── BM25 keyword search (fallback when no embeddings) ───
@@ -259,7 +336,7 @@ def _tokenize(text: str) -> list[str]:
             tokens.add(word.lower())
 
     # Chinese character bigrams (handles Chinese better than single chars)
-    chars = [c for c in text if '\u4e00' <= c <= '\u9fff']
+    chars = "".join(c for c in text if '\u4e00' <= c <= '\u9fff')
     for i in range(len(chars) - 1):
         tokens.add(chars[i:i+2])
 
@@ -367,43 +444,94 @@ def _parse_file(filepath: str) -> str:
 def index(text: str, source: str, collection: str = "default") -> dict:
     """Index text into vector store.
 
+    ENG-11 fix (vector↔text misalignment):
+      1. Pre-check alignment: if ``len(existing_embs) != pre-index chunk count``
+         the store is already corrupted (offline half-write / legacy doubling).
+         Rebuild everything instead of vstack-ing on top of bad data.
+      2. Embed ONLY the chunks added by this call — the old code re-embedded all
+         chunks and stacked them, which doubled embeddings on Ollama recovery.
+      3. Strict post-check: combined rows must equal total chunks; on mismatch we
+         refuse to write (BM25 fallback stays) instead of silently poisoning.
+
     Returns:
-        dict with: chunks_count, embedding_status, fallback
+        dict with: chunks_count, embedding_status, fallback, rebuilt,
+        failed_embeddings
     """
     chunks = _chunk_text(text)
     with _lock:
         existing = _load_chunks(collection)
+        n_before = len(existing)
         existing_embs = _load_embeddings(collection)
+        if existing_embs is None:
+            existing_embs = np.zeros((0, EMBED_DIM), dtype=np.float32)
 
-        new_embs = _embed(chunks)
-        ollama_online = bool(np.any(new_embs != 0))
+        # ── Alignment pre-check (the core ENG-11 fix) ──
+        rebuilt = False
+        rebuild_failed = 0
+        rebuild_pending = False
+        if existing_embs.shape[0] != n_before:
+            logger.warning(
+                "collection %r misaligned: embs=%d chunks=%d -> rebuilding",
+                collection, existing_embs.shape[0], n_before,
+            )
+            res = _rebuild_all_embeddings(collection)
+            existing_embs = res["embeddings"]
+            rebuilt = res["rebuilt"]
+            rebuild_failed = res["failed"]
+            # Rebuild produced no real vectors (Ollama still offline): keep the
+            # store vector-less rather than mixing zeros with fresh vectors.
+            rebuild_pending = not rebuilt
 
-        start_idx = len(existing)
+        # Append new chunks
         for i, chunk in enumerate(chunks):
             chunk_id = hashlib.md5(
-                (source + str(start_idx + i)).encode()
+                (source + str(n_before + i)).encode()
             ).hexdigest()[:12]
             existing.append({
                 "id": chunk_id,
                 "text": chunk,
                 "source": source,
-                "idx": start_idx + i,
+                "idx": n_before + i,
             })
+
+        # Embed ONLY the new chunks — not all chunks (fixes doubling)
+        new_embs, failed_texts = _embed(chunks)
+        online = bool(np.any(new_embs != 0))
 
         _save_chunks(collection, existing)
 
-        if ollama_online:
-            if existing_embs is not None and len(existing_embs) > 0:
-                combined = np.vstack([existing_embs, new_embs]) if new_embs.ndim > 1 else np.vstack([existing_embs, new_embs.reshape(1, -1)])
-            else:
-                combined = new_embs
+        if online and not rebuild_pending:
+            combined = np.vstack([existing_embs, new_embs])
+            # Strict alignment check — never silently write a misaligned store
+            if combined.shape[0] != len(existing):
+                logger.error(
+                    "collection %r alignment check failed: embs=%d chunks=%d "
+                    "-> embeddings not saved (BM25 fallback)",
+                    collection, combined.shape[0], len(existing),
+                )
+                return {
+                    "chunks_count": len(chunks),
+                    "embedding_status": "offline",
+                    "fallback": "keyword (BM25)",
+                    "rebuilt": rebuilt,
+                    "failed_embeddings": len(failed_texts) + rebuild_failed,
+                }
             _save_embeddings(collection, combined)
+            return {
+                "chunks_count": len(chunks),
+                "embedding_status": "online",
+                "fallback": "none",
+                "rebuilt": rebuilt,
+                "failed_embeddings": len(failed_texts) + rebuild_failed,
+            }
 
-    return {
-        "chunks_count": len(chunks),
-        "embedding_status": "online" if ollama_online else "offline",
-        "fallback": "none" if ollama_online else "keyword (BM25)",
-    }
+        return {
+            "chunks_count": len(chunks),
+            "embedding_status": "offline",
+            "fallback": "keyword (BM25)",
+            "rebuilt": rebuilt,
+            "failed_embeddings": len(failed_texts) + rebuild_failed,
+        }
 
 
 def index_file(filepath: str, collection: str = "default", filename: str = "") -> dict:
@@ -449,10 +577,24 @@ def query(
     embeddings = _load_embeddings(collection)
     chunk_texts = [c.get("text", "") for c in chunks]
 
-    # ─── Strategy 1: Vector search ───
-    if embeddings is not None and len(embeddings) > 0 and len(embeddings) >= len(chunks):
+    # ─── Strategy 1: Vector search (strict alignment, ENG-11/ENG-13) ───
+    # Rows must match chunks EXACTLY: a partially-written store (chunks saved,
+    # embeddings not) yields positionally wrong hits, so degrade to BM25 instead.
+    use_vector = (
+        embeddings is not None
+        and embeddings.ndim == 2
+        and len(chunks) > 0
+        and embeddings.shape[0] == len(chunks)
+    )
+    if embeddings is not None and not use_vector:
+        logger.warning(
+            "RAG collection=%s embeddings(%d) != chunks(%d), degrading to BM25",
+            collection, embeddings.shape[0], len(chunks),
+        )
+
+    if use_vector:
         try:
-            query_emb = _embed([query_text])
+            query_emb, _ = _embed([query_text])
             if query_emb.ndim == 2 and query_emb.shape[0] > 0:
                 qv = query_emb[0]
                 if np.any(qv != 0):
@@ -518,18 +660,22 @@ def delete_collection(collection: str) -> bool:
 
 
 def collection_info(collection: str) -> dict:
-    """Get info about a collection."""
+    """Get info about a collection (incl. embedding↔chunk alignment)."""
     chunks = _load_chunks(collection)
     sources = set()
     total_chars = 0
     for c in chunks:
         sources.add(c.get("source", "unknown"))
         total_chars += len(c.get("text", ""))
+    embs = _load_embeddings(collection)
+    aligned = embs is not None and embs.shape[0] == len(chunks)
     return {
         "name": collection,
         "chunks": len(chunks),
         "sources": sorted(sources),
         "total_chars": total_chars,
         "doc_count": len(sources),
-        "embedding_available": _load_embeddings(collection) is not None,
+        "embedding_available": embs is not None,
+        "embedding_aligned": aligned,
+        "embedding_rows": int(embs.shape[0]) if embs is not None else 0,
     }
