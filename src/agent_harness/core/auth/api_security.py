@@ -46,6 +46,29 @@ def reset_token() -> str:
     return token
 
 
+# API Key 的角色解析（SEC-5）。
+# 单 token 自托管模型下默认 admin 是合理设计（一个 key 服务一个部署者），但**写死在认证
+# 分支里**不行：脚本/CI/网关转发用的 token 往往该降权。配置写错时一律取最小权限 user ——
+# 配置失误不该变成提权。
+VALID_API_KEY_ROLES = ("admin", "user")
+
+
+def resolve_api_key_role(raw: str | None, warn=None) -> str:
+    """把 HARNESS_API_KEY_ROLE 的原始值解析成合法角色，非法值降级为 user。"""
+    role = (raw or "admin").strip().lower()
+    if role not in VALID_API_KEY_ROLES:
+        msg = (
+            f"[AUTH] HARNESS_API_KEY_ROLE={role!r} 非法"
+            f"（合法值: {VALID_API_KEY_ROLES}），已降级为 user"
+        )
+        if warn is not None:
+            warn(msg)
+        else:
+            print(msg, file=sys.stderr)
+        return "user"
+    return role
+
+
 def validate_token(request_token: str | None, stored_token: str) -> bool:
     """Constant-time comparison of tokens to prevent timing attacks."""
     if not request_token or not stored_token:

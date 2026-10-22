@@ -15,6 +15,7 @@ Supports PDF, DOCX, TXT, Markdown.
 """
 
 import contextlib
+import contextvars
 import hashlib
 import json
 import logging
@@ -29,6 +30,37 @@ from typing import Any
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# ─── 访问作用域（SEC-2：可见性在数据层兜底）───
+# 为什么放在这一层而不是 API 层：API 的 `_user_collection()` 只保护「API 自己拼出来的名字」，
+# 但 agent 的工具（rag_query / rag_index）允许模型直接传 collection 名 —— 模型被检索内容
+# 诱导后可以传别人的物理名，绕过 API 那层映射。数据层过一道，任何调用方都绕不过去。
+_scope: contextvars.ContextVar[str] = contextvars.ContextVar("rag_scope_prefix", default="")
+
+
+def set_scope(prefix: str) -> contextvars.Token:
+    """设置本执行上下文的可见 collection 前缀。空串 = 全见（admin / CLI / demo）。"""
+    return _scope.set(str(prefix or ""))
+
+
+def reset_scope(token: contextvars.Token) -> None:
+    _scope.reset(token)
+
+
+def current_scope() -> str:
+    return _scope.get()
+
+
+def _check_scope(name: str) -> str:
+    """作用域外访问 → 明确拒绝（PermissionError），不静默返回空结果。
+
+    静默返回空会让调用方以为「这个 collection 是空的」，而实际是「你没权限」——
+    两者修法完全不同，必须区分。
+    """
+    s = _scope.get()
+    if s and not name.startswith(s):
+        raise PermissionError(f"collection 不可见（越权访问已拒绝）: {name!r}")
+    return name
 
 # ─── Config ───
 
@@ -79,8 +111,9 @@ def _coll_dir(collection: str, create: bool = False) -> str:
     """物理目录。默认不建目录：读路径（query/info/delete/list）绝不能制造空目录。
 
     create=True 只给写路径用（_save_chunks / _save_embeddings 内部已自行 makedirs）。
+    所有读写最终都经过这里 —— 作用域校验也放在这里，一处覆盖全部入口（SEC-2）。
     """
-    d = os.path.join(RAG_DIR, _safe_collection_name(collection))
+    d = os.path.join(RAG_DIR, _check_scope(_safe_collection_name(collection)))
     if create:
         os.makedirs(d, exist_ok=True)
     return d
@@ -656,12 +689,18 @@ def query(
 
 
 def list_collections() -> list[str]:
-    """List all collections."""
+    """List all collections **visible to the current scope**.
+
+    过滤放在这里而不是调用方：`supervisor.py` 会把返回值直接拼进 system prompt，
+    不过滤就是把所有人的 collection 物理名送给模型（进而送给用户）。
+    """
     os.makedirs(RAG_DIR, exist_ok=True)
+    s = _scope.get()
     with _lock:
         return sorted([
             d for d in os.listdir(RAG_DIR)
             if os.path.isdir(os.path.join(RAG_DIR, d))
+            and (not s or d.startswith(s))
         ])
 
 

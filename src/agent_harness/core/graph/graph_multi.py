@@ -18,6 +18,7 @@ Architecture:
 """
 
 import concurrent.futures
+import contextvars
 import json
 import os
 import re
@@ -323,12 +324,15 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
                 "content": f"▶️ {wname} 开始工作: {task[:60]}...\n"
             })
         task_id = state.get("task_id", "")
+        # SEC-2：ThreadPoolExecutor 不传播 contextvars —— 不显式 copy 的话，worker 线程里
+        # RAG 可见作用域是空串（=全见），rag_query 工具就能被诱导读到别人的 collection。
+        ctx = contextvars.copy_context()
         if _trace_collector:
             with _trace_collector.span(f"worker:{wname}", "worker", task=task[:80]):
-                result = run_worker(wname, task, task_id=task_id)
+                result = ctx.run(run_worker, wname, task, task_id=task_id)
                 _trace_collector.record_metadata("output_preview", str(result.get("output", ""))[:100])
                 return result
-        return run_worker(wname, task, task_id=task_id)
+        return ctx.run(run_worker, wname, task, task_id=task_id)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(parallel_workers)) as pool:
         futures = {}
