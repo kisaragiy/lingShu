@@ -79,8 +79,19 @@ agent-comic = "agent_harness.apps.research.run:main"
 requires = ["setuptools>=75.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+include-package-data = true
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# 静态资源必须进 wheel —— 否则 pip 安装后前端与管理后台全部 404。
+# ENG-5/6 实况：Dockerfile 曾用 COPY 手工补 agent_harness/static（管理后台），
+# 但**漏了 apps/research/static（主前端整个目录）**；且离开 Docker 用 pip 安装时
+# 两个目录都不会进包。主前端的真实挂载点在 main.py: RESEARCH_STATIC_DIR。
+[tool.setuptools.package-data]
+"agent_harness" = ["static/**/*", "static/*"]
+"agent_harness.apps.research" = ["static/**/*", "static/*"]
 
 # ─── Ruff ───
 [tool.ruff]

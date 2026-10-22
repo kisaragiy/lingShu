@@ -2,3 +2,15 @@
 Dockerfile
 docker-compose.yml
 .dockerignore
+
+# 构建缓存 —— 必须排除：
+# src/*.egg-info/SOURCES.txt 会把本地文件清单带进镜像，让「package-data 没配」
+# 这类缺陷在本地构建时侥幸成功，到干净 clone/CI 上就变成前端 404。
+**/*.egg-info
+build/
+dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
