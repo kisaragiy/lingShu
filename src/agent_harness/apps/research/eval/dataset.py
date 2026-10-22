@@ -7,6 +7,12 @@ Each task has:
   - expected_tool_used: tool that should have been called
   - category: "search" | "analyze" | "mixed"
   - weight: importance (1-3)
+  - factual (可选): 事实性断言 —— ENG-40，判「内容对不对」而不只是「有没有相关词」
+      must_have_numbers     必须出现的数字（支持 "1.2万亿"/"987亿" 中文单位）
+      must_not_have_numbers 不得出现的数字（编造数字）
+      must_cite_domains     必须出现的来源域名
+      requires_fact_check_note  报告须标注「未核验」或「未找到依据」
+    未定义 factual 的任务在评分里给满分并标 asserted=False（不假装测了）。
 
 Run with: agent-harness eval
 """
@@ -29,6 +35,12 @@ EVAL_DATASET = [
         "category": "analyze",
         "weight": 1,
         "description": "Simple code execution — tests analyze worker",
+        # ENG-40：确定性算术结果，可机械判真伪；旧评分只要含关键词就给满分，
+        # 算错了也一样高分。加上断言后「算错」会真扣分。
+        "factual": {
+            "must_have_numbers": ["456831"],
+            "must_not_have_numbers": ["456832"],
+        },
     },
     {
         "id": "eval-003",
