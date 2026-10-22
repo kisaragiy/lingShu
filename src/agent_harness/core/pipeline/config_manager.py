@@ -5,7 +5,9 @@ Auto-discovers environment (paths, LLM backends, services).
 Provides fix actions for one-click environment setup.
 """
 
+import copy
 import json
+import logging
 import os
 import socket
 import subprocess
@@ -13,11 +15,16 @@ import sys
 import time
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 # ─── Paths ───
 
 CONFIG_DIR = Path(os.environ.get("HARNESS_CONFIG_DIR",
                                  os.path.expanduser("~/.agent-harness")))
 CONFIG_PATH = CONFIG_DIR / "config.json"
+
+# 目录权限只收紧一次（每进程一次 icacls 子进程，不在每次 load_config 里付这个成本）
+_ACL_HARDENED = False
 
 DEFAULT_CONFIG = {
     "setup_complete": True,
@@ -45,8 +52,39 @@ DEFAULT_CONFIG = {
 
 # ─── Config IO ───
 
+def _hard_dir_permissions() -> None:
+    """把配置目录收紧到「仅当前用户」（失败只 warning，绝不阻断启动）。
+
+    SEC-18 的两层防御：加密防「config.json 被拷走后直接可读」，ACL 防
+    「同机其它账户读目录」。Windows 的 ACL 模型与 POSIX 不同、且不同文件系统
+    （FAT/exFAT/网络盘）行为不一致，故一律 best-effort。
+    """
+    global _ACL_HARDENED
+    if _ACL_HARDENED:
+        return
+    _ACL_HARDENED = True  # 先置位：失败也不反复重试（避免每次 load 都 spawn 子进程）
+    try:
+        if os.name == "posix":
+            os.chmod(CONFIG_DIR, 0o700)
+        elif sys.platform == "win32":
+            user = os.environ.get("USERNAME") or ""
+            if not user:
+                return
+            subprocess.run(
+                ["icacls", str(CONFIG_DIR), "/inheritance:r",
+                 "/grant:r", f"{user}:(OI)(CI)F", "SYSTEM:(OI)(CI)F"],
+                capture_output=True, text=True, timeout=15, check=False,
+            )
+    except Exception as e:  # noqa: BLE001 —— 权限收紧失败不能阻断启动
+        logger.warning("配置目录权限收紧失败（已忽略，不影响启动）：%s", e)
+
+
 def _ensure_dir():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        _hard_dir_permissions()
+    except Exception as e:  # noqa: BLE001 —— 双保险：权限逻辑异常不得冒泡
+        logger.warning("配置目录权限收紧调用异常（已忽略）：%s", e)
 
 
 def redact_config(cfg: dict) -> dict:
@@ -66,16 +104,76 @@ def redact_config(cfg: dict) -> dict:
     return out
 
 
+def _decrypt_in_place(merged: dict) -> None:
+    """把 `llm.api_key_enc` 解密回 `llm.api_key`（只在内存里，绝不回写磁盘）。
+
+    解密失败（换机/换账户/密文损坏）**明确报错**并置空：静默返回空 key 会让
+    上游以为「用户没配置」，进而静默降级到本地模型 —— 那是更糟的失败模式。
+    """
+    llm = merged.get("llm")
+    if not isinstance(llm, dict):
+        return
+    token = llm.pop("api_key_enc", None)
+    if not token:
+        return
+    from agent_harness.core.pipeline.keystore import KeystoreError, decrypt_key
+
+    try:
+        llm["api_key"] = decrypt_key(token)
+    except KeystoreError as e:
+        logger.error("%s", e)
+        llm["api_key"] = ""
+
+
+def _migrate_legacy_plaintext(user: dict) -> dict:
+    """一次性迁移：config.json 里若还有明文 `llm.api_key` → 加密成 `api_key_enc` 并重写。
+
+    SEC-18 之前写出的配置都是明文；读一次就顺手收口，用户无感。
+    """
+    llm = user.get("llm")
+    if not isinstance(llm, dict):
+        return user
+    plaintext = llm.pop("api_key", "") or ""
+    llm.pop("has_api_key", None)  # 派生字段，不落盘
+    if not plaintext:
+        return user
+
+    from agent_harness.core.pipeline.keystore import encrypt_key
+
+    try:
+        llm["api_key_enc"] = encrypt_key(plaintext)
+    except Exception as e:  # noqa: BLE001 —— 加密不可用时退回内存态，绝不写明文
+        logger.error("llm.api_key 加密失败，本次不落盘 key：%s", e)
+        # key 已从 user 里 pop 出来，失败必须放回内存，否则用户当场失去 key
+        llm["api_key"] = plaintext
+        return user
+
+    try:
+        CONFIG_PATH.write_text(
+            json.dumps(user, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        logger.info("已迁移 config.json：llm.api_key 明文 → api_key_enc 密文（SEC-18）")
+    except OSError as e:
+        logger.warning("迁移后写回 config.json 失败（key 仍在内存可用）：%s", e)
+    return user
+
+
 def load_config() -> dict:
-    """Load config from disk, merging with defaults."""
+    """Load config from disk, merging with defaults.
+
+    SEC-18：`llm.api_key_enc` 在这里解密回内存的 `llm.api_key`；老格式的明文
+    `llm.api_key` 会被就地迁移成密文（一次性）。
+    """
     _ensure_dir()
     if CONFIG_PATH.exists():
         try:
             with open(CONFIG_PATH, encoding="utf-8") as f:
                 user = json.load(f)
+            user = _migrate_legacy_plaintext(user)
             merged = {**DEFAULT_CONFIG, **user}
             merged["llm"] = {**DEFAULT_CONFIG["llm"], **(user.get("llm", {}))}
             merged["paths"] = {**DEFAULT_CONFIG["paths"], **(user.get("paths", {}))}
+            _decrypt_in_place(merged)
             return merged
         except (json.JSONDecodeError, OSError):
             pass
@@ -83,10 +181,30 @@ def load_config() -> dict:
 
 
 def save_config(config: dict) -> dict:
-    """Save config to disk."""
+    """Save config to disk.
+
+    SEC-18：落盘前把 `llm.api_key` 换成 Fernet 密文 `llm.api_key_enc`。
+    明文只留在内存 dict / `HARNESS_CLOUD_KEY`（进程内），**永不写入 config.json**。
+    """
     _ensure_dir()
+    to_write = copy.deepcopy(config)
+    llm_out = to_write.get("llm")
+    if isinstance(llm_out, dict):
+        plaintext = llm_out.pop("api_key", "") or ""
+        llm_out.pop("has_api_key", None)  # 派生字段，不落盘（否则会变成陈旧状态）
+        if plaintext:
+            from agent_harness.core.pipeline.keystore import encrypt_key
+
+            try:
+                llm_out["api_key_enc"] = encrypt_key(plaintext)
+            except Exception as e:  # noqa: BLE001 —— 加密不可用时不落明文，宁可不存
+                logger.error("llm.api_key 加密失败，本次不把 key 写入磁盘：%s", e)
+                llm_out.pop("api_key_enc", None)
+        else:
+            llm_out.pop("api_key_enc", None)  # 用户清空 key → 旧密文必须一并清掉
+
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+        json.dump(to_write, f, ensure_ascii=False, indent=2)
     # 同步 LLM 配置到环境变量,使其他读环境变量的路径(如 workers.py)也能运行时生效
     llm = config.get("llm", {})
     if llm.get("api_url"):

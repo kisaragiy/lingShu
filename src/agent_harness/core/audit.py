@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from pathlib import Path
@@ -38,13 +39,37 @@ def _get_conn():
     return conn
 
 
+def _redact_enabled() -> bool:
+    """SEC-19 落库闸：HARNESS_AUDIT_REDACT=0 时保留原文（本地调试用）。
+
+    与 SEC-3 模块层的 HARNESS_PII_REDACT 是两层开关：本闸管"审计落库"，
+    模块闸管"报告输出"，不合并（一个关掉不影响另一个的语义）。
+    """
+    return os.environ.get("HARNESS_AUDIT_REDACT", "1") != "0"
+
+
 def audit(action: str, **kwargs: Any) -> str:
-    """记录一条审计日志。返回 trace_id。"""
+    """记录一条审计日志。返回 trace_id。
+
+    敏感实参（api_key/token/Bearer/手机号/邮箱…）在**落库前**脱敏 ——
+    审计的用途是排障，排障不能以明文留存密钥/隐私为代价。
+    """
+    from agent_harness.core.safety.pii_redact import redact_pii
+
     trace_id = uuid.uuid4().hex[:12]
     now = time.time()
     duration = kwargs.pop("duration_ms", None)
     result = kwargs.pop("result", None)
     error = kwargs.pop("error", "")
+
+    params_json = json.dumps(kwargs, ensure_ascii=False, default=str) if kwargs else None
+    result_json = json.dumps(result, ensure_ascii=False, default=str) if result else None
+    if _redact_enabled():
+        if params_json:
+            params_json = redact_pii(params_json)
+        if result_json:
+            result_json = redact_pii(result_json)
+
     with _get_conn() as conn:
         conn.execute(
             "INSERT INTO audit_log (id, trace_id, action, params, result, duration_ms, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -52,8 +77,8 @@ def audit(action: str, **kwargs: Any) -> str:
                 uuid.uuid4().hex[:16],
                 trace_id,
                 action,
-                json.dumps(kwargs, ensure_ascii=False, default=str) if kwargs else None,
-                json.dumps(result, ensure_ascii=False, default=str) if result else None,
+                params_json,
+                result_json,
                 duration,
                 error,
                 now,

@@ -409,6 +409,9 @@ SUBPROCESS_CALL_PINNED: set[tuple[str, str]] = {
     ("core/pipeline/config_manager.py", "_fix_start_model_proxy"),
     ("core/pipeline/config_manager.py", "_fix_start_ollama"),
     ("core/pipeline/config_manager.py", "_fix_start_searxng"),
+    # SEC-18 目录 ACL 收紧：单条固定 argv 的 icacls（Windows 没有 stdlib ACL API），
+    # 参数只有目录路径 + `%USERNAME%:(OI)(CI)F` 固定后缀，无外部输入拼接。
+    ("core/pipeline/config_manager.py", "_hard_dir_permissions"),
     ("core/tools/desktop.py", "_call_playwright"),
     ("core/tools/desktop.py", "_tool_app_launch"),        # ← 同时是 shell=True 那处（P0）
     ("core/tools/mcp_utils.py", "call_mcp_tool"),
