@@ -291,9 +291,10 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None,
     ref_lines = []
     for num in sorted(source_map.keys()):
         url = source_map[num]
-        # Try to derive a title from the URL
-        title = url.rsplit("/", 1)[-1][:50] if "/" in url else url
-        ref_lines.append(f"[来源 {num}] {title} - {url}")
+        # Try to derive a title from the URL（用独立变量：此前复用 title 覆盖了报告标题，
+        # 导致 h1/页面 title 变成最后一个 URL 的路径尾部，且覆盖后不再转义）
+        ref_title = url.rsplit("/", 1)[-1][:50] if "/" in url else url
+        ref_lines.append(f"[来源 {num}] {ref_title} - {url}")
     if ref_lines:
         formatted_content += "\n\n## 参考来源\n\n" + "\n".join(ref_lines)
 
@@ -582,6 +583,7 @@ def _markdown_to_html(text: str) -> str:
     html = []
     in_table = False
     in_list = False
+    prev_table_row = None   # 暂存上一表格行，等下一行裁决它是表头还是数据行
 
     for line in lines:
         stripped = line.strip()
@@ -589,15 +591,33 @@ def _markdown_to_html(text: str) -> str:
         # Table row
         if stripped.startswith("|") and stripped.endswith("|"):
             cells = [c.strip() for c in stripped.split("|")[1:-1]]
-            # Check if it's a header separator
-            if all(set(c) <= set(":-") for c in cells):
+            is_sep = all(set(c) <= set(":-") for c in cells)
+            if is_sep:
+                # 分隔行 ⟹ 上一行是表头。此前直接 continue，表头被当数据行渲染成 <td>，
+                # 表格从此没有表头（ENG-26）。
+                if prev_table_row is not None:
+                    if not in_table:
+                        html.append("<table>")
+                        in_table = True
+                    html.append("<tr><th>" + "</th><th>".join(prev_table_row) + "</th></tr>")
+                    prev_table_row = None
                 continue
-            if not in_table:
-                html.append("<table>")
-                in_table = True
-            html.append("<tr><td>" + "</td><td>".join(cells) + "</td></tr>")
+            # 非分隔行：先刷出暂存的上一行（它没有分隔行跟随 → 是数据行），当前行重新暂存
+            if prev_table_row is not None:
+                if not in_table:
+                    html.append("<table>")
+                    in_table = True
+                html.append("<tr><td>" + "</td><td>".join(prev_table_row) + "</td></tr>")
+            prev_table_row = cells
             continue
         else:
+            # 非表格行：先刷出暂存行，再闭合表格
+            if prev_table_row is not None:
+                if not in_table:
+                    html.append("<table>")
+                    in_table = True
+                html.append("<tr><td>" + "</td><td>".join(prev_table_row) + "</td></tr>")
+                prev_table_row = None
             if in_table:
                 html.append("</table>")
                 in_table = False
@@ -636,6 +656,12 @@ def _markdown_to_html(text: str) -> str:
             else:
                 html.append(f"<p>{stripped}</p>")
 
+    if prev_table_row is not None:      # 文末残留的最后一行表格
+        if not in_table:
+            html.append("<table>")
+            in_table = True
+        html.append("<tr><td>" + "</td><td>".join(prev_table_row) + "</td></tr>")
+        prev_table_row = None
     if in_table:
         html.append("</table>")
     if in_list:
