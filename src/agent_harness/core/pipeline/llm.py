@@ -53,6 +53,58 @@ def _http_post(session, url, payload, headers=None, timeout=120):
     return session.post(url, json=payload, headers=headers or {}, timeout=timeout)
 
 
+# ─── Thinking 模式策略（业界做法：不是禁思考，是「按需开 + 给够预算」）───
+# HARNESS_LLM_THINKING = off（默认，保持既有行为）| on
+#   off → payload 里显式发 thinking:{"type":"disabled"}（关闭思考）
+#   on  → 不发该字段，让模型自主思考；并把 max_tokens 抬到至少 4096 给思考留空间
+# 无论哪种模式，都会识别「思考把预算吃光」并按预算重试一次（见 _THINKING_MAX_RETRY）。
+THINKING_MODE_ENV = "HARNESS_LLM_THINKING"
+THINKING_MIN_BUDGET = 4096          # 开思考时 max_tokens 下限（思考 + 答案要一起装下）
+THINKING_RETRY_CAP = 8192           # 预算重试的 max_tokens 上限
+_REASONING_FIELDS = ("reasoning_content", "reasoning", "thinking")
+
+
+def _thinking_mode() -> str:
+    """当前思考模式：'on' 或 'off'（默认 off，不改变既有部署行为）。"""
+    return "on" if os.environ.get(THINKING_MODE_ENV, "").strip().lower() in ("on", "1", "true", "yes") else "off"
+
+
+def _extract_reasoning(msg: dict) -> str:
+    """取思考轨迹。各家字段名不同：DeepSeek/vLLM=reasoning_content、
+    ollama 新版 /v1=reasoning、Anthropic 风格=thinking。"""
+    for field in _REASONING_FIELDS:
+        value = msg.get(field)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _extract_openai_content(data: dict, max_tokens: int) -> tuple[str, str, str, bool]:
+    """从 OpenAI 兼容响应里取 (答案, 思考轨迹, finish_reason, 是否可缓存)。
+
+    思考轨迹与答案走两条通道，**永远不合并**：
+      - content 有值 → 正常答案；reasoning 单独交还（可记日志/展示「思考过程」）
+      - content 空 + finish=length + 有 reasoning → 预算全被思考吃掉，答案还没开始写；
+        返回空串，由调用方决定加预算重试（不把思考当答案，也不假装成功）
+      - content 空 + reasoning 已吃满预算（R1 系答案写在推理里）→ 标 [推理截断输出]，不缓存
+    """
+    try:
+        choice = data["choices"][0]
+    except (KeyError, IndexError, TypeError):
+        return "", "", "", False
+    msg = choice.get("message") or {}
+    content = (msg.get("content") or "").strip()
+    reasoning = _extract_reasoning(msg)
+    finish = choice.get("finish_reason") or ""
+    if content:
+        return content, reasoning, finish, True
+    if reasoning and finish == "length":
+        return "", reasoning, finish, False
+    if reasoning and len(reasoning) > max_tokens * 0.8:
+        return "[推理截断输出] " + reasoning[-200:], reasoning, finish, False
+    return "", reasoning, finish, True
+
+
 # Shared HTTP session
 _session = req_lib.Session()
 _session.headers.update({"User-Agent": "agent-harness/0.2.0"})
@@ -146,36 +198,51 @@ def call_llama(messages: list[dict], system_prompt: str = "",
             return cached
     # 运行时读取：用户在设置页填的 api_url/model 立即生效，不再依赖 import 快照
     _cfg = get_llm_config()
+    mode = _thinking_mode()
+    # 开思考时把预算抬到下限 —— 思考与答案共用 max_tokens，预算不够时答案一个 token 都轮不到
+    budget = max(max_tokens, THINKING_MIN_BUDGET) if mode == "on" else max_tokens
     payload = {
         "model": _cfg.get("model") or MODEL_LLAMA,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
-        "max_tokens": max_tokens,
+        "max_tokens": budget,
         "temperature": temperature,
         "stream": False,
-        "thinking": {"type": "disabled"},
     }
+    if mode != "on":
+        # 只在「本次不希望思考」时显式关闭；开思考时不发这个字段，让模型自主决定
+        payload["thinking"] = {"type": "disabled"}
+    _api_url = _cfg.get("api_url") or LLAMA_API
     try:
-        resp = _http_post(_session, _cfg.get("api_url") or LLAMA_API, payload, timeout=300)
+        resp = _http_post(_session, _api_url, payload, timeout=300)
         if resp.status_code == 200:
             data = resp.json()
-            msg = data["choices"][0]["message"]
-            # Strip reasoning tokens — Qwen3.6-35B outputs them before content
-            content = msg.get("content", "")
-            if not content:
-                # 模型把 token 全花在 reasoning 上（thinking 未关 / max_tokens 不足）。
-                # 推理尾段是思考过程，不是结论 —— 不能拿它冒充答案（ENG-23）。
-                reasoning = msg.get("reasoning_content", "") or ""
-                if reasoning:
-                    print(
-                        f"[LLM] call_llama: content 为空，reasoning 长度={len(reasoning)}"
-                        f"（疑似 thinking 未关或 max_tokens={max_tokens} 不足）",
-                        file=sys.stderr,
-                    )
-                    if len(reasoning) > max_tokens * 0.8:
-                        # DeepSeek-R1 系：答案确实在 reasoning 里且被截断 → 显式标注，
-                        # 让上层知道这不是正式结论（比静默当答案诚实）
-                        content = "[推理截断输出] " + reasoning[-200:]
-                content_cacheable = content.startswith("[推理截断输出]") is False
+            content, reasoning, finish, content_cacheable = _extract_openai_content(data, budget)
+            # 思考把预算吃光（content 空 + finish=length + 有 reasoning）→ 加预算重试一次。
+            # 业界做法：thinking 模型的 max_tokens 必须同时装下思考与答案；不重试就只能
+            # 拿到半截思考，重试一次比调高全局默认预算更省（多数请求不需要）。
+            if not content and finish == "length" and reasoning and budget < THINKING_RETRY_CAP:
+                retry_budget = min(budget * 2, THINKING_RETRY_CAP)
+                print(
+                    f"[LLM] call_llama: content 为空且 finish=length（推理长度={len(reasoning)}），"
+                    f"预算 {budget}→{retry_budget} 重试一次",
+                    file=sys.stderr,
+                )
+                payload["max_tokens"] = retry_budget
+                resp2 = _http_post(_session, _api_url, payload, timeout=300)
+                if resp2.status_code == 200:
+                    data = resp2.json()
+                    retry_content, retry_reasoning, finish, content_cacheable = _extract_openai_content(
+                        data, retry_budget)
+                    content = retry_content
+                    reasoning = retry_reasoning or reasoning
+                    budget = retry_budget
+            if not content and reasoning:
+                # 重试后仍无答案 → 不拿思考冒充答案（ENG-23），但要说清是什么问题
+                print(
+                    f"[LLM] call_llama: 仍无答案（finish={finish}, reasoning={len(reasoning)} tokens）。"
+                    f"若为思考模型请设 {THINKING_MODE_ENV}=on，或提高调用方 max_tokens。",
+                    file=sys.stderr,
+                )
             tokens = data.get("usage", {}).get("total_tokens", 0)
             ledger_bump(tokens)
             _record_llm_metrics(payload["model"], data.get("usage"), True, tokens)
@@ -219,16 +286,19 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
     api_url = cfg["api_url"]
     api_key = cfg["api_key"]
     model = cfg["model"] or MODEL_DEEPSEEK
+    cloud_mode = _thinking_mode()
+    cloud_budget = max(max_tokens, THINKING_MIN_BUDGET) if cloud_mode == "on" else max_tokens
     payload = {
         "model": model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
-        "max_tokens": max_tokens,
+        "max_tokens": cloud_budget,
         "temperature": 0.7,
         "stream": False,
-        # 云端 Qwen3 系默认开思考模式 → content 恒空、答案全进 reasoning_content，
-        # 与本地 call_llama 对齐显式关闭（ENG-23）
-        "thinking": {"type": "disabled"},
     }
+    if cloud_mode != "on":
+        # 云端 Qwen3 系默认开思考模式 → content 恒空、答案全进 reasoning_content。
+        # 只有明确「本次不要思考」时才关（ENG-23 / HARNESS_LLM_THINKING）。
+        payload["thinking"] = {"type": "disabled"}
     # Check cache for cloud calls
     cache_key = _llm_cache_key(model, payload["messages"], system_prompt, 0.7)
     cached = _llm_cache_get(cache_key)
