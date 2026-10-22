@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added — 溯源三态与数字核验（ENG-29/32/33/34）
+- 🔗 **provenance**：从 worker 成功步骤解析一手来源（工具名 + URL + 抓取时间 + snippet）；`search` 对齐 `标题: 摘要 [url]`、`web_scrape` 对齐 `{"title","body","url"}` JSON（含被截断 JSON 的字段兜底）——**模型自述不算证据**
+- ✅ **v2 核验**：报告数字与来源正文双向归一比对，差集即「未找到依据」；有 provenance 走 v2，无则回落 v1
+- 🏷️ **三态标注**：未找到依据（数字 + 来源 URL）/ 未核验（skip 原因中文化：轮次触顶、无可核对数字、无来源正文、校验异常）/ 通过不变形 —— skipped 不再静默通过
+- 🔢 **中文单位归一**：万 / 亿 / 万亿 + 复合单位按乘数换算；「2024 年」按时间限定排除（年份不是待核验数据，否则跨年引用必误报）
+- 🖼️ `generate_report_html` 支持 `provenance` / `factcheck` 三态汇总块；`/v1/reports/formalize` 接受调用方传入（agent 侧 state 未落盘，默认不传 = 无块，不假装已接线）
+- ✂️ 只读抓取类工具输出截断上限 500 → 2000（年报正文被截断会导致数字查不到）
+- 🧪 `tests/test_finalize_fact_check.py` 37 用例（v1 14 条全保留）
+
 ### Fixed — 熔断器三态状态机（无进展检测真正生效）
 - 🔥 `record_output(wname, output)`：worker 名改作分组 key，不再拼进被比较文本——旧实现每次前缀不同，唯一指纹恒 > 1，**无进展检测实际永不触发**
 - 🔁 新增 CLOSED / OPEN / HALF_OPEN 三态：硬熔断（token 超支/墙钟超时）永久停；软熔断（无进展）冷却 60s 后半开放行一次探测，探测通过恢复 closed、失败重置冷却（原实现触发后**永不恢复**）
