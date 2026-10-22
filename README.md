@@ -8,11 +8,11 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-1c3d5a?logo=langchain)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-f5de17)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-769%20passed-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-816%20passed-brightgreen)]()
 [![GitHub stars](https://img.shields.io/github/stars/kisaragiy/lingShu?style=flat&logo=github)](https://github.com/kisaragiy/lingShu)
 
 > **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
-> 本地优先、开箱即用。一个能装、能跑、能给非技术人演示的多 Agent 调研助手。
+> 一条指令并行跑完检索、交叉验证与成稿：每条结论都带可回溯的来源（工具名 + 原始 URL + 抓取时间），核不到的显式标注「未找到强相关依据」。
 
 </div>
 
