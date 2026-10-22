@@ -162,14 +162,26 @@ def call_llama(messages: list[dict], system_prompt: str = "",
             # Strip reasoning tokens — Qwen3.6-35B outputs them before content
             content = msg.get("content", "")
             if not content:
-                # If content is empty, the model might still be generating
-                content = msg.get("reasoning_content", "")[-200:] or "(empty)"
+                # 模型把 token 全花在 reasoning 上（thinking 未关 / max_tokens 不足）。
+                # 推理尾段是思考过程，不是结论 —— 不能拿它冒充答案（ENG-23）。
+                reasoning = msg.get("reasoning_content", "") or ""
+                if reasoning:
+                    print(
+                        f"[LLM] call_llama: content 为空，reasoning 长度={len(reasoning)}"
+                        f"（疑似 thinking 未关或 max_tokens={max_tokens} 不足）",
+                        file=sys.stderr,
+                    )
+                    if len(reasoning) > max_tokens * 0.8:
+                        # DeepSeek-R1 系：答案确实在 reasoning 里且被截断 → 显式标注，
+                        # 让上层知道这不是正式结论（比静默当答案诚实）
+                        content = "[推理截断输出] " + reasoning[-200:]
+                content_cacheable = content.startswith("[推理截断输出]") is False
             tokens = data.get("usage", {}).get("total_tokens", 0)
             ledger_bump(tokens)
             _record_llm_metrics(payload["model"], data.get("usage"), True, tokens)
             _emit_llm_envelope(payload["model"], messages, system_prompt, temperature,
                                data.get("usage"), data=data)
-            if cache_key and content:
+            if cache_key and content and content_cacheable:
                 _llm_cache_set(cache_key, content, tokens)
             return content, tokens
     except Exception as e:
@@ -213,6 +225,9 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
         "max_tokens": max_tokens,
         "temperature": 0.7,
         "stream": False,
+        # 云端 Qwen3 系默认开思考模式 → content 恒空、答案全进 reasoning_content，
+        # 与本地 call_llama 对齐显式关闭（ENG-23）
+        "thinking": {"type": "disabled"},
     }
     # Check cache for cloud calls
     cache_key = _llm_cache_key(model, payload["messages"], system_prompt, 0.7)
