@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Security — 密钥与日志落盘（SEC-18/19）
+- 🔐 **SEC-18**：`config.json` 曾把 `llm.api_key` 明文 `json.dump` 落盘。新增 `core/pipeline/keystore.py`，用 `PBKDF2(machine_id|username)` 派生本机 KEK 对单字段加密，落盘 `api_key_enc`，启动解密回内存。**否决了「剥离到环境变量」方案**——环境变量是进程内存态，重启全丢，桌面应用每次重开都要重填 key。老明文配置读一次即迁移（幂等）；解密失败明确 ERROR 并置空，不静默降级；配置目录 best-effort 收紧（POSIX 700 / Windows `icacls`，失败只 warning 不阻断启动）。防的是「配置文件被拷走」，不是「本机同账户被攻破」——后者要 OS keychain/TPM，明确不做
+- 🧼 **SEC-19**：`audit()` 曾把工具实参（含 key、URL 签名）明文写盘。新增 `core/safety/pii_redact.py` 双层规则：键名（`api_key`/`token`/`secret`/`password`/`authorization`/`cookie` 及变体）+ 值形态（`sk-*`/`Bearer`/长 hex/长 base64/手机号/身份证/邮箱/银行卡）。单独成函数可单测，`HARNESS_AUDIT_REDACT=0` 可关
+- 🧪 `test_sec18_config_keystore.py` 11 + `test_sec19_audit_redact.py` 31（全量 915 passed）
+
+### Fixed — 流式路径的并发与取消（ENG-19/21）
+- 🚦 **ENG-19**：流式分支（前端默认 `stream=true`）直接起 daemon 线程、**完全绕过 `_agent_semaphore`** —— 并发上限形同虚设；客户端断开后线程继续跑满超时白烧 token。现 handler 层 `asyncio.to_thread(sem.acquire(timeout=...))` 纳入闸门（直接 acquire 会阻塞 event loop；`Semaphore.acquire` 首参是阻断标志，`timeout` 必须关键字传），拿不到返回 503；`pre_acquired` 标志保证名额由持有者释放一次，计数配平；`_stream_progress` 全程 `try/finally`：断开 → `cancel_task` → `join(5s)` → 清注册表，半截 session 不落盘
+- 🎯 **ENG-21**：`cancel.py` 曾是**全局单点** event —— 并发下后启动的任务覆盖它，取消 A 变成取消 B（或谁都取消不了）。改为按 `task_id` 注册表，`session_id` 透传到 supervisor/worker/graph_multi 的取消检查点；旧 API 保留为 CLI 兜底
+- 🐛 顺带修：`acquire` 超时返回 `False` 时曾仍置 `acquired_here=True` → 每超时一次并发上限就 +1，**闸门被自己的错误处理漏光**。现检查返回值并在排队超时时返回明确的「繁忙」事件
+- 🧪 `test_eng19_sse_concurrency.py` 10 用例
+
 ### Changed — 评测口径加事实性维度（ENG-40）
 - ⚖️ 原评分 keyword 独占 40 分：「市值 1 亿」和「市值 1 万亿」只要都含关键词就同分——测的是「输出了相关词」，不是「内容对」。现拆为 keyword 20 + **factual 20**（总分仍 100）
 - 断言写在任务里（`task["factual"]`）：`must_have_numbers`（该说的没说）/ `must_not_have_numbers`（编造数字）/ `must_cite_domains`（无来源裸答）/ `requires_fact_check_note`（无来源不自标未核验）
