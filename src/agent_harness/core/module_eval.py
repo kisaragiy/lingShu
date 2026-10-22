@@ -187,7 +187,7 @@ class LingShuCircuitBreaker:
         breaker.add_tokens(n)
 
     def record_output(self, breaker: Any, output: str) -> None:
-        breaker.record_output(output)
+        breaker.record_output("probe", output)
 
     def tripped(self, breaker: Any) -> bool:
         return bool(breaker.check().get("tripped"))

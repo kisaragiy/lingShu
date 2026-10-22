@@ -121,7 +121,7 @@ def executor_node(state: HarnessState) -> dict:
     # Feed circuit breaker for no-progress detection (token/time handled by check).
     new_errors = list(state.get("errors", []))
     if cb is not None:
-        cb.record_output(f"{tool_name}:{str(result)[:100]}")
+        cb.record_output(tool_name, str(result)[:200])
         if cb.check()["tripped"]:
             new_errors.append("[熔断] 已触发（token/超时/无进展）")
             new_trace.append({"step": "circuit_breaker", "tripped": True,
