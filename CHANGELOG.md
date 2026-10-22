@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Docs — 演示指南重写（原文档有会被当场证伪的假数字）
+- 🔢 **`docs/demo-guide.md` 里的数字全错**：「62 tests passing」（实际 1059）、「61 个版本迭代（v0.4 → v0.61）」（实际 v0.75.3 / CHANGELOG 53 个版本标签）、`.env` 里写 `LLM_API_KEY` / `LLM_BASE_URL`（`.env.example` 里根本没有这两个变量）。这类数字面试官扫一眼 README 就能对上，矛盾比缺失更伤
+- 🔗 **README 从没链接过 demo-guide**：这份指南一直是孤儿文档，评审找不到入口。现在「快速开始 → 一条命令看证据链」下方直接给出样本报告 + 指南链接
+- 📄 新增 `docs/samples/demo-report-2025-nev.html`：一次真实运行的产物（15 条一手来源），不跑也能看到「事实核验说明」长什么样（已检查无本地路径 / 隐私）
+- ✅ 文档里每条数字都附了自查命令（`pytest` / `grep -c '^## ' CHANGELOG.md` / 一行 Python 数工具），对不上就是文档的错
+- 🧭 工具数**核实为 37 正确**（完整应用导入链下的注册数；单独 import 工具模块会多注册，那不是运行时形态）—— 原审计把它列为存疑项，实为误报
+- 📌 保留原有设计取舍：**不提供离线演示模式**（假数据演示与真实能力脱节比演示失败更糟）
+
 ### Fixed — SEC-2 知识库越权读取（隔离下沉到数据层）
 - 🕳️ **两个真实越权点，都不在 API 层**：① `supervisor.py` 把 `list_collections()` 的返回值直接拼进 system prompt，**所有用户的 collection 物理名都会送给模型和用户**（信息泄露）；② `_tool_rag_query(collection=...)` 完全信任模型传进来的名字 —— 模型被检索内容诱导后传别人的物理名就能读到。API 层原有的 `_user_collection()` 只保护「API 自己拼出来的名字」，管不到这两条路径
 - 🛡️ **修法：校验下沉到数据层**。`rag_store` 新增 `contextvars` 作用域（`set_scope` / `reset_scope` / `current_scope`），全部读写只经过 `_coll_dir()` 一处，在那里做 `_check_scope()`；`list_collections()` 同一处过滤。任何调用方（API / agent 工具 / 脚本）都绕不过去
