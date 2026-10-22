@@ -32,6 +32,8 @@ dependencies = [
     "rich>=13.0",
     "prometheus-client>=0.19",
     "structlog>=24.1.0",
+    # SEC-18：config.json 的 llm.api_key 用本机派生 KEK（Fernet）加密落盘
+    "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]

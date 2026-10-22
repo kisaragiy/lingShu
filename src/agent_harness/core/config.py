@@ -158,6 +158,13 @@ def get_llm_config() -> dict:
             llm = cfg.get("llm", {})
             url = llm.get("api_url") or ""
             key = llm.get("api_key") or ""
+            if not key and llm.get("api_key_enc"):
+                # SEC-18：磁盘上只有密文，解密回内存（失败时不静默冒充「已配置」）
+                try:
+                    from agent_harness.core.pipeline.keystore import decrypt_key
+                    key = decrypt_key(llm["api_key_enc"])
+                except Exception:  # noqa: BLE001
+                    key = ""
             model = llm.get("model") or ""
             if url:  # config.json 有明确 api_url 时优先
                 return {"api_url": url, "api_key": key, "model": model}
