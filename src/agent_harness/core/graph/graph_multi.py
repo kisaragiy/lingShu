@@ -1172,6 +1172,11 @@ def supervisor_finalize(state: SupervisorState) -> dict:
         "final_output": final,
         "completion_contract": contract,
         "trace_steps": trace_steps,
+        # ENG-29 收口：结构化核验结果与一手来源记录随 finalize 一起返回。
+        # 此前只把「未核验条数」塞进 trace_steps，原始 provenance 与三态被丢弃，
+        # 导致调用方（API/报告生成）拿不到证据链，HTML 溯源汇总块永远是空的。
+        "factcheck": fact_info,
+        "provenance": _collect_provenance(state),
     }
 
 
@@ -1295,6 +1300,9 @@ def run_multi_agent(
         "trace_id": trace_id,
         "no_progress_tripped": final.get("no_progress_tripped", False),
         "completion_contract": final.get("completion_contract", {}),
+        # 证据链（ENG-29 收口）：报告生成与 UI 需要原始 provenance + 三态核验结果
+        "factcheck": final.get("factcheck", {}),
+        "provenance": final.get("provenance", []),
         # 预算摘要：成本/级别/cache 命中率在一等公民字段里可见
         "budget": initial_state["token_budget"].summary(),
         "budget_level": final.get("budget_level", "ok"),
