@@ -31,6 +31,12 @@ services:
     environment:
       - SEARXNG_BASE_URL=http://127.0.0.1:4000
       - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-change-me-in-production}
+      # 容器内无代理时 bing/google 一律返回空文档（"parsing error"），只剩国内引擎，
+      # 而国内引擎高频抓取会立刻 CAPTCHA 封禁 → 表现为 HTTP 200 + results=0 的"假成功"。
+      # 指向宿主代理（Docker Desktop 的 host.docker.internal）。
+      - HTTP_PROXY=${SEARXNG_HTTP_PROXY:-http://host.docker.internal:7899}
+      - HTTPS_PROXY=${SEARXNG_HTTP_PROXY:-http://host.docker.internal:7899}
+      - NO_PROXY=localhost,127.0.0.1
     volumes:
       - searxng_data:/etc/searxng:rw
     cap_drop:
@@ -39,6 +45,9 @@ services:
       - CHOWN
       - SETGID
       - SETUID
+      # 空 volume 首次启动时 entrypoint 要往 /etc/searxng 写 settings.yml；
+      # 没有 DAC_OVERRIDE 时连 root 都写不进（实测 Restarting 127 + "Permission denied"）
+      - DAC_OVERRIDE
     restart: unless-stopped
 
 volumes:
