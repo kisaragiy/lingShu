@@ -2,13 +2,14 @@
 import sys
 import json
 
-from ..config import (
-    LLAMA_API,
-    MODEL_LLAMA,
-    SUPERVISOR_MAX_ROUNDS,
-)
+from ..config import SUPERVISOR_MAX_ROUNDS
 from ..pipeline.cancel import is_cancelled
-from ..pipeline.llm import ledger_bump
+from ..pipeline.llm import (
+    extract_answer,
+    ledger_bump,
+    runtime_endpoint,
+    thinking_payload,
+)
 from ..pipeline.state import SupervisorState
 
 # ─── Worker capability definitions ───
@@ -123,14 +124,14 @@ def _record_llm(model: str, usage: dict | None = None, success: bool = True) -> 
 
 def _emit_llm_envelope(messages: list[dict] | None, system_prompt: str,
                        temperature: float, usage: dict | None,
-                       data: dict | None = None) -> None:
+                       data: dict | None = None, model: str = "") -> None:
     """落主链路 LLM 调用的可复现信封（P1-1）。观测层故障绝不影响主链路。"""
     try:
         from ..reproducibility import reproducibility_envelope
         from ..agent_log import log_llm_envelope
         resp = data or {}
         env = reproducibility_envelope(
-            model=MODEL_LLAMA,
+            model=model or runtime_endpoint()[1],
             model_version=resp.get("model") or resp.get("model_version"),
             provider=resp.get("provider"),
             temperature=temperature,
@@ -149,11 +150,22 @@ def _call_llm_full(messages: list[dict], system_prompt: str = "",
 
     dsh P0: 捕获 finish_reason 以识别 max_tokens 截断(length)，
     供 sticky 逻辑区分「截断但实质内容」vs「真正空返回」。
+
+    配置与取值统一走 pipeline/llm 的三个入口：端点每调用重读（不吃 import 快照）、
+    答案只从 content 取（思考轨迹不冒充答案）、thinking 跟随 HARNESS_LLM_THINKING。
     """
     import requests as req_lib
 
+    api_url, model = runtime_endpoint()
+    if not api_url:
+        print(
+            "[supervisor] 未配置 LLM 端点 —— 设置 HARNESS_LLAMA_API 或 HARNESS_DEEPSEEK_API",
+            file=sys.stderr,
+        )
+        return "", "unconfigured"
+
     payload = {
-        "model": MODEL_LLAMA,
+        "model": model,
         "messages": (
             [{"role": "system", "content": system_prompt}]
             + messages
@@ -161,27 +173,26 @@ def _call_llm_full(messages: list[dict], system_prompt: str = "",
         "max_tokens": max_tokens,
         "temperature": 0.3,
         "stream": False,
-        "thinking": {"type": "disabled"},
+        **thinking_payload(),
     }
     try:
-        resp = req_lib.post(LLAMA_API, json=payload, timeout=timeout)
+        resp = req_lib.post(api_url, json=payload, timeout=timeout)
         if resp.status_code == 200:
             data = resp.json()
             choice = data["choices"][0]
-            msg = choice["message"]
             finish_reason = str(choice.get("finish_reason", ""))
-            content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
+            content = extract_answer(data, max_tokens)
             usage = data.get("usage", {}) or {}
             ledger_bump(usage.get("total_tokens", 0))
-            _record_llm(MODEL_LLAMA, usage)
-            _emit_llm_envelope(messages, system_prompt, 0.3, usage, data=data)
+            _record_llm(model, usage)
+            _emit_llm_envelope(messages, system_prompt, 0.3, usage, data=data, model=model)
             return content, finish_reason
-        _record_llm(MODEL_LLAMA, None, success=False)     # 非 200：后端在但报错
-        _emit_llm_envelope(messages, system_prompt, 0.3, None)
+        _record_llm(model, None, success=False)     # 非 200：后端在但报错
+        _emit_llm_envelope(messages, system_prompt, 0.3, None, model=model)
         return "", ""
     except Exception:
-        _record_llm(MODEL_LLAMA, None, success=False)     # 不可达/超时
-        _emit_llm_envelope(messages, system_prompt, 0.3, None)
+        _record_llm(model, None, success=False)     # 不可达/超时
+        _emit_llm_envelope(messages, system_prompt, 0.3, None, model=model)
         return "", "error"
 
 

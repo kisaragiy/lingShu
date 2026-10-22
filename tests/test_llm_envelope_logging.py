@@ -106,6 +106,9 @@ def test_call_llama_records_envelope_on_failure(monkeypatch, no_cache, capture):
 
 def test_supervisor_records_envelope(monkeypatch, capture):
     import requests
+    from agent_harness.core.pipeline import llm as _llm
+    monkeypatch.setattr(_llm, "get_llm_config", lambda: {
+        "model": "unit-model", "api_url": "http://unit.test/v1", "api_key": "k"})
 
     monkeypatch.setattr(requests, "post", lambda *a, **kw: _Resp({
         "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
@@ -117,12 +120,15 @@ def test_supervisor_records_envelope(monkeypatch, capture):
     assert content == "ok" and fr == "stop"
     assert capture, "Agent 主链路 LLM 调用未落信封"
     env = capture[-1]["envelope"]
-    assert env["model"] == supervisor.MODEL_LLAMA
+    assert env["model"] == "unit-model"
     assert len(env["prompt_hash"]) == 64
 
 
 def test_supervisor_records_envelope_on_failure(monkeypatch, capture):
     import requests
+    from agent_harness.core.pipeline import llm as _llm
+    monkeypatch.setattr(_llm, "get_llm_config", lambda: {
+        "model": "unit-model", "api_url": "http://unit.test/v1", "api_key": "k"})
 
     def _boom(*a, **kw):
         raise ConnectionError("refused")

@@ -10,9 +10,14 @@ from typing import Literal
 
 from langgraph.graph import END, StateGraph
 
-from ..config import LLAMA_API, MAX_RETRIES, MODEL_LLAMA
+from ..config import MAX_RETRIES
 from ..pipeline.circuit_breaker import CircuitBreaker
-from ..pipeline.llm import ledger_bump
+from ..pipeline.llm import (
+    extract_answer,
+    ledger_bump,
+    runtime_endpoint,
+    thinking_payload,
+)
 from ..pipeline.state import HarnessState
 from ..tools.registry import TOOL_REGISTRY, call_tool, validate_result
 
@@ -20,23 +25,30 @@ from ..tools.registry import TOOL_REGISTRY, call_tool, validate_result
 
 def _call_llm(messages: list[dict], system_prompt: str = "",
               max_tokens: int = 4096, temperature: float = 0.3) -> str:
+    """端点/模型每调用重读配置；答案只取 content（思考轨迹不冒充答案）。"""
+    import sys
+
     import requests as req_lib
+
+    api_url, model = runtime_endpoint()
+    if not api_url:
+        print("[graph] 未配置 LLM 端点 —— 设置 HARNESS_LLAMA_API 或 HARNESS_DEEPSEEK_API",
+              file=sys.stderr)
+        return ""
     payload = {
-        "model": MODEL_LLAMA,
+        "model": model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
         "stream": False,
-        "thinking": {"type": "disabled"},
+        **thinking_payload(),
     }
     try:
-        resp = req_lib.post(LLAMA_API, json=payload, timeout=300)
+        resp = req_lib.post(api_url, json=payload, timeout=300)
         if resp.status_code == 200:
             data = resp.json()
-            msg = data["choices"][0]["message"]
-            content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
             ledger_bump(data.get("usage", {}).get("total_tokens", 0))
-            return content
+            return extract_answer(data, max_tokens)
         return ""
     except Exception:
         return ""

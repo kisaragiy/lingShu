@@ -17,7 +17,11 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from agent_harness.core.config import LLAMA_API, MODEL_LLAMA
+from agent_harness.core.pipeline.llm import (
+    extract_answer,
+    runtime_endpoint,
+    thinking_payload,
+)
 
 # ─── Data types ───
 
@@ -96,8 +100,9 @@ def generate_script(user_prompt: str, scene_count: int = 6) -> ComicScript:
         f"Generate {scene_count} scenes, each ~5 seconds."
     )
 
+    api_url, model = runtime_endpoint()
     payload = {
-        "model": MODEL_LLAMA,
+        "model": model,
         "messages": [
             {"role": "system", "content": _SCRIPT_SYSTEM_PROMPT},
             {"role": "user", "content": user_msg},
@@ -105,16 +110,18 @@ def generate_script(user_prompt: str, scene_count: int = 6) -> ComicScript:
         "max_tokens": 2048,
         "temperature": 0.8,
         "stream": False,
-        "thinking": {"type": "disabled"},
+        **thinking_payload(),
     }
 
     try:
-        resp = req_lib.post(LLAMA_API, json=payload, timeout=300)
-        if resp.status_code == 200:
-            msg = resp.json()["choices"][0]["message"]
-            raw = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
-        else:
+        if not api_url:
             raw = ""
+        else:
+            resp = req_lib.post(api_url, json=payload, timeout=300)
+            if resp.status_code == 200:
+                raw = extract_answer(resp.json(), 2048)
+            else:
+                raw = ""
     except Exception:
         raw = ""
 
