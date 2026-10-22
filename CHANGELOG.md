@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed — wheel 不含静态资源（pip/Docker 安装后前端 404，ENG-5/6）
+- 📦 **`pyproject.toml` 没有 `package-data`**：setuptools 默认不打包非 `.py` 文件，所以 wheel 里既没有主前端 `apps/research/static`（`main.py` 的 `RESEARCH_STATIC_DIR`）、也没有管理后台 `static/admin`
+- 🧱 **Dockerfile 的手工兜底漏了主前端**：`COPY src/agent_harness/static/` 只补了管理后台，主前端整个目录无人管 → 容器里首页 404
+- ✅ 改为 `include-package-data = true` + 两个包各声明 `static/**/*`；Dockerfile 删除手工 COPY（不再需要）
+- 🔬 实测（**干净环境**，先清掉 `src/*.egg-info/SOURCES.txt` 缓存）：旧配置 wheel 内 **0 个静态文件**（117 文件），新配置 **14 个**（131 文件）。不清缓存时旧配置也显示 14 —— 那是 `SOURCES.txt` 残留造成的假象
+- 🧹 `.dockerignore` 补上 `**/*.egg-info` / `build/` / `dist/`：原本没排除，Docker 的 `COPY src/ src/` 会把本地缓存带进镜像，让这类打包缺陷在本地侥幸通过、干净环境才暴露
+- 🧪 `tests/test_packaging_assets.py` 3 用例（package-data 覆盖两个目录 / 前端入口文件存在 / Dockerfile 不再手工 COPY）
+
 ### Fixed — LLM 配置收敛到单一入口（4 处调用点，3 处在主链路）
 - 🔍 **同一处缺陷有 4 个副本**：`supervisor.py`（模块级 import 快照，docstring 自认「绕过 `pipeline/llm.py`」）、`graph.py`、`comic_agent.py`（同为模块级）、`cs_agent.py`（函数内 import，同样只在首次生效）。修好 `workers.py` 并不够——规划层仍读进程启动时的配置
 - 🚫 **思考轨迹不再冒充答案**：另有 3 处 `content or reasoning_content[-500:]`，答案为空就把思考尾段当答案返回（`supervisor.py` / `graph.py` / `comic_agent.py`）

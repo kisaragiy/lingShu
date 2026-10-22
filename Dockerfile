@@ -23,8 +23,10 @@ RUN apt-get update && \
 COPY --from=builder /build/dist/*.whl .
 RUN pip install --no-cache-dir *.whl && rm -f *.whl
 
-# Copy static assets (not included in wheel)
-COPY src/agent_harness/static/ /usr/local/lib/python3.11/site-packages/agent_harness/static/
+# 静态资源已由 pyproject 的 package-data 打进 wheel：
+#   agent_harness/apps/research/static/（主前端，main.py 的 RESEARCH_STATIC_DIR）
+#   agent_harness/static/admin/（管理后台）
+# 这里曾手工 COPY 兜底，但只补了 admin、漏了主前端整个目录 → 容器里前端 404。
 COPY .env.example /app/.env.example
 
 EXPOSE 8788
