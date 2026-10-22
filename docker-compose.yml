@@ -29,7 +29,10 @@ services:
     ports:
       - "4000:8080"
     environment:
-      - SEARXNG_BASE_URL=http://127.0.0.1:4000
+      # 这是**容器内**的变量：容器内 127.0.0.1 指容器自己，必须用容器自己的监听端口 8080
+      # （端口映射是 "4000:8080"，宿主机访问才用 :4000）。写 4000 会让 SearXNG 生成
+      # 指向宿主机映射端口的自引用 URL，容器内部访问不到自己。
+      - SEARXNG_BASE_URL=http://localhost:8080
       - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-change-me-in-production}
       # 容器内无代理时 bing/google 一律返回空文档（"parsing error"），只剩国内引擎，
       # 而国内引擎高频抓取会立刻 CAPTCHA 封禁 → 表现为 HTTP 200 + results=0 的"假成功"。

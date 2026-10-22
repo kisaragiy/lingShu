@@ -940,6 +940,7 @@ async function renderDashSettings() {
   const el = document.getElementById('dash-content');
   const config = await API.get('/v1/setup/config').catch(() => null);
   const health = await API.get('/health').catch(() => null);
+  const sk = await API.get('/v1/setup/search-key').catch(() => null);
 
   let html = '<div class="card"><div class="card-title">⚙️ 设置</div>';
 
@@ -954,6 +955,31 @@ async function renderDashSettings() {
   html += '<div class="form-group"><label class="form-label">模型</label>' +
     '<input class="form-input" id="set-llm-model" value="' + escHtml(llm?.model || '') + '"></div>';
   html += '<button class="btn btn-primary btn-sm" onclick="saveSettings()">保存设置</button>';
+
+  // ─── 搜索来源（BYOK：用户自己的 key）───
+  // 只报「已配置/未配置」，绝不回显 key 片段（与后端 redact_config 同口径）。
+  const dsOk = !!(sk && sk.deepseek && sk.deepseek.configured);
+  const tvOk = !!(sk && sk.tavily && sk.tavily.configured);
+  html += '<div class="card-title" style="font-size:14px;margin-top:24px">🔎 搜索来源（自带 Key）</div>' +
+    '<p class="text-sm text-muted" style="margin-bottom:12px">填自己的搜索 API Key，密文只存本机、界面不回显。' +
+    '不填则回落环境变量或 SearXNG。</p>' +
+    '<div style="display:flex;gap:16px;margin-bottom:10px;font-size:13px">' +
+      '<span>DeepSeek：' + (dsOk ? '✅ 已配置' : '⚪ 未配置') + '</span>' +
+      '<span>Tavily：' + (tvOk ? '✅ 已配置' : '⚪ 未配置') + '</span>' +
+    '</div>' +
+    '<div class="form-group"><label class="form-label">服务商</label>' +
+      '<select class="form-input" id="set-search-provider">' +
+        '<option value="deepseek">DeepSeek（返回摘要 + 权威性评分，推荐）</option>' +
+        '<option value="tavily">Tavily</option>' +
+      '</select></div>' +
+    '<div class="form-group"><label class="form-label">API Key</label>' +
+      '<input class="form-input" id="set-search-key" type="password" autocomplete="off" ' +
+        'placeholder="粘贴你的 Key（保存后不再显示）">' +
+      '<div class="form-hint">只写密文到 ~/.agent-harness/config.json，不落明文</div></div>' +
+    '<div class="btn-group" style="display:flex;gap:8px">' +
+      '<button class="btn btn-primary btn-sm" onclick="saveSearchKey(false)">保存 Key</button>' +
+      '<button class="btn btn-secondary btn-sm" onclick="saveSearchKey(true)">清除该服务商的 Key</button>' +
+    '</div>';
 
   // About section
   html += '<div class="card-title" style="font-size:14px;margin-top:24px">📦 关于灵枢</div>' +
@@ -998,6 +1024,24 @@ async function saveSettings() {
   };
   await API.post('/v1/setup/config', config);
   toast('设置已保存 ✓', 'ok');
+}
+
+// BYOK：保存/清除用户自己的搜索 key（clear=true → 传空串清除）
+async function saveSearchKey(clear) {
+  const providerEl = document.getElementById('set-search-provider');
+  const provider = (providerEl && providerEl.value) || 'deepseek';
+  const input = document.getElementById('set-search-key');
+  const key = clear ? '' : (((input && input.value) || '').trim());
+  if (!clear && !key) { toast('请先粘贴 Key', 'err'); return; }
+  try {
+    const res = await API.post('/v1/setup/search-key', { provider: provider, key: key });
+    if (res && res.error) { toast('保存失败：' + res.error, 'err'); return; }
+    if (input) input.value = '';
+    toast(clear ? ('已清除 ' + provider + ' 的 Key') : ('已保存 ' + provider + ' Key（密文落盘）'), 'ok');
+    renderDashSettings();
+  } catch (e) {
+    toast('保存失败：' + (e && e.message ? e.message : '网络错误'), 'err');
+  }
 }
 
 // ═══════════════════════════════════

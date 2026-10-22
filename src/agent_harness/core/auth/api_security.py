@@ -7,9 +7,11 @@ Provides:
 """
 
 import hmac
+import itertools
 import json
 import os
 import secrets
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -82,13 +84,23 @@ def audit_config() -> list[str]:
 
 AUDIT_DIR = HARNESS_DIR / "audit"
 
+# 进程内单调序号：Windows 时钟粒度不足以保证「同一微秒」不重号，而文件名只用时间戳
+# → 并发/连续调用撞名时后一条覆盖前一条，审计静默丢记录（与 core/tools/permission.py 同因同修）。
+_AUDIT_SEQ = itertools.count(1)
+
 
 def log_audit(tool_name: str, source: str, args: dict, result: str = "", duration_ms: float = 0):
-    """Write a structured audit log entry for tool invocations."""
-    _ensure_dir()
-    AUDIT_DIR.mkdir(exist_ok=True)
+    """Write a structured audit log entry for tool invocations.
+
+    审计失败绝不打断业务（磁盘满/权限不足时业务照常），但绝不静默：
+    写不进去就往 stderr 明确告警一次。目录创建也在 try 内 —— 否则 PermissionError
+    会冒泡打断工具执行，与「审计只是旁路」的定位相反。
+    """
+    seq = next(_AUDIT_SEQ)
     entry = {
-        "ts": datetime.now(UTC).strftime("%Y%m%d_%H%M%S%f"),
+        # 微秒 + 进程内单调序号：并发/连续调用不会撞名，序号单调可排序
+        "ts": "{}_{:06d}".format(datetime.now(UTC).strftime("%Y%m%d_%H%M%S%f"), seq),
+        "seq": seq,
         "tool": tool_name,
         "source": source,
         "args": {k: str(v)[:200] for k, v in args.items()},
@@ -97,7 +109,13 @@ def log_audit(tool_name: str, source: str, args: dict, result: str = "", duratio
     }
     path = AUDIT_DIR / f"audit_{entry['ts']}.json"
     try:
+        _ensure_dir()
+        AUDIT_DIR.mkdir(exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(entry, f, ensure_ascii=False, indent=2)
-    except OSError:
-        pass
+    except Exception as exc:  # noqa: BLE001 — 审计失败不杀业务，但必须可见
+        print(
+            f"[AUDIT] 审计日志写入失败，本次记录已丢失 — tool={tool_name} "
+            f"source={source} path={path} 原因={type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )

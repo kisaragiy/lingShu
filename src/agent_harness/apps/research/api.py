@@ -605,7 +605,16 @@ def _get_cm():
 @router.get("/v1/setup/config")
 async def get_config():
     cm = _get_cm()
-    return cm.redact_config(cm.load_config())
+    cfg = cm.redact_config(cm.load_config())
+    # 搜索密钥同 llm.api_key 一个口径：连密文都不外传。
+    # 状态查询走 GET /v1/setup/search-key（只报布尔）。
+    s = cfg.get("search")
+    if isinstance(s, dict):
+        cfg["search"] = {
+            k: v for k, v in s.items()
+            if k not in ("api_key", "api_key_enc", "tavily_key", "tavily_key_enc")
+        }
+    return cfg
 
 
 # 公开 demo 下"访客自带 key"这条设计路径本身就是 RCE 链第一环（render.yaml 注释承认了该意图）：
@@ -673,6 +682,81 @@ async def save_config(request: Request):
 @router.get("/v1/setup/check-paths")
 async def check_paths():
     return _get_cm().check_paths()
+
+
+# ─── BYOK：用户自带搜索 key（DeepSeek / Tavily）───
+# 明文只在请求体里出现一次：立刻加密落盘，不回传、不打日志、不写明文。
+# 状态接口只报布尔 —— 与 redact_config 同一原则（前4后4 会泄掉一半密钥）。
+_SEARCH_KEY_FIELDS = {
+    "deepseek": ("api_key", "api_key_enc"),
+    "tavily": ("tavily_key", "tavily_key_enc"),
+}
+
+
+@router.get("/v1/setup/search-key")
+async def get_search_key_status():
+    """已配置与否。绝不返回 key 的任何片段。"""
+    from agent_harness.core.config import get_search_config
+
+    got = get_search_config()
+    return {
+        "deepseek": {"configured": bool(got.get("deepseek_key"))},
+        "tavily": {"configured": bool(got.get("tavily_key"))},
+    }
+
+
+@router.post("/v1/setup/search-key")
+async def save_search_key(request: Request):
+    """保存/清除用户自己的搜索 key。
+
+    body: {"provider": "deepseek"|"tavily", "key": "<明文>"}；key 为空串 = 清除。
+    """
+    if _capability_denied("write_server_config"):
+        return JSONResponse({"error": "演示模式禁止写入服务器密钥"}, status_code=403)
+
+    body = await request.json()
+    provider = str((body or {}).get("provider") or "").strip().lower()
+    key = str((body or {}).get("key") or "").strip()
+    if provider not in _SEARCH_KEY_FIELDS:
+        return JSONResponse({"error": "provider 只支持 deepseek / tavily"}, status_code=400)
+    if key and len(key) < 8:
+        return JSONResponse({"error": "key 太短（<8 字符），请检查是否粘贴完整"}, status_code=400)
+    if key and any(c.isspace() for c in key):
+        return JSONResponse({"error": "key 含空格/换行，请检查粘贴内容"}, status_code=400)
+
+    from agent_harness.core.pipeline.config_manager import CONFIG_PATH, load_config
+    from agent_harness.core.pipeline.keystore import encrypt_key
+
+    cfg = load_config() or {}
+    search = cfg.setdefault("search", {})
+    plain_field, enc_field = _SEARCH_KEY_FIELDS[provider]
+    # 明文残留一律抹掉（历史配置里可能存过明文）
+    search.pop(plain_field, None)
+    if key:
+        try:
+            search[enc_field] = encrypt_key(key)
+        except Exception as e:  # noqa: BLE001 —— 加密不可用就别假装存上了
+            return JSONResponse({"error": f"密钥加密失败，未保存：{type(e).__name__}"}, status_code=500)
+    else:
+        search.pop(enc_field, None)
+
+    # 落盘：保留其它段，只替换 search
+    import json as _j
+
+    existing = {}
+    if CONFIG_PATH.exists():
+        try:
+            with open(CONFIG_PATH, encoding="utf-8") as f:
+                existing = _j.load(f) or {}
+        except (_j.JSONDecodeError, OSError):
+            existing = {}
+    existing["search"] = search
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CONFIG_PATH.with_suffix(".json.tmp")
+    tmp.write_text(_j.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(CONFIG_PATH)
+
+    return {"ok": True, "provider": provider, "configured": bool(key)}
 
 
 @router.get("/v1/setup/llm-backends")
