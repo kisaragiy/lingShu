@@ -70,7 +70,7 @@ def _state(used=None, round_: int = 1, tasks=None, **extra) -> dict:
 # ═══════════ ① WARN：记日志，不打断 ═══════════
 
 def test_warn_logs_and_does_not_block(monkeypatch, capsys):
-    monkeypatch.setattr(gm, "run_worker", lambda w, t: _ok(w, t))
+    monkeypatch.setattr(gm, "run_worker", lambda w, t, task_id="": _ok(w, t))
     st = _state(used=int(SOFT * 0.75))          # 75% → WARN
     out = gm.supervisor_dispatch(st)
 
@@ -86,7 +86,7 @@ def test_warn_logs_and_does_not_block(monkeypatch, capsys):
 
 def test_warn_fires_only_once(monkeypatch, capsys):
     """warned 标志由 budget.py 维护 → 不重复刷屏。"""
-    monkeypatch.setattr(gm, "run_worker", lambda w, t: _ok(w, t))
+    monkeypatch.setattr(gm, "run_worker", lambda w, t, task_id="": _ok(w, t))
     st = _state(used=int(SOFT * 0.75))
     first = gm.supervisor_dispatch(st)
     capsys.readouterr()
@@ -101,7 +101,7 @@ def test_warn_fires_only_once(monkeypatch, capsys):
 def test_ask_alerts_and_halts(monkeypatch, capsys):
     q: _queue.Queue = _queue.Queue()
     gm.set_progress_queue(q)
-    monkeypatch.setattr(gm, "run_worker", lambda w, t: _ok(w, t))
+    monkeypatch.setattr(gm, "run_worker", lambda w, t, task_id="": _ok(w, t))
     st = _state(used=SOFT)                       # 100% → ASK
 
     out = gm.supervisor_dispatch(st)
@@ -118,7 +118,7 @@ def test_ask_alerts_and_halts(monkeypatch, capsys):
 
 
 def test_ask_after_user_confirm_continues(monkeypatch):
-    monkeypatch.setattr(gm, "run_worker", lambda w, t: _ok(w, t))
+    monkeypatch.setattr(gm, "run_worker", lambda w, t, task_id="": _ok(w, t))
     st = _state(used=SOFT)
     st["token_budget"].asked = True              # 用户已确认
     out = gm.supervisor_dispatch(st)
@@ -132,7 +132,7 @@ def test_ask_after_user_confirm_continues(monkeypatch):
 def test_stop_kills_and_halts(monkeypatch, capsys):
     q: _queue.Queue = _queue.Queue()
     gm.set_progress_queue(q)
-    monkeypatch.setattr(gm, "run_worker", lambda w, t: _ok(w, t))
+    monkeypatch.setattr(gm, "run_worker", lambda w, t, task_id="": _ok(w, t))
     st = _state(used=SOFT * 2)                   # 200% → STOP（跑飞）
 
     out = gm.supervisor_dispatch(st)
@@ -155,7 +155,7 @@ def test_stop_kills_and_halts(monkeypatch, capsys):
 def test_normal_flow_is_untouched(monkeypatch, capsys):
     calls: list[str] = []
     monkeypatch.setattr(gm, "run_worker",
-                        lambda w, t: (calls.append(w), _ok(w, t))[1])
+                        lambda w, t, task_id="": (calls.append(w), _ok(w, t))[1])
     st = _state(used=1_000)                      # 1% —— 远低于所有阈值
     for _ in range(3):
         out = gm.supervisor_dispatch(st)
@@ -171,7 +171,7 @@ def test_state_without_budget_behaves_as_before(monkeypatch):
     """旧调用方（state 里没有 token_budget）→ 与接线前完全一致。"""
     calls: list[str] = []
     monkeypatch.setattr(gm, "run_worker",
-                        lambda w, t: (calls.append(w), _ok(w, t))[1])
+                        lambda w, t, task_id="": (calls.append(w), _ok(w, t))[1])
     st = _state()                                # 不带 token_budget
     for _ in range(2):
         out = gm.supervisor_dispatch(st)
@@ -188,7 +188,7 @@ def test_ledger_delta_is_fed_into_budget(monkeypatch):
     fake = {"n": 0}
     monkeypatch.setattr(gm, "ledger_total", lambda: fake["n"])
 
-    def fake_worker(w, t):
+    def fake_worker(w, t, task_id=""):
         fake["n"] += 30_000                      # 模拟本轮真实 LLM 消耗
         return _ok(w, t)
 

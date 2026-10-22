@@ -153,7 +153,7 @@ def test_chat_rag_injection_respects_scope(rag_tmp, monkeypatch):
 
     seen = {}
 
-    def _fake_run_multi(enhanced):
+    def _fake_run_multi(enhanced, **kwargs):
         seen["prompt"] = enhanced
         return {"final_output": "ok", "rounds": 1, "worker_results": {}}
 

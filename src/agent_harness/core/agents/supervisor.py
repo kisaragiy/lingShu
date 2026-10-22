@@ -385,7 +385,7 @@ def supervisor_analyze(state: SupervisorState) -> dict:
 
 def supervisor_collect(state: SupervisorState) -> dict:
     """Collect results from all workers, check completeness."""
-    if is_cancelled():
+    if is_cancelled(state.get("task_id", "")):
         return {"all_done": True, "final_output": "⛔ 任务已被取消"}
 
     worker_results = state.get("worker_results", {})

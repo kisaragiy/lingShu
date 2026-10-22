@@ -244,7 +244,7 @@ def _is_search_task(task: str) -> bool:
 def _worker_executor(state: WorkerState) -> dict:
     """Execute one step of the worker's plan."""
     # ─── dsh P0: phase-abort — 取消后立即终止，不执行任何工具 ───
-    if is_cancelled():
+    if is_cancelled(state.get("task_id", "")):
         print(f"  [Abort] {state.get('worker_name','?')} 已取消，跳过工具执行", file=sys.stderr)
         return {
             "errors": list(state.get("errors", [])) + ["任务已取消"],
@@ -400,7 +400,7 @@ def _worker_synthesize(state: WorkerState) -> dict:
     """Synthesize results into a concise response for the supervisor."""
     _t0 = time.time()
     # ─── dsh P0: phase-abort — 取消后不再调 LLM 合成 ───
-    if is_cancelled():
+    if is_cancelled(state.get("task_id", "")):
         return {
             "final_output": f"⛔ {state.get('worker_name', '?')} 任务已取消",
             "aborted": True,
@@ -489,7 +489,7 @@ def build_worker(worker_name: str) -> StateGraph:
 
 # ─── Run a single worker ───
 
-def run_worker(worker_name: str, task: str, max_retries: int = 3) -> WorkerResult:
+def run_worker(worker_name: str, task: str, max_retries: int = 3, task_id: str = "") -> WorkerResult:
     """Run a worker agent synchronously and return its result.
 
     Auto-retries on failure with exponential backoff (2s, 4s, 8s).
@@ -498,6 +498,7 @@ def run_worker(worker_name: str, task: str, max_retries: int = 3) -> WorkerResul
         worker_name: One of "search", "analyze", "execute"
         task: The specific sub-task description
         max_retries: Max retry attempts (0 = no retry)
+        task_id: 取消作用域 ID（session_id）—— 只查这个任务的取消信号（ENG-21）
 
     Returns:
         WorkerResult dict with output, traces, errors
@@ -508,7 +509,7 @@ def run_worker(worker_name: str, task: str, max_retries: int = 3) -> WorkerResul
     last_error = ""
     for attempt in range(1 + max_retries):
         # ─── dsh P0: phase-abort — 取消后不构建/运行 worker，直接返回取消结果 ───
-        if is_cancelled():
+        if is_cancelled(task_id):
             print(f"  [Abort] {worker_name} 已取消", file=sys.stderr)
             return WorkerResult(
                 worker_name=worker_name,
@@ -530,6 +531,7 @@ def run_worker(worker_name: str, task: str, max_retries: int = 3) -> WorkerResul
             initial_state: WorkerState = {
                 "worker_name": worker_name,
                 "task": task,
+                "task_id": task_id,
                 "available_tools": tools,
                 "plan": [],
                 "current_step": 0,

@@ -47,6 +47,7 @@ class SupervisorState(TypedDict, total=False):
     final_output: str
     errors: list[str]
     trace_id: str
+    task_id: str                        # 取消作用域（API 传 session_id；ENG-21）
     trace_steps: list[dict]
     circuit_breaker: Any               # CircuitBreaker instance
     token_budget: Any                  # TokenBudget instance（WARN/ASK/STOP 三层软限制）
@@ -58,6 +59,7 @@ class WorkerState(TypedDict, total=False):
     """Individual worker subgraph state."""
     worker_name: str                   # "search" | "analyze" | "execute"
     task: str                          # task description for this worker
+    task_id: str                       # 取消作用域（从 supervisor state 透传；ENG-21）
     available_tools: list[str]         # tools this worker can use
     plan: list[dict]                   # mini plan: [{name, tool, args}]
     current_step: int
