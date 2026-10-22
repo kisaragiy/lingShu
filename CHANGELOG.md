@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed — 证据链在会话持久化层断裂（刷新页面后来源全丢）
+- 🕳️ **真断点**：会话只存 `role` / `content` / `ts` 三个字段，`provenance` 与 `factcheck` 从不落盘 → 刷新页面或重开会话，来源、抓取时间、核验结果**全没了**。「每条结论可回溯」因此只在单次请求的生命周期内成立；`/v1/reports/formalize` 更直接：原代码注释自己写着「agent 侧 state 未落盘，默认不传 → 报告无「事实核验说明」汇总块」
+- 🧩 修法：给 assistant 消息挂 `provenance` / `factcheck` 后一并落盘（`session_store` 的 message 事件本就保留消息全部字段，读回原样），`formalize` 在调用方未显式传证据时从 `source_session` 取最近一条带证据的消息
+- ✂️ **落盘前瘦身**：每轮最多 40 条来源、`title`/`snippet` 各截 200 字 —— 不控会话 JSONL 会随轮次无界膨胀
+- 🔒 `_evidence_from_session` 内置 owner 闸：会话含 URL 与摘录，取别人的必须 403（新增端点最容易漏的一环）
+- 🧠 顺手确认 `_build_history_context` 只取 `role`/`content` —— 来源不进 LLM 上下文，既省 token 又避免污染
+- 🧪 `tests/test_evidence_persistence.py` 12 用例：存读往返 / 老消息向后兼容 / 瘦身上限与截断 / 垃圾输入（`None`、字符串、数字当字段值）/ 来源不进 history / URL 去重 / 取最近一轮 / 跨 owner 403 与 404 / formalize 真用上会话证据 / 显式参数优先 / 拒绝后不生成报告
+
 ### Docs — 演示指南重写（原文档有会被当场证伪的假数字）
 - 🔢 **`docs/demo-guide.md` 里的数字全错**：「62 tests passing」（实际 1059）、「61 个版本迭代（v0.4 → v0.61）」（实际 v0.75.3 / CHANGELOG 53 个版本标签）、`.env` 里写 `LLM_API_KEY` / `LLM_BASE_URL`（`.env.example` 里根本没有这两个变量）。这类数字面试官扫一眼 README 就能对上，矛盾比缺失更伤
 - 🔗 **README 从没链接过 demo-guide**：这份指南一直是孤儿文档，评审找不到入口。现在「快速开始 → 一条命令看证据链」下方直接给出样本报告 + 指南链接

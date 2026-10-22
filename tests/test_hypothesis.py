@@ -22,7 +22,10 @@ def test_normalize_url_strips_www(domain_part):
     from agent_harness.core.tools.web import _normalize_url
     url = f"https://www.{domain_part}.com/path"
     result = _normalize_url(url)
-    assert "www." not in result, f"www not stripped: {result}"
+    # 断言要贴在 host 前缀上：`0www.com` 这类子域天然含 "www." 子串，
+    # 原来的 `"www." not in result` 会被 hypothesis 撞成假失败。
+    host = result.split("://", 1)[-1].split("/", 1)[0]
+    assert not host.startswith("www."), f"www not stripped: {result}"
 
 
 @given(st.text(min_size=3, max_size=30, alphabet="abcdefghijklmnopqrstuvwxyz0123456789-_."))
