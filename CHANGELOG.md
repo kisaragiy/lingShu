@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed — Worker 层 LLM 配置分裂（信任级：报告混入占位内容）
+- 🎭 **一次调研里跑了三种后端**：实测一次 demo 调用串里同时出现 `model: "mock"`、`127.0.0.1:18888`（连接被拒）、`qwen3.5:9b` —— 报告里真实分析与占位内容混在一起。根因是 `workers.py` 用 `config` 模块的 **import 快照**（进程启动那一刻的 `.env`），而 `llm.py` 已改为运行时 `get_llm_config()`：同一进程两套配置来源
+- 🔧 改为 `get_llm_config()`；简单任务只降预算、**不再切到第二个端点**（切端点正是配置分裂的成因）；未配置时直接说明并返回空，不发请求
+- 🧠 思考策略与 `llm.py` 统一：默认发 `thinking:{type:disabled}`，`HARNESS_LLM_THINKING=on` 时不发该字段并把预算抬到 ≥4096
+- 🚫 删掉 `content or reasoning[-500:]` —— 答案为空时曾把**思考轨迹尾段当答案**返回（ENG-23 在 `llm.py` 修过，此处的同类缺陷漏修）
+- 🧪 `tests/test_workers_llm_config.py` 5 用例
+
+### Fixed — searxng 部署配置（空 volume 起不来 + 搜索接口 403）
+- 🧱 `cap_drop: ALL` 没有补 `DAC_OVERRIDE`：空 volume 首次启动时 entrypoint 写不进 `/etc/searxng/settings.yml`，容器进 `Restarting (127)` 循环
+- 🔌 默认 `settings.yml` 的 `search.formats` 只有 `html`：`format=json` 一律 403
+- 🌐 容器内无代理时国外引擎返回空文档（`bing: parsing error`），国内引擎高频抓取立刻 `CAPTCHA` → 表现为 HTTP 200 + `results=0` 的"假成功"。compose 增加 `HTTP(S)_PROXY` 指向宿主代理
+
 ### Fixed — 定时任务不再重复、漏跑、静默停摆（ENG-39 / ENG-35）
 - ⏰ **重复触发**：去重靠比较 `last_run` 与当前 `tm_min`/`tm_hour`，`30 * * * *` 在 xx:31 会再跑一次。改为持久化 `next_run`、只判 `now >= next_run`，触发后从 `now` 重算（不是从错过的槽位）——停机三天也只补一次，不连环补
 - 🔤 **语法缺失**：只认 `*`、`*/n`、单值，`1-5` / `1,3,5` 会 `int()` 抛 `ValueError` 后静默 `return False` —— `0 9 * * 1-5`（工作日简报）永不触发且无任何日志。现支持范围/列表/步长；坏字段只让该字段不命中，不炸 tick。weekday 采用 POSIX 口径（周日=0，7 为别名，周一=1），docstring 写明

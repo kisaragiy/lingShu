@@ -13,7 +13,6 @@ from typing import Literal
 from langgraph.graph import END, StateGraph
 
 from ..agents.supervisor import WORKER_CAPABILITIES
-from ..config import LLAMA_API, MODEL_LLAMA
 from ..pipeline.cancel import is_cancelled
 from ..pipeline.llm import ledger_bump
 from ..pipeline.state import WorkerResult, WorkerState
@@ -80,45 +79,57 @@ def _fallback_worker_result(worker_type: str, query: str) -> str:
 
 # ─── LLM call for workers ───
 
-# Local model endpoint for simple tasks (token optimization strategy #4)
-LOCAL_LLM_API = "http://127.0.0.1:8081/v1/chat/completions"
-LOCAL_LLM_MODEL = MODEL_LLAMA
+# 端点/模型必须走 get_llm_config()（运行时配置），不能用 config 模块的 import 快照——
+# 快照是进程启动那一刻的 .env，用户在设置页改的 api_url/model 看不到，结果是同一进程里
+# 一部分调用打真模型、一部分打 mock/旧端口（实测：一次调研里出现 mock + 127.0.0.1:18888
+# + qwen3.5:9b 三种后端，报告混着真实与占位内容）。
+# 简单任务只降预算、不切端点：切端点等于维护"两套配置来源"，正是配置分裂的成因。
 
 
 def _call_llm(messages: list[dict], system_prompt: str = "",
               max_tokens: int = 4096, task_hint: str = "") -> str:
-    """
-    Call LLM with optional simple-task routing to save tokens.
-
-    Strategy #4: If task_hint indicates a simple query, route to
-    the local Ollama model (free) instead of DeepSeek (paid).
-    """
+    """Call the configured LLM. Simple tasks get a smaller budget, not another endpoint."""
     import requests as req_lib
 
-    # Check if this is a simple task that can use local model
-    use_local = bool(task_hint and _is_simple_task(task_hint))
+    from ..config import get_llm_config
+    from ..pipeline.llm import (
+        THINKING_MIN_BUDGET, _extract_openai_content, _thinking_mode,
+    )
 
-    api_url = LOCAL_LLM_API if use_local else LLAMA_API
-    model = LOCAL_LLM_MODEL if use_local else MODEL_LLAMA
+    use_local = bool(task_hint and _is_simple_task(task_hint))
+    cfg = get_llm_config()
+    api_url, model = cfg.get("api_url") or "", cfg.get("model") or ""
+    if not api_url or not model:
+        print("[Worker] LLM 未配置（api_url / model 为空），不发起调用", file=sys.stderr)
+        return ""
+
+    mode = _thinking_mode()
+    base_budget = 512 if (use_local and mode != "on") else max_tokens
+    budget = max(base_budget, THINKING_MIN_BUDGET) if mode == "on" else base_budget
 
     payload = {
         "model": model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
-        "max_tokens": max_tokens if not use_local else 512,
+        "max_tokens": budget,
         "temperature": 0.3,
         "stream": False,
-        "thinking": {"type": "disabled"},
     }
+    if mode != "on":
+        payload["thinking"] = {"type": "disabled"}
     try:
-        resp = req_lib.post(api_url, json=payload, timeout=300 if not use_local else 30)
-        if resp.status_code == 200:
-            data = resp.json()
-            msg = data["choices"][0]["message"]
-            content = msg.get("content", "") or msg.get("reasoning_content", "")[-500:] or ""
-            ledger_bump(data.get("usage", {}).get("total_tokens", 0))
-            return content
-        print(f"[Worker] LLM 返回 HTTP {resp.status_code}，本步产出为空", file=sys.stderr)
-        return ""
+        resp = req_lib.post(api_url, json=payload, timeout=300 if not use_local else 60)
+        if resp.status_code != 200:
+            print(f"[Worker] LLM 返回 HTTP {resp.status_code}，本步产出为空", file=sys.stderr)
+            return ""
+        data = resp.json()
+        content, reasoning, finish, _cacheable = _extract_openai_content(data, budget)
+        ledger_bump(data.get("usage", {}).get("total_tokens", 0))
+        if not content:
+            # 思考轨迹是过程不是结论：拿它冒充答案会让报告里出现"看起来像答案的推理"
+            print(f"[Worker] 答案为空（finish={finish}"
+                  f"{'，有思考轨迹' if reasoning else ''}），本步产出为空",
+                  file=sys.stderr)
+        return content
     except Exception as e:
         print(f"[Worker] LLM 调用异常: {e}", file=sys.stderr)
         return ""
