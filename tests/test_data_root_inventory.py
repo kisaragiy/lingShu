@@ -83,6 +83,8 @@ PINNED: dict[tuple[str, str], str | None] = {
     # ── 真写死：无法重定向，任何进程调用都落在用户真实数据根 ──
     ("core/pipeline/session_store.py", "DEFAULT_DIR"): None,
     ("core/tools/permission.py", "AUDIT_DIR"): None,
+    # PENDING_DIR 读 HARNESS_DATA_DIR（可重定向），与审计目录不同源是历史遗留
+    ("core/tools/permission.py", "PENDING_DIR"): "HARNESS_DATA_DIR",
 }
 
 # 真写死的上限（阶段二目标：减到 0），只能减少

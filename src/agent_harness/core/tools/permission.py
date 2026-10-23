@@ -4,10 +4,16 @@
 权限级别:
   read-only     — 只读操作，无害，允许自动调用
   reversible    — 有副作用但可逆（如文件写入、生图），自动放行但记录
-  irreversible  — 有不可逆影响（如代码执行、桌面操作），需显式确认
+  irreversible  — 有不可逆影响（如代码执行、桌面操作）
+
+irreversible 的处置（P0-4）：
+  default 模式 — 一律拒绝（不再看 auto_confirm），并把待批请求落盘到
+                 PENDING_DIR/req_*.json，供人工切 full 审批。理由：auto_confirm
+                 默认 True，靠它兜底等于默认全开，而这一级是任意代码执行。
+  full  模式 — 放行；调用方显式传 auto_confirm=False 时仍拒绝。
+                 full 带 TTL（默认 30 分钟），到期自动回落 default。
 
 在 call_tool() 中，irreversible 工具始终记录审计日志。
-外部调用者可通过 auto_confirm=False 触发 403 拒绝。
 """
 
 import itertools
@@ -19,6 +25,11 @@ from datetime import UTC, datetime
 # ─── Audit log directory ───
 HARNESS_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".."))
 AUDIT_DIR = os.path.join(os.path.expanduser("~"), ".agent-harness", "audit")
+# 待批工单目录：default 模式下 irreversible 被拒时落盘，让人工知道「谁想跑什么」
+PENDING_DIR = os.path.join(
+    os.environ.get("HARNESS_DATA_DIR") or os.path.expanduser("~/.agent-harness"),
+    "pending",
+)
 
 # 进程内单调序号：Windows 时钟粒度不足以保证「同一微秒」不重号，而文件名只用
 # 时间戳 → 并发（线程/连续调用）撞名时后一条会覆盖前一条，审计静默丢记录。
@@ -82,6 +93,34 @@ def _demo_write_tool_allowed(tool_name: str) -> bool:
     return tool_name in {t.strip() for t in raw.split(",") if t.strip()}
 
 
+def _write_pending_ticket(tool_name: str, source: str) -> str:
+    """把待批请求落盘，返回工单 ID（写失败返回空串）。
+
+    契约：拒绝一定发生，工单只是让「谁想跑什么」可追溯，**不是放行凭据** ——
+    任何读工单自动放行的实现都会把这道闸变回默认全开。
+    """
+    try:
+        os.makedirs(PENDING_DIR, exist_ok=True)
+        seq = next(_AUDIT_SEQ)
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S%f")
+        ticket = "req_{}_{:06d}".format(ts, seq)
+        body = {
+            "ticket": ticket,
+            "tool": tool_name,
+            "source": source,
+            "ts": datetime.now(UTC).isoformat(),
+            "status": "pending",
+            "approve_hint": "确需执行时切 full 模式（set_mode('full')，带 TTL）后重试",
+        }
+        with open(os.path.join(PENDING_DIR, ticket + ".json"), "w", encoding="utf-8") as f:
+            json.dump(body, f, ensure_ascii=False, indent=2)
+        return ticket
+    except Exception as exc:  # noqa: BLE001 — 工单写失败不能让拒绝退化成放行
+        print(f"[PENDING] 待批工单写入失败 tool={tool_name} "
+              f"原因={type(exc).__name__}: {exc}", file=sys.stderr)
+        return ""
+
+
 def check_permission(tool_name: str, source: str = "harness",
                      auto_confirm: bool = True) -> bool:
     """检查是否允许调用指定工具
@@ -89,11 +128,11 @@ def check_permission(tool_name: str, source: str = "harness",
     Args:
         tool_name: 工具名称
         source: 调用来源 (harness / mcp / human / api)
-        auto_confirm: 
-            True (默认) — read-only 和 reversible 直接放行，
-                          irreversible 记录日志后放行（兼容模式）
-            False — irreversible 工具一律拒绝（返回 False）
-                    供前端 API 使用，需用户弹窗确认后才能调用
+        auto_confirm:
+            True (默认) — read-only / reversible 放行；irreversible 在 default 模式
+                          **仍拒绝**（降级失效），只在 full 模式放行
+            False — irreversible 一律拒绝（full 模式下也拒）
+                    供前端 API 的严格调用方使用
 
     Returns:
         True 允许调用，False 拒绝
@@ -119,7 +158,19 @@ def check_permission(tool_name: str, source: str = "harness",
     if level == "irreversible":
         # 始终记录审计日志
         log_audit(tool_name, source, {})
-        # 兼容模式：记录日志后放行；严格模式：需要人类确认
+        try:
+            from ..safety.mode import is_full_access
+            full_access = bool(is_full_access())
+        except Exception:  # noqa: BLE001 — 模式模块坏掉按 default 处理，绝不当作 full
+            full_access = False
+        if not full_access:
+            # default 模式：一律拒绝 + 落待批工单（P0-4）
+            ticket = _write_pending_ticket(tool_name, source)
+            log_audit(tool_name, source, {},
+                      f"irreversible denied in default mode; "
+                      f"ticket={ticket or 'write_failed'}")
+            return False
+        # full 模式：放行；调用方显式 auto_confirm=False 时仍拒绝
         return auto_confirm
 
     # 未知级别，安全起见拒绝

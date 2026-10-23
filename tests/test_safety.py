@@ -210,11 +210,18 @@ class TestBackup:
 
 class TestCallToolIntegration:
     def test_risky_tool_intercepted_via_registry(self):
+        """P0-4 之后：irreversible 工具在 default 模式被**权限层**直接拒绝并落工单。
+
+        副作用说明：参数级风险矩阵（check_operation）对 irreversible 工具已不可达
+        —— default 模式下权限层先拒，full 模式下 require_confirm=False。risk 矩阵
+        本身仍由本文件的单元测试（script_exec_blocked / path_escape 等）覆盖，
+        集成层测的是真正生效的那一层。
+        """
         from agent_harness.core.tools.registry import call_tool
         r = call_tool("qq_send", to="张三", message="hi", _source="api")
         assert not r["success"]
-        assert "需要确认" in r["error"]
-        assert "confirm_code" in r.get("data", {})
+        assert "权限拒绝" in r["error"]
+        assert "full" in r["error"], "文案必须告诉人怎么放行（切 full），否则等于死胡同"
 
     def test_safe_tool_passes_via_registry(self):
         from agent_harness.core.tools.registry import call_tool
@@ -242,7 +249,9 @@ class TestFailClosed:
         from agent_harness.core.tools.registry import call_tool
         r = call_tool("code_execute", code="print(1)", _source="harness")
         assert not r["success"]
-        assert "安全护栏不可用" in r["error"]
+        # 由哪一层拒不重要：权限层的 default 拒绝与 registry 的 fail-closed 分支
+        # 都是合规结果。绑死文案会把实现顺序当成契约。
+        assert ("安全护栏不可用" in r["error"]) or ("权限拒绝" in r["error"])
 
     def test_safety_unavailable_reversible_logs_but_allows(self, monkeypatch, caplog):
         import sys

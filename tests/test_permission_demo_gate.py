@@ -17,6 +17,11 @@ from agent_harness.core.tools import permission as perm
 @pytest.fixture()
 def audit_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(perm, "AUDIT_DIR", str(tmp_path / "audit"))
+    monkeypatch.setattr(perm, "PENDING_DIR", str(tmp_path / "pending"))
+    # 安全模式是模块级全局：每个用例都从 default 起，避免用例之间串味
+    from agent_harness.core.safety import mode as mode_mod
+    monkeypatch.setattr(mode_mod, "_current_mode", mode_mod.MODE_DEFAULT)
+    monkeypatch.setattr(mode_mod, "_expires_at", 0.0)
     return tmp_path / "audit"
 
 
@@ -41,10 +46,23 @@ def test_local_mode_reversible_allowed(local_mode, tool):
     assert perm.check_permission(tool) is True
 
 
-def test_local_mode_irreversible_still_follows_auto_confirm(local_mode):
-    """兼容语义不变：默认放行，显式 auto_confirm=False 拒绝。"""
-    assert perm.check_permission("code_execute", auto_confirm=True) is True
+def test_local_mode_irreversible_denied_in_default_mode(local_mode):
+    """P0-4：default 模式下一律拒绝（不再看 auto_confirm），并落待批工单。
+
+    旧语义是「默认放行、auto_confirm=False 才拒」，但 auto_confirm 默认 True，
+    靠它兜底等于默认全开，而这一级是任意代码执行。改为 fail-closed。
+    """
+    import json
+    from pathlib import Path
+
+    assert perm.check_permission("code_execute", auto_confirm=True) is False
     assert perm.check_permission("code_execute", auto_confirm=False) is False
+
+    tickets = list(Path(perm.PENDING_DIR).glob("req_*.json"))
+    assert tickets, "拒绝必须落待批工单，否则事后没人知道要批什么"
+    body = json.loads(tickets[0].read_text(encoding="utf-8"))
+    assert body["tool"] == "code_execute"
+    assert body["status"] == "pending"
 
 
 @pytest.mark.parametrize("tool", ["search", "fetch", "rag_query", "file_read"])

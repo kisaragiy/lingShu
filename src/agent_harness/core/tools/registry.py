@@ -162,8 +162,9 @@ def _call_tool_impl(name: str, **kwargs) -> dict:
     if not check_permission(name, source=source, auto_confirm=auto_confirm):
         return {
             "success": False,
-            "error": f"[权限拒绝] 工具 '{name}' 不可逆，需要用户确认。"
-                     f"请通过前端确认弹窗后再调用。",
+            "error": f"[权限拒绝] 工具 '{name}' 不可逆，当前为 default 安全模式。"
+                     f"确需执行请先把安全模式切到 full 后重试"
+                     f"（待批请求已落盘到 pending/ 目录）。",
             "data": None,
         }
 
