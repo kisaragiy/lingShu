@@ -24,7 +24,8 @@ comic_output/
 # 公开仓库边界: 逆向/加密分析脚本与运行时数据不出仓库
 reference/
 src/data/
-# 一次性脚本/临时文件
+# 一次性脚本/临时文件（scratch/ 放 demo 日志、临时脚本，不该进仓库）
+scratch/
 tmp_*.py
 fix_*.py
 do_*.py
