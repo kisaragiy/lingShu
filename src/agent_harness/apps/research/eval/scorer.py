@@ -17,6 +17,8 @@ factual 维度把「必须出现的数字 / 不得出现的数字 / 必须引用
 
 from dataclasses import dataclass, field
 
+from .budget import BudgetBaseline, ratio_score, resolve_baseline
+
 
 @dataclass
 class EvalScore:
@@ -140,6 +142,7 @@ def score_task(
     trace_tree=None,
     latency_s: float = 0,
     total_tokens: int = 0,
+    baseline: BudgetBaseline | None = None,
 ) -> EvalScore:
     """Score a single eval task.
 
@@ -147,8 +150,8 @@ def score_task(
       - Keyword match: 20 points (proportional to matched keywords)
       - Factual assertions: 20 points (proportional to passed checks)
       - Tool usage: 30 points (correct tool used)
-      - Latency: 15 points (faster = better, <5s = full, >30s = 0)
-      - Token cost: 15 points (fewer tokens = better, <500 = full, >5000 = 0)
+      - Latency: 15 points（相对基线：≤1.2× 满分，≤2× 半分，≤3× 20%，超出 0）
+      - Token cost: 15 points（同口径，基线来源见 eval/budget.resolve_baseline）
 
     Pass threshold: >= 60 points
     """
@@ -169,28 +172,24 @@ def score_task(
     # ─── Tool score (30 points) ───
     tool_score = (30 if expected_tool in tool_calls else 0) if expected_tool else 30
 
-    # ─── Latency score (15 points) ───
-    if latency_s <= 5:
-        latency_score = 15
-    elif latency_s <= 15:
-        latency_score = 10
-    elif latency_s <= 30:
-        latency_score = 5
-    else:
-        latency_score = 0
-
-    # ─── Cost score (15 points) ───
-    if total_tokens <= 500:
-        cost_score = 15
-    elif total_tokens <= 1500:
-        cost_score = 10
-    elif total_tokens <= 5000:
-        cost_score = 5
-    else:
-        cost_score = 0
+    # ─── Latency / Cost：按相对基线分档（P1-11）───
+    # 绝对阈值会把「正常规模的多 Agent run」判成 0 分——惩罚任务规模而非质量。
+    # 基线优先级：task["budget"] → 传入 baselines → 多 Agent 默认值。
+    ref = baseline or resolve_baseline(task)
+    latency_score = ratio_score(latency_s, ref.latency_s, 15)
+    cost_score = ratio_score(total_tokens, ref.tokens, 15)
 
     total = keyword_score + factual_score + tool_score + latency_score + cost_score
     passed = total >= 60
+    # 单一总分掩盖单维崩塌；把「拿满分的维度」显式列出来，报告里能看出
+    # 60 分是靠内容还是靠省出来的
+    passed_dimensions = [
+        name for name, got, cap in (
+            ("keyword", keyword_score, 20), ("factual", factual_score, 20),
+            ("tool", tool_score, 30), ("latency", latency_score, 15),
+            ("cost", cost_score, 15),
+        ) if got >= cap
+    ]
 
     return EvalScore(
         task_id=task_id,
@@ -209,5 +208,7 @@ def score_task(
             "factual": factual_detail,
             "latency_s": round(latency_s, 1),
             "total_tokens": total_tokens,
+            "budget_baseline": ref.to_dict(),
+            "passed_dimensions": passed_dimensions,
         },
     )
