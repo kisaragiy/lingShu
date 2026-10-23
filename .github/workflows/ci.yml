@@ -15,6 +15,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 增量类型门禁需要基准提交，浅克隆会漏掉跨多提交的改动。
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -37,14 +40,32 @@ jobs:
         run: uv run ruff check src/ --select F,E9
 
       - name: "Ruff format check (informational) — 68/91 文件未格式化"
-        # ruff 从未在 CI 跑过（上面那个 group 错误），所以全仓从未按 ruff format 落过格式。
-        # 仓库级格式化会产生 68 文件的巨型 diff，必须独立提交，不要混进功能 PR。
+        # informational by design：历史格式债会产生大面积 diff，需独立整理，避免污染功能审查。
         run: uv run ruff format --check src/
         continue-on-error: true
 
-      - name: Mypy type check
-        run: uv run mypy src/ --strict --ignore-missing-imports --allow-untyped-decorators
-        continue-on-error: true
+      - name: Mypy changed files (blocking, strict)
+        # 保留 pyproject 的 strict 契约；历史未标注代码不阻塞无关文件，改动文件必须达标。
+        # skip 只隔离被导入的历史模块，不忽略本次选中文件的类型错误。
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          base="${PR_BASE_SHA:-$PUSH_BASE_SHA}"
+          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+            diff_base=$(git merge-base "$base" HEAD)
+            git diff --name-only -z --diff-filter=ACMR "$diff_base" HEAD -- 'src/**/*.py' > /tmp/mypy-files
+          else
+            # 首次推送或历史缺失时查全量，不能因无基准静默漏检。
+            git ls-files -z -- 'src/**/*.py' > /tmp/mypy-files
+          fi
+          mapfile -d '' -t files < /tmp/mypy-files
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "没有改动的 src Python 文件，无需类型检查"
+          else
+            uv run mypy --strict --follow-imports=skip --ignore-missing-imports --allow-untyped-decorators "${files[@]}"
+          fi
 
       - name: Bandit SAST
         run: uv run bandit -r src/ -c pyproject.toml -f json -o bandit_report.json 2>&1 || echo "⚠️ SAST scan completed"
@@ -57,19 +78,22 @@ jobs:
         run: uv run pytest tests/ -q --cov=src/agent_harness --cov-report=term --cov-fail-under=35
 
       - name: Mutation testing (core modules)
+        # informational by design：变异存活率尚无稳定基线，先观察再制定可执行阈值。
         run: |
           uv run mutmut run --paths src/agent_harness/core/tools/web.py src/agent_harness/core/safety/ --runner "python -m pytest -x -q" 2>&1 | tail -20 || echo "⚠️ Mutation test completed, review results"
         continue-on-error: true
 
-      - name: Security audit (pip-audit)
-        run: |
-          uv run pip-audit --strict --progress-spinner=off 2>&1 || echo "⚠️ 有已知漏洞依赖，建议修复"
+      - name: Security audit (pip-audit, blocking)
+        # 白名单：在下方命令追加 --ignore-vuln 和真实漏洞 ID；每个 ID 必须注释理由、跟踪 issue 与到期日。
+        # 不配置默认豁免，扫描失败或任何未豁免漏洞均阻塞合并。
+        run: uv run pip-audit --strict --progress-spinner=off
 
       - name: Version consistency check
         run: |
           PKG_VER=$(grep -m1 '__version__' src/agent_harness/__init__.py 2>/dev/null | sed 's/.*"//;s/".*//')
           echo "Version: $PKG_VER"
 
+      # informational by design：扫描远端标签而非本提交镜像，无法可靠归因本次改动。
       - name: Docker security scan (Trivy)
         if: github.event_name == 'push'
         uses: aquasecurity/trivy-action@master
@@ -83,6 +107,52 @@ jobs:
       - name: Secret leak scan (truffleHog)
         run: |
           uv run trufflehog filesystem --no-verification . 2>&1 || echo "⚠️ 发现潜在密钥泄漏，请手动检查"
+
+  integration:
+    name: "Integration (live server)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # 无密钥 CI 验证真实 HTTP/SSE 和模板降级，不依赖付费或本机 LLM。
+      HARNESS_DISABLE_AUTH: "1"
+      HARNESS_DISABLE_RATE_LIMIT: "1"
+      HARNESS_API_HOST: "127.0.0.1"
+      HARNESS_API_PORT: "8788"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+      - name: Start server and run integration tests
+        shell: bash
+        run: |
+          uv run python -m agent_harness.main > server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for i in $(seq 1 30); do
+            if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
+            if curl --fail --silent --max-time 3 http://127.0.0.1:8788/health; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then
+            cat server.log
+            exit 1
+          fi
+          # 覆盖默认 not integration，防止目标用例再次被排除。
+          uv run pytest -m integration -o addopts="-q --tb=short"
+      - name: Upload server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-server-log
+          path: server.log
 
   onboarding:
     name: "Fresh-clone onboarding (test the docs)"
