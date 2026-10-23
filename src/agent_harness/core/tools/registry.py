@@ -402,7 +402,11 @@ def _call_tool_impl(name: str, **kwargs) -> dict:
     try:
         from .timeout import call_with_timeout, get_timeout
         timeout = get_timeout(name)
-        if timeout and timeout > 0:
+        # P0-7：有副作用的工具（reversible 写类 / irreversible）不套「假超时」。
+        # daemon 线程超时只让调用方放弃等待，底层仍在写盘/发消息 → 调用方重试
+        # 就变成重复副作用。这类工具同步执行到结束，超时保护交给外部（子进程/审计）。
+        side_effect = TOOL_REGISTRY[name].get("privilege", "reversible") != "read-only"
+        if timeout and timeout > 0 and not side_effect:
             result = call_with_timeout(TOOL_REGISTRY[name]["func"], kwargs, timeout)
         else:
             result = TOOL_REGISTRY[name]["func"](**kwargs)

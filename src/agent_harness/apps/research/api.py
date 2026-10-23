@@ -1,6 +1,7 @@
 """Research API (灵枢) — routes for the AI research assistant."""
 import asyncio
 import json
+import logging
 import os
 import queue
 import re
@@ -58,6 +59,7 @@ PORT = int(os.environ.get("HARNESS_API_PORT", "8788"))
 
 # ─── API Key (CLI / Open WebUI fallback) ───
 _API_TOKEN: str = load_or_generate_token()
+logger = logging.getLogger(__name__)
 
 # ─── Rate limiter ───
 _RATE_LIMIT_WINDOW = 60
@@ -248,8 +250,8 @@ def _sse_done(result_text: str) -> str:
 
 def _execute_multi(prompt: str, history_context: str, session_id: str = "", kb_scope: str = "") -> dict:
     from agent_harness.core.graph.graph_multi import (
-        _progress_queue,
         default_checkpointer,
+        get_progress_queue,
         run_multi_agent,
     )
     enhanced = prompt
@@ -264,12 +266,22 @@ def _execute_multi(prompt: str, history_context: str, session_id: str = "", kb_s
         kb_cols = [c for c in list_collections() if not kb_scope or c.startswith(kb_scope)]
         if kb_cols:
             kb_results = []
+            kb_failures: list[str] = []
             for col in kb_cols:
                 try:
                     results = rag_query(prompt, collection=col, top_k=3)
                     kb_results.extend(results)
-                except Exception:
-                    pass
+                except Exception as exc:  # noqa: BLE001 — P1-10：失败必须可见，不能吞
+                    kb_failures.append(f"{col}: {exc}")
+                    logger.warning("知识库检索失败（collection=%s）：%s", col, exc)
+            if kb_failures and not kb_results:
+                # 嵌入服务不可用 / 全部 collection 失败：告诉用户，而不是装作没知识库
+                _pq_fail = get_progress_queue(session_id)
+                if _pq_fail:
+                    _pq_fail.put({
+                        "type": "status",
+                        "content": f"⚠️ 知识库不可用（原因：{kb_failures[0]}），本次回答未使用知识库\n",
+                    })
             if kb_results:
                 kb_context = "\n\n".join(
                     "[知识库 - {}] {}".format(r.get("source", "unknown"), r["text"])
@@ -279,13 +291,14 @@ def _execute_multi(prompt: str, history_context: str, session_id: str = "", kb_s
                     f"以下是从知识库中检索到的相关信息（请优先使用这些信息回答）:\n{kb_context}\n\n"
                     f"用户问题: {enhanced}"
                 )
-                if _progress_queue:
-                    _progress_queue.put({
+                _pq = get_progress_queue(session_id)
+                if _pq:
+                    _pq.put({
                         "type": "progress",
                         "content": f"📚 从知识库中找到 {len(kb_results)} 条相关信息\\n"
                     })
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — 知识库初始化失败也要留痕（P1-10）
+        logger.warning("知识库初始化失败：%s", exc)
     # session_id 作为 task_id 透传到 supervisor/worker，取消信号才按会话生效（ENG-21）
     # SEC-2：把可见作用域交给数据层兜底 —— worker 线程经 copy_context 继承，
     # 因此 agent 工具（rag_query/rag_index）即使被诱导传别人的 collection 名也会被拒。
@@ -314,19 +327,27 @@ def _execute_single(prompt: str, history_context: str, kb_scope: str = "") -> st
         kb_cols = [c for c in list_collections() if not kb_scope or c.startswith(kb_scope)]
         if kb_cols:
             kb_results = []
+            kb_failures: list[str] = []
             for col in kb_cols:
                 try:
                     results = rag_query(prompt, collection=col, top_k=2)
                     kb_results.extend(results)
-                except Exception:
-                    pass
+                except Exception as exc:  # noqa: BLE001 — P1-10：失败必须可见，不能吞
+                    kb_failures.append(f"{col}: {exc}")
+                    logger.warning("知识库检索失败（collection=%s）：%s", col, exc)
+            if kb_failures and not kb_results:
+                # 单 Agent 路径没有进度队列 → 把失败写进上下文，防止模型声称「查过知识库」
+                enhanced = (
+                    f"（系统提示：知识库检索失败，原因：{kb_failures[0]}。"
+                    f"本次回答未使用任何知识库内容，不要声称已查阅知识库。）\n\n{enhanced}"
+                )
             if kb_results:
                 kb_context = "\n".join(
                     "[知识库] {}".format(r["text"]) for r in kb_results[:2]
                 )
                 enhanced = f"知识库信息:\n{kb_context}\n\n{enhanced}"
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — 知识库初始化失败也要留痕（P1-10）
+        logger.warning("知识库初始化失败：%s", exc)
     from agent_harness.core.tools import rag_store as _rag_scope_store
     _scope_tok = _rag_scope_store.set_scope(kb_scope)
     try:
@@ -344,9 +365,12 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
     `_MAX_CONCURRENT_AGENTS` 形同失效。
     """
     acquired_here = False
+    # P0-2：进度队列按 session_id 作用域登记 —— 并发请求各用各的队列，
+    # 一个请求结束只清自己的（原实现是无条件 clear 全局，会掐断别人的 SSE）。
+    _pq_key = session_id or ""
     try:
-        from agent_harness.core.graph.graph_multi import clear_progress_queue, set_progress_queue
-        set_progress_queue(q)
+        from agent_harness.core.graph.graph_multi import set_progress_queue
+        set_progress_queue(q, key=_pq_key)
         if not pre_acquired and _agent_semaphore is not None:
             # 必须检查返回值：acquire 超时返回 False，此时既没拿到名额，
             # 也绝不能在 finally 里 release —— 否则每超时一次就把并发上限放大 1，
@@ -396,7 +420,7 @@ def _run_with_queue(prompt: str, history: str, model: str, q: queue.Queue, sessi
             if acquired_here and _agent_semaphore is not None:
                 _agent_semaphore.release()
             from agent_harness.core.graph.graph_multi import clear_progress_queue
-            clear_progress_queue()
+            clear_progress_queue(_pq_key)
             if session_id:
                 _unregister_running_task(session_id)
         except Exception:
