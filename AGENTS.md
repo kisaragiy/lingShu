@@ -1,260 +1,115 @@
-# 灵枢 (LingShu) — AI 应用开发实战项目
+# 灵枢 (LingShu) — 开发者约定
 
 > **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
-> 一个完整的 AI 应用落地实践——从多 Agent 编排到产品化交付。
+> 本文件面向开发者与贡献者：说明项目结构、本地开发、测试与架构约束。产品介绍见 [README](README.md)。
 
 ---
 
-## 一、项目定位
-
-**一句话：灵枢是一个独立的多 Agent AI 应用工程实践——以「防复现知识管道」为真实落点，以「Agent 可靠性工程」为核心深度。**
-
-> ⚠️ **本文件是内部工作准则（AGENTS），不是对外 README。** README 只展示最好面（真实数据/无主观词/不写缺陷踩坑）；本文件可写红线、对账、工作法则。
-
-**【真实落点 = 防复现知识管道】**（主叙事，面试讲透，有真据）
-- 解决的真实问题：`~/knowledge/daily/` 高产出零索引、教训全在事后记录无事前拦截、项目自己不被使用=样板房。
-- 真实产出：规则库 **35 条**（实测：v1 10 + v2 13 + v4 6 + 求职 11）· 中文 2-gram 检索层（零外部依赖）· 沉淀机制扫 daily 抽候选 · **38 测试通过**。
-- 真实拦截验证：`guardian.py --search "显存不够"` 命中 R-11/12；`guard "给简历写平台"` 拦截 R-22/23 共 4 条。
-
-**【核心深度 = Agent 可靠性工程】**（辅证，相对应届稀缺）
-- 熔断（circuit_breaker）· 预算控制（budget）· 重试退避（retry）· 降级链（degradation）· 安全三层（safety: risk/mode/backup）· 审计（audit）。
-- Supervisor-Worker 编排 + LangGraph 图，39 个工具。
-
-**【红线（内部对账，不写进对外）】**
-- 对外只展示最好面；**踩坑/教训/重构/缺陷 → 口头讲**（面试是真实证据），不写 README。
-- 数字必须对上仓库：README 历史"63 测试"与实测（知识管道 38 + 项目自身 325）不符，**已修正**；"39 个工具"需核对实际注册数。
-- 实测（2026-10-10 `pytest tests/ -q`）：**368 passed / 0 failed / 2 skipped**（370 tests，+8 集成用例默认 deselect）。
-- 别让技术广度稀释"用 AI 解决真实问题"的浓度——主打是"这个 Agent 怎么设计、怎么保证最坏不发生"，不是"造了框架"或"写了多少行前端"。
-- **AIGC 集成** — ComfyUI API 对接、LoRA 训练、批量生图管线
-
----
-
-### 已实现（v0.53+）
-
-| 能力 | 说明 |
-|------|------|
-| **Supervisor-Worker 编排** | LangGraph 多 Agent 图：分析→分配并行 Worker→验收→汇总 |
-| **多引擎搜索** | SearXNG → DuckDuckGo(5层解析去重+UA轮换) → skill 三级降级 |
-| **网页抓取** | fetch/web_scrape/agent_browser 三级抓取，Playwright 兜底 |
-| **RAG 知识库** | PDF/DOCX/TXT → 向量搜索 / BM25 关键词降级 + 嵌入状态提示 |
-| **JWT 认证 + RBAC** | HMAC-SHA256 双 token + admin/user 两角色 + CSP + 审计日志 |
-| **37 个工具** | 搜索/代码/桌面/浏览器/绘画/RAG/股票 6 大类 |
-| **核心+场景分层** | `core/` 共享基础设施 + `apps/research` 调研 + `apps/cs_demo` 客服 |
-| **测试体系** | 769 单元测试 + CI 集成 |
-| **exe 打包** | PyInstaller 单文件夹 exe，开箱即用 |
-| **Docker 部署** | 多阶段构建 + docker-compose（LingShu + SearXNG） |
-| 微信小程序 | 7 页面移动端（对话/报告/客服/个人中心），4 tab，对接灵枢 API | v0.63 |
-| 自动 LLM 配置 | 启动时自动检测 Ollama，pull qwen3:1.7b，无需手动配置 | v0.63 |
-
----
-
-## ADR（架构决策记录）
-
-### ADR-001 不为外部用户引入服务端 / 多租户 / 配额组件（2026-09-10）
-**背景**：为「找真实用户」做的产品化补丁出现两次边界漂移迹象 —— ① 计划「内置体验 key + 限额」（等于在单机桌面应用里新建多租户配额子系统）；② `apps/research/api.py:1203` 的 skill 目录指向 Hermes 数据目录（把灵枢当 Hermes 下游）。
-**决策**：用户获取活动的产出**不进 `core/`**；允许的补丁类型仅限三类 —— **配置外置、错误恢复与诊断、文档**。
-**备选**：内置体验 key（**否决**：`budget` 在代码里没有执行原语，且打包后 key 必然明文可提取，限额放客户端等于没有限额）。
-**后果**：发 key / 限额 / 埋点 / DAU 这类动作留在运营层，不进代码库。
-
-### ADR-002 禁止硬编码私网地址与个人绝对路径（2026-09-10）
-**背景**：`rag_store.py` 默认把用户上传的文档原文 POST 到 `172.18.9.126:11434`（172.16/12 是私网段 —— 分发到别人机器后，该地址可能是路由器 DHCP 池里的陌生设备）；`config_manager.py` 硬编码 `C:\Users\zwq\Downloads\llama.cpp`。
-**决策**：环境相关地址一律走配置项 / 环境变量，默认值只能是 `127.0.0.1`；由 `tests/test_no_private_hosts.py` 作为发版门禁守着。
-**后果**：WSL 等特殊场景需显式设置 `HARNESS_OLLAMA_API`。
-
-### ADR-003 打包形态与配置读取的两条硬约束（2026-09-10）
-**背景**：三条「只在打包后才暴露」的缺陷 —— `console=True` 让用户第一眼是 cmd 黑框；`auto_setup` 只挂 CLI 入口（打包版入口是 launcher）导致「无 key 用本地模型」在实现上不存在；`llm.py` 用 import 快照常量导致设置页填的 api_url 永不生效。
-**决策**：① 打包一律 `console=False`，失败路径走 `tkinter` 弹窗（`_fail`），等待函数需容忍无控制台（`_pause`）；② **运行时配置必须走 `get_llm_config()`**，环境变量/import 常量只能作回退；③ 自动配置必须**落 `config.json`**，不能只设环境变量（对已 import 的模块是快照）。
-**后果**：由 `tests/test_packaging_and_config_gates.py` 守门。
-
----
-
-## 三、项目边界
-
-| 不做 | 原因 |
-|------|------|
-| **不做云服务** | 本地优先——证明的是你懂架构，不是你会运维 |
-| **不做通用聊天机器人** | @ChatGPT 做得更好，灵枢展示的是 Agent 编排能力 |
-| **不做全栈 IDE** | 灵枢展示的是 AI 应用集成，不是代码编辑器 |
-
----
-
-## 四、架构总览（v0.75.0）
+## 一、项目结构
 
 ```
-┌── 用户交互层 ──────────────────────────────────────┐
-│                                                      │
-│  原生窗口 (pywebview)                                │
-│    ├── 💬 对话      ← 主要使用入口                  │
-│    ├── 📊 服务状态   ← 骨架屏+错误卡片+重试按钮     │
-│    ├── 📚 知识库     ← 上传管理+嵌入状态指示        │
-│    ├── 🧠 技能       ← 已安装列表+技能市场           │
-│    └── ⚙️ 菜单       ← 设置/报告/MCP/会话/用户      │
-│                                                      │
-│  侧边栏                                             │
-│    ├── 会话列表     ← 搜索过滤+owner_id 隔离        │
-│    └── 状态栏       ← 🟢 运行中 / 🔴 API 离线       │
-│                                                      │
-│  认证层                                             │
-│    ├── 首次启动 → 创建管理员                         │
-│    ├── 登录页   → JWT Bearer                         │
-│    └── API Key  → CLI/Open WebUI 管理级 fallback    │
-│                                                      │
-└──────────────────────────┬──────────────────────────┘
-                           │ HTTP/SSE + JWT/X-API-Key
-┌── 服务层 ───────────────▼─────────────────────────┐
-│                                                      │
-│  FastAPI Server (:8788)  · 双模 Auth Middleware       │
-│    ├── /v1/chat/completions  (OpenAI API)              │
-│    ├── /v1/auth/*            (Login/Logout/Me)        │
-│    ├── /v1/admin/*           (用户 CRUD)              │
-│    ├── /v1/skills/*          (管理+市场)              │
-│    ├── /v1/tools/*           (列表+开关)              │
-│    ├── /v1/knowledge/*       (RAG 索引+查询)          │
-│    ├── /v1/setup/*           (配置/诊断/修复)         │
-│    ├── /v1/sessions/*        (owner_id 隔离)          │
-│    ├── /v1/tasks/*           (可中断+并发限流)        │
-│    ├── /v1/reports/*         (生成+列表+下载)         │
-│    └── /v1/health            (状态栏轮询)             │
-│                                                      │
-│  40+ 工具 · 三级权限 · 路径遍历防护 · CSP 头         │
-│  Agent Semaphore(5) · SQLite 每线程连接              │
-│                                                      │
-└──────────────────────────┬──────────────────────────┘
-                           │
-┌── 编排层 ───────────────▼─────────────────────────┐
-│                                                      │
-│  LangGraph 多 Agent 图                                │
-│    Supervisor (分析→分配→验收→汇总)                   │
-│      ├── Search Worker   (搜索/抓取/缓存)            │
-│      ├── Analyze Worker  (代码/分析/总结)            │
-│      └── Execute Worker  (桌面/浏览器/绘画)          │
-│                                                      │
-│  三重熔断器 · 指数退避重试 · Worker 输出 2000 字     │
-│  Finalizer 结构化报告 (800-1500 字 + 来源标注)       │
-│                                                      │
-└──────────────────────────┬──────────────────────────┘
-                           │
-┌── 基础设施 ─────────────▼─────────────────────────┐
-│                                                      │
-│  推理后端 (任选其一):                                │
-│    model_proxy (:8081) → DeepSeek Flash (云端)       │
-│    llama.cpp (:8080)     → Qwen3.6-35B (本地)        │
-│    Ollama (:11434)       → 多模型群 (WSL)            │
-│                                                      │
-│  辅助服务:                                           │
-│    SearXNG (:4000)   · ComfyUI (:8188)               │
-│    SkillHub          · Open WebUI (:3000)             │
-│                                                      │
-│  存储:                                               │
-│    SQLite auth.db    · 会话 JSON (RLock+原子写入)    │
-│    RAG NPY+JSON      · 报告 MD+HTML+JSON 索引        │
-│    tool_config.json  · api_token.txt / jwt_secret.txt│
-│                                                      │
-└──────────────────────────────────────────────────────┘
+src/agent_harness/
+├── core/                 # 与场景无关的基础设施
+│   ├── agents/           # Supervisor 与 Worker 实现
+│   ├── graph/            # LangGraph 编排：单 Agent 图 + 多 Agent 图
+│   ├── pipeline/         # LLM 调用、重试、熔断、预算、配置、取消
+│   ├── tools/            # 工具注册表（搜索/抓取/代码/RAG/桌面/MCP…）
+│   ├── safety/           # 风险判定、写入准入、备份、claim 校验
+│   ├── skills/           # 技能加载与注入
+│   └── auth/             # JWT + RBAC + SQLite 会话
+├── apps/                 # 应用层，每个子目录是独立可裁的应用
+│   ├── research/         # 调研助手：API + 前端 + 报告管线 + eval
+│   ├── knowledge_qa/     # 知识库问答
+│   ├── cs_demo/          # 客服演示
+│   └── template/         # 新应用脚手架
+├── static/admin/         # 管理后台静态资源
+├── main.py               # FastAPI 入口（默认 :8788）
+├── api_fastapi.py        # OpenAI 兼容 API 入口
+├── auto_setup.py         # 首次运行自检与配置生成
+└── plugin_loader.py      # 插件动态加载
+tests/                    # pytest（单元 + 集成 + 发版门禁）
+docs/                     # 架构、配置、API、快速上手
+tools/                    # 打包、构建、运维脚本（仓库根）
 ```
 
----
+## 二、本地开发
 
-## 五、技术栈
+```bash
+python -m venv .venv && .venv/Scripts/activate   # Windows
+pip install -e ".[dev]"
+agent-harness serve            # 启动服务，浏览器打开 http://127.0.0.1:8788
+```
+
+常用环境变量（完整列表见 `docs/configuration.md`）：
+
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `HARNESS_API_PORT` | 服务端口 | 8788 |
+| `HARNESS_API_HOST` | 绑定地址 | 127.0.0.1 |
+| `HARNESS_WORKERS` | uvicorn worker 数 | 1（**必须保持 1**，见下） |
+| `HARNESS_CLOUD_KEY` / `HARNESS_CLOUD_URL` | 云端推理后端 | 未设置 |
+| `HARNESS_OLLAMA_API` | 本地嵌入/推理地址 | 127.0.0.1:11434 |
+
+## 三、测试
+
+```bash
+pytest -q                      # 全量
+pytest tests/ -q -k "not integration"
+```
+
+基线（2026-10-23 实测）：`1083 collected, 1080 passed, 3 skipped`（8 个 integration 默认 deselect）。改动后跑全量，数字下降即视为回归。
+
+发版门禁测试（不要绕过）：
+
+- `tests/test_no_private_hosts.py` — 禁止硬编码私网地址与个人绝对路径
+- `tests/test_packaging_and_config_gates.py` — 打包形态与运行时配置读取
+
+## 四、架构约束（ADR）
+
+### ADR-001 不在 `core/` 里引入服务端 / 多租户 / 配额组件
+**决策**：`core/` 只承载单机可复用的基础设施；配额、计费、埋点这类运营能力不进代码库。允许的补丁类型仅限配置外置、错误恢复与诊断、文档。
+**理由**：打包为桌面应用后额度必然可被提取，客户端限额等于没有限额；服务端形态另有分支。
+**后果**：需要多租户隔离的场景不在当前支持范围。
+
+### ADR-002 环境相关地址一律走配置
+**决策**：私网地址、绝对路径不得硬编码，默认值只能是 `127.0.0.1`；由测试守门。
+**后果**：非默认环境（如 WSL 内 Ollama）需显式设置 `HARNESS_OLLAMA_API`。
+
+### ADR-003 运行时配置必须经 `get_llm_config()`
+**决策**：① 打包一律 `console=False`，失败路径走 `tkinter` 弹窗；② 配置读取走运行时函数，import 常量只作回退；③ 自动配置必须落 `config.json`（环境变量对已 import 的模块是快照）。
+**理由**：设置页填入的地址必须立即生效，且在打包形态下可见。
+
+## 五、已知设计边界
+
+- **单 worker**：`session_store` / `metrics` / `cancel` / LLM 缓存均为进程内状态，`HARNESS_WORKERS>1` 会导致状态分裂与指标断裂。多进程支持需要共享存储，当前未实现。
+- **认证模式**：默认开启 JWT；`HARNESS_DISABLE_AUTH=1` 仅用于本地单人演示，**不得暴露到公网**。API Key 持有的角色由 `HARNESS_API_KEY_ROLE`（`admin` / `user`）决定，默认 `admin`；**非法值 fail-closed 降级为 `user`** —— 配置失误不该变成提权。
+- **知识库隔离（RAG scope）**：collection 可见性在 `rag_store` **数据层**用 `contextvars` 兜底（`set_scope` / `reset_scope` / `current_scope`），全部读写只经 `_coll_dir()` 一处校验，`list_collections()` 同处过滤。越权抛 `PermissionError`（不返回空结果 —— 空结果会被误读成「库是空的」）。空 scope = 全见（admin / CLI / demo）。**新增调用方若处在需要隔离的路径上，必须在入口 `set_scope` 并 `finally reset`**；跨线程需 `contextvars.copy_context()`（`ThreadPoolExecutor` 不传播）。
+- **demo / 共享实例的写类工具**：`HARNESS_DISABLE_AUTH=1` 时 reversible / irreversible 工具**一律拒绝**，只有 `HARNESS_DEMO_ALLOW_WRITE_TOOLS`（逗号分隔工具名）点名的才放开。不依赖 `auto_confirm` —— 它默认 `True`，靠它兜底等于默认全开，而 reversible 里是写盘工具（`file_write` / `rag_index` / `skill_generate`）、irreversible 里是 `code_execute`。
+- **数据落盘**：会话为 append-only JSONL 事件源，报告为磁盘 HTML + JSON 索引；未内置备份策略，重要数据请自行备份 `~/.agent-harness/`。
+
+### 已知未修（边界清单，非缺陷）
+
+| 项 | 现状 | 取舍理由 |
+|---|---|---|
+| CSP 含 `unsafe-inline` | `main.py` 的安全头允许内联 script/style | 前端大量内联样式与事件，改 nonce/hash 需全量前端改造，收益与改动量不成比例；已用 CORS 白名单与 CSP 其余指令收敛 |
+| `static/js/tabs.js` 单文件 ~1300 行 | 所有 tab 渲染集中一处 | 纯可维护性问题、无行为影响；拆分需回归全部交互，优先级低于功能正确性 |
+| 无自动备份/恢复流程 | 报告与会话依赖人工备份 `~/.agent-harness/` | 桌面单机形态下数据在用户本机且路径可见；服务端形态需另设计（与 ADR-001 一致） |
+| metrics 不跨进程聚合 | `HARNESS_WORKERS>1` 时指标断裂 | 与「必须单 worker」同源，属已知边界而非缺陷；多进程需 Prometheus 多进程模式 + 共享目录 |
+| `agents/` `pipeline/` `tools/` 三个空壳目录 | `src/agent_harness/` 下这三个目录只剩 `__pycache__`，代码已迁入 `core/` 同名模块 | 历史遗留，属清洁问题、无行为影响；删除前需确认无延迟 import 引用 |
+
+## 六、技术栈
 
 | 层 | 技术 |
 |------|------|
 | 窗口 | pywebview (WebView2) |
 | 后端 | Python 3.11+ / FastAPI / Uvicorn |
-| 编排 | LangGraph (Supervisor-Worker) |
-| 认证 | HMAC-SHA256 JWT + pbkdf2_hmac 密码哈希 + SQLite |
-| 向量 | Ollama nomic-embed-text → NPY 文件 → BM25 降级 |
+| 编排 | LangGraph（Supervisor-Worker） |
+| 认证 | HMAC-SHA256 JWT + pbkdf2_hmac + SQLite |
+| 向量 | Ollama nomic-embed-text → NPY；BM25 降级 |
 | 搜索 | SearXNG → DuckDuckGo HTML → skill 三级降级 |
-| 存储 | SQLite / JSON 文件 / NPY |
-| 技能 | SkillHub CLI (+ 目录 moveto _disabled/) |
-| 打包 | PyInstaller (单文件夹 exe, ~130MB) |
-| 推理 | llama.cpp / Ollama / DeepSeek Flash API |
+| 存储 | SQLite / JSON / NPY |
+| 打包 | PyInstaller（单文件夹） |
 
----
+## 七、版本与变更
 
-## 六、版本规划
-
-```
-v0.4   多 Agent 编排框架
-v0.5   产品化（会话/流式/品牌）
-v0.6   质量提升（路由/Worker/进度）
-v0.7   知识库 RAG
-v0.8   会话持久化
-v0.9   前端（Setup Wizard + Dashboard）
-v0.10  exe 打包（git tag 缺失，历史遗留）
-v0.11  独立窗口（pywebview）
-v0.12  一键配置 + 容错
-v0.13  搜索链路稳定性
-v0.14  安全加固（API认证+CORS+沙箱+权限+CSP+审计）
-v0.15  用户登录与权限（JWT+RBAC+用户管理）
-v0.16  高并发+数据隔离（SQLite线程池+Agent限流+owner_id）
-v0.17  报告质量+搜索质量（专业模板+下载+Worker输出完整+中文错误）
-v0.18  RAG 稳定性（批量嵌入+BM25降级+线程安全+原子写入）
-v0.19  前端体验打磨 / 技能市场+MCP开关
-v0.20  AGENTS.md重写 / 搜索多策略解析
-v0.21  定时任务系统 / 插件加载器
-v0.22  CHANGELOG / 版本信息 / 设置页关于
-v0.23  报告体验闭环（自动保存草稿+生成即打开）
-v0.24  报告PDF打印 / 报告搜索
-v0.25  报告规范度（结构化输出+置信度+来源元数据）
-v0.26  新手上路（欢迎页+状态增强）
-v0.27  数据导出（会话+报告+完整备份ZIP）
-v0.28  **安全护栏（WorkBuddy P0 移植）**:
-         ├── 会话安全模式 default(沙箱优先)/full(全权全审计)
-         ├── 危险操作确认矩阵(按参数分类:敏感路径/批量删/脚本/外部发送/网络)
-         ├── 写前自动备份(覆盖写存.bak副本)
-         ├── 删除保护(文件走回收站 ~/.agent-harness/trash/)
-         └── API: GET/POST /v1/safety/mode, POST /v1/safety/confirm
-v0.75.1 三重熔断接线硬化 — LLM token 总账(三调用点)喂熔断器 + route 熔断短路 finalize(运行中能拦住) + retry 从孤儿变实装 + graph.py 补熔断器初始化 + 9 测试证明真触发
-v0.75.2 安全护栏 fail-closed — registry 两处 ImportError 不再静默裸奔：权限模块坏→抛错拒绝；safety 坏→不可逆拒+CRITICAL 日志；+3 测试(共30)
---- 以上为当前已发布 (v0.75.3) ---
-
-版本节奏（慢，参考群星 DLC 式）:
-  v0.19.1  → 小修补
-  v0.20.0  → 下一个功能版本
-  v0.21.0  → ...
-  V1.0     → 不设预期日期，功能够了再谈
-
-短期方向（不设具体版本号）:
-  - 搜索全链路可靠性（多 selector 解析+结果去重+预热缓存）
-  - 定时任务（已实现的 agent_cron 代码，需重新接入）
-  - 第三方插件系统（已实现的 plugin_loader 代码，需重新接入）
-  - 前端拆模块（1500 行 index.html 逐步分离）
-  - 知识管道（docs/knowledge-pipeline/：21 条防复现规则 v1+v2 + 检索层 search_rules + 沉淀机制 extract_candidates，A 路线真实场景，独立资产，22 测试）
-```
-
----
-
-## 七、面试核心叙事
-
-> **灵枢是一个完整的 AI 应用开发实践，不是一个 ChatGPT wrapper。**
-
-和面试官讲这三层：
-
-```
-第一层（15 秒）：
-  "我搭了一个多 Agent 系统——Supervisor 分配任务，Worker 并行执行，
-   做完出报告。不是调 API 的 demo，是自己写架构、写前端、打包 exe 的产品。"
-
-第二层（60 秒）：
-  "核心架构是 Supervisor-Worker 模式，用 LangGraph 定义工作流图。
-   Worker 并行跑搜索/分析/执行，Supervisor 验收结果。做了三重熔断防失控。
-   前端 pywebview，后端 FastAPI，JWT 认证，RAG 知识库，769 个测试。"  
-
-第三层（3 分钟）：
-  "迭代了 50+ 版本，重构过一次架构（从单体到 core+apps 分层）。
-   踩过的坑包括：Worker import 路径问题、API Key 泄露修复、方向漂移回到聚焦。
-   现在正在做质量闭环——出图自动质检、不合格重试。"
-```
-
-## 八、和市场岗位的对应关系
-
-| 市场要求 | 灵枢对应的能力 |
-|---------|--------------|
-| **Python + FastAPI** | 整个后端是 FastAPI |
-| **LLM/大模型应用** | 多模型路由、RAG、提示词工程 |
-| **Agent 开发** | Supervisor-Worker 编排、39 个工具 |
-| **AIGC** | ComfyUI 对接、LoRA 训练管线 |
-| **全栈能力** | pywebview 前端 + 后端 + 部署 |
-| **安全意识** | JWT + RBAC + CSP + 审计日志 |
-| **工程规范** | 361 测试 + CI + 版本管理 + AGENTS.md |
+当前版本 **v0.75.3**。版本记录见 [CHANGELOG.md](CHANGELOG.md)。版本节奏偏慢（v0.X.Y 小步），每次改动同步更新本文件与 CHANGELOG。
