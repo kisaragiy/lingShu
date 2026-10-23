@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,12 +26,20 @@ MODE_FULL = "full"        # 全权访问（需显式切换）
 
 _VALID_MODES = (MODE_DEFAULT, MODE_FULL)
 
+# Full Access 自动回落（秒）：全权模式是高风险状态，不该无限期停留。
+# 0 = 不自动回落（显式关闭）。可用 HARNESS_FULL_ACCESS_TTL 覆盖。
+try:
+    FULL_ACCESS_TTL_SECONDS = max(0, int(os.environ.get("HARNESS_FULL_ACCESS_TTL", "1800")))
+except ValueError:
+    FULL_ACCESS_TTL_SECONDS = 1800
+
 # ─── 状态存储 ───
 STATE_DIR = Path(os.environ.get("HARNESS_DATA_DIR", Path.home() / ".agent-harness"))
 STATE_FILE = STATE_DIR / "safety_mode.json"
 
 _lock = threading.RLock()
 _current_mode: str = MODE_DEFAULT
+_expires_at: float = 0.0   # full 模式到期时间戳（epoch 秒）；0 = 无期限 / 非 full
 
 # 审计目录复用 permission.py 约定
 AUDIT_DIR = STATE_DIR / "audit"
@@ -42,25 +51,43 @@ def _ensure_dirs() -> None:
 
 
 def _load_persisted() -> str:
-    """启动时读取持久化模式（默认 default，绝不默认 full）。"""
-    global _current_mode
+    """启动时读取持久化模式（默认 default，绝不默认 full）。
+
+    full 带过期时间：启动时若已过期则退回 default —— 进程重启不该给全权模式续命。
+    """
+    global _current_mode, _expires_at
     try:
         if STATE_FILE.exists():
             data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
             mode = data.get("mode", MODE_DEFAULT)
-            if mode in _VALID_MODES:
-                _current_mode = mode
+            if mode not in _VALID_MODES:
+                return _current_mode
+            if mode == MODE_FULL:
+                exp = float(data.get("expires_at") or 0)
+                if exp and time.time() >= exp:
+                    # 已过期：强制写回 default。不能只 return 当前值 —— 重启场景下
+                    # 进程内 _current_mode 可能是脏的（上次进程留下的 full）
+                    _current_mode = MODE_DEFAULT
+                    _expires_at = 0.0
+                    return _current_mode
+                _current_mode = MODE_FULL
+                _expires_at = exp
+            else:
+                _current_mode = MODE_DEFAULT
+                _expires_at = 0.0
     except Exception:
         pass  # 读取失败保持默认，安全侧保守
     return _current_mode
 
 
 def _persist(mode: str) -> None:
+    payload = {"mode": mode, "updated_at": datetime.now(UTC).isoformat()}
+    if mode == MODE_FULL and _expires_at:
+        payload["expires_at"] = _expires_at
     try:
         _ensure_dirs()
         STATE_FILE.write_text(
-            json.dumps({"mode": mode, "updated_at": datetime.now(UTC).isoformat()},
-                       ensure_ascii=False, indent=2),
+            json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
     except OSError:
@@ -84,8 +111,15 @@ def _audit(action: str, **kwargs) -> None:
 
 
 def get_mode() -> str:
-    """当前安全模式。"""
+    """当前安全模式；full 到期自动回落 default 并留审计。"""
+    global _current_mode, _expires_at
     with _lock:
+        if (_current_mode == MODE_FULL and _expires_at
+                and time.time() >= _expires_at):
+            _current_mode = MODE_DEFAULT
+            _expires_at = 0.0
+            _persist(MODE_DEFAULT)
+            _audit("mode_ttl_expired", from_mode=MODE_FULL, to_mode=MODE_DEFAULT)
         return _current_mode
 
 
@@ -105,7 +139,7 @@ def set_mode(mode: str, source: str = "api", operator: str = "unknown") -> dict:
     Returns:
         {"ok": True, "mode": <新模式>} 或 {"ok": False, "error": ...}
     """
-    global _current_mode
+    global _current_mode, _expires_at
     mode = (mode or "").strip().lower()
     if mode not in _VALID_MODES:
         return {"ok": False, "error": f"无效模式: {mode}，可选: {', '.join(_VALID_MODES)}"}
@@ -115,9 +149,13 @@ def set_mode(mode: str, source: str = "api", operator: str = "unknown") -> dict:
         if old == mode:
             return {"ok": True, "mode": mode, "changed": False}
         _current_mode = mode
+        _expires_at = (time.time() + FULL_ACCESS_TTL_SECONDS
+                       if mode == MODE_FULL and FULL_ACCESS_TTL_SECONDS > 0 else 0.0)
         _persist(mode)
-        _audit("mode_switch", from_mode=old, to_mode=mode, source=source, operator=operator)
-        return {"ok": True, "mode": mode, "changed": True, "from": old}
+        _audit("mode_switch", from_mode=old, to_mode=mode, source=source,
+               operator=operator, expires_at=_expires_at or None)
+        return {"ok": True, "mode": mode, "changed": True, "from": old,
+                "expires_at": _expires_at or None}
 
 
 # 启动时加载持久化模式
