@@ -72,13 +72,22 @@ def set_default_timeout(tool: str, seconds: float) -> None:
     DEFAULT_TIMEOUTS[tool] = float(seconds)
 
 
-def call_with_timeout(func, kwargs: dict, timeout: float):
+def call_with_timeout(func, kwargs: dict, timeout: float, side_effect: bool = False):
     """以超时执行 func(**kwargs)。
 
     - timeout<=0 → 直接同步执行（零线程开销）。
+    - side_effect=True → **也同步执行**：daemon 线程超时只放弃「等待」，不会停止
+      底层工作。对有副作用的工具（写盘/发消息/执行代码），超时后调用方以为失败
+      会重试，而底层仍在跑 → 副作用重复。宁可等它跑完，也不制造重复副作用。
     - 否则用 daemon 线程强制：超时抛 TimeoutError，底层线程 daemon 化，
       超时后不会阻塞进程退出。
+
+    语义边界（重要）：TimeoutError 只保证 **调用方不再等待**，不保证底层已停止。
+    文案已写明，调用方不得据 TimeoutError 判定「没有发生」，重试前必须过幂等 key。
     """
+    if side_effect:
+        return func(**kwargs)
+
     if not timeout or timeout <= 0:
         return func(**kwargs)
 
@@ -95,7 +104,9 @@ def call_with_timeout(func, kwargs: dict, timeout: float):
     try:
         ok, val = q.get(timeout=timeout)
     except queue.Empty:
-        raise TimeoutError(f"工具执行超时(>{timeout:g}s)") from None
+        raise TimeoutError(
+            f"工具执行超时(>{timeout:g}s)：已放弃等待（底层可能仍在执行，勿盲目重试）"
+        ) from None
     if ok:
         return val
     raise val
