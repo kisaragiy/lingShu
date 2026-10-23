@@ -57,12 +57,24 @@ pytest -q                      # 全量
 pytest tests/ -q -k "not integration"
 ```
 
-基线（2026-10-23 实测）：`1083 collected, 1080 passed, 3 skipped`（8 个 integration 默认 deselect）。改动后跑全量，数字下降即视为回归。
+基线（2026-10-23 实测）：`1106 collected, 1103 passed, 3 skipped`（8 个 integration 默认 deselect）。改动后跑全量：passed **只增不减**，出现任何 failed/error 即视为回归；新增用例后同步更新本行数字。
 
 发版门禁测试（不要绕过）：
 
 - `tests/test_no_private_hosts.py` — 禁止硬编码私网地址与个人绝对路径
 - `tests/test_packaging_and_config_gates.py` — 打包形态与运行时配置读取
+
+### git hooks（换机器必装）
+
+`.git/hooks/` 不进版本库，本仓库自带一份在 `scripts/git-hooks/`，一条命令装回：
+
+```bash
+bash scripts/install-git-hooks.sh     # 设 core.hooksPath → scripts/git-hooks
+```
+
+pre-commit 做两件事：有代码变更时跑 `pytest -x -q tests/`；校验 pyproject、包
+`__version__`、AGENTS.md 三处版本号一致。紧急情况用 `git commit --no-verify`
+跳过，但**不要**改 hook 去放宽门禁。
 
 ## 四、架构约束（ADR）
 
