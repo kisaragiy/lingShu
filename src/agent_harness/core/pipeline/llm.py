@@ -84,9 +84,13 @@ def _extract_openai_content(data: dict, max_tokens: int) -> tuple[str, str, str,
 
     思考轨迹与答案走两条通道，**永远不合并**：
       - content 有值 → 正常答案；reasoning 单独交还（可记日志/展示「思考过程」）
-      - content 空 + finish=length + 有 reasoning → 预算全被思考吃掉，答案还没开始写；
-        返回空串，由调用方决定加预算重试（不把思考当答案，也不假装成功）
       - content 空 + reasoning 已吃满预算（R1 系答案写在推理里）→ 标 [推理截断输出]，不缓存
+      - content 空 + finish=length + 思考没吃满 → 预算卡在思考中途，答案还没开始写；
+        返回空串，由调用方决定加预算重试（不把思考当答案，也不假装成功）
+
+    分支顺序有讲究：「吃满预算」必须排在「finish=length」**前面**。R1 系模型思考吃光
+    预算时 finish 必然是 length，反过来的顺序会让 [推理截断输出] 成为不可达死代码，
+    于是这类响应只会永远返回空串（2026-10-23 由 cassette 夹具跑出来）。
     """
     try:
         choice = data["choices"][0]
@@ -98,10 +102,10 @@ def _extract_openai_content(data: dict, max_tokens: int) -> tuple[str, str, str,
     finish = choice.get("finish_reason") or ""
     if content:
         return content, reasoning, finish, True
-    if reasoning and finish == "length":
-        return "", reasoning, finish, False
     if reasoning and len(reasoning) > max_tokens * 0.8:
         return "[推理截断输出] " + reasoning[-200:], reasoning, finish, False
+    if reasoning and finish == "length":
+        return "", reasoning, finish, False
     return "", reasoning, finish, True
 
 

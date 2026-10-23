@@ -1,0 +1,19 @@
+{
+  "name": "malformed_empty_choices",
+  "why": "网关/代理返回 choices: [] 的空壳响应（实测遇到过）—— 同样必须降级成空串",
+  "request": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "system_prompt": "你是助手"
+  },
+  "response": {
+    "id": "chatcmpl-c6",
+    "model": "qwen3.5:9b",
+    "choices": []
+  },
+  "prompt_hash": "fb803fde3d69e30ff15b7f2e750c745c00ac78012eb710098421acbbdf620b03"
+}
