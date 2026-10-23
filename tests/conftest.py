@@ -46,6 +46,9 @@ def pytest_configure(config):  # noqa: ARG001  (pytest hook)
     for name in DATA_ROOT_ENV:
         sub = name.removeprefix("HARNESS_").removesuffix("_DIR").removesuffix("_DATA").lower()
         os.environ[name] = str(_TMP_DATA_ROOT / sub)
+    # 审计库是**文件**路径（不是目录），不能用上面的目录规则；不重定向则测试会在
+    # 源码树里写 src/data/audit.db（原实现把 DB_PATH 钉在 __file__ 上三级）。
+    os.environ["HARNESS_AUDIT_DB"] = str(_TMP_DATA_ROOT / "audit" / "audit.db")
 
 
 @pytest.fixture(scope="session")

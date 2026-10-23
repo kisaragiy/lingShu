@@ -315,10 +315,11 @@ def _worker_executor(state: WorkerState) -> dict:
 
     # Push tool progress event
     try:
-        from ..graph_multi import _progress_queue
-        if _progress_queue:
+        from ..graph_multi import get_progress_queue
+        _pq = get_progress_queue(state.get("task_id", ""))
+        if _pq:
             status_icon = "✅" if result.get("success") else "❌"
-            _progress_queue.put({
+            _pq.put({
                 "type": "progress",
                 "content": f"  {status_icon} [{state.get('worker_name','?')}] {tool_name} ({elapsed:.1f}s)\n"
             })
