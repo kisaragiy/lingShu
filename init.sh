@@ -32,6 +32,10 @@ fi
 SMOKE_CMD="$("$PY" -c 'import json;print(json.load(open("PROGRESS.json",encoding="utf-8")).get("smoke_cmd",""))' 2>/dev/null)"
 if [ -n "${SMOKE_CMD:-}" ]; then
   echo "[init] smoke: $SMOKE_CMD"
+  # 冒烟与状态解析必须用同一解释器，避免 PATH 上的 python 缺少项目依赖。
+  if [[ "$SMOKE_CMD" == "python "* ]]; then
+    SMOKE_CMD='"$PY" '"${SMOKE_CMD#python }"
+  fi
   if ! eval "$SMOKE_CMD"; then
     echo "[init] ALERT: 冒烟失败 —— 先修环境再开工" >&2; exit 2
   fi
@@ -40,5 +44,27 @@ fi
 # 报告下一个 feature（新会话接手第 2 步）
 if [ -f "$HARNESS" ]; then "$PY" "$HARNESS_W" --dir "$PROJ_W" status || true; fi
 
-echo "[init] READY"
-exit 0
+# 缺失或无法解释的时间不能证明状态仍可信，必须与过期状态一样阻止接班。
+if "$PY" - <<'PY'
+import json
+import sys
+from datetime import datetime, timedelta, timezone
+
+try:
+    with open("PROGRESS.json", encoding="utf-8") as stream:
+        updated = datetime.fromisoformat(json.load(stream)["updated"])
+    if updated.tzinfo is None:
+        raise ValueError("updated 必须带时区")
+    if datetime.now(timezone.utc) - updated > timedelta(days=7):
+        print("[init] ALERT: PROGRESS.json 超过 7 天未更新", file=sys.stderr)
+        sys.exit(2)
+except (OSError, ValueError, KeyError, TypeError) as exc:
+    print(f"[init] ALERT: PROGRESS.json updated 缺失或无法解析（{exc}）", file=sys.stderr)
+    sys.exit(2)
+PY
+then
+  echo "[init] READY"
+  exit 0
+else
+  exit 2
+fi
