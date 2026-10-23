@@ -37,6 +37,9 @@ MYPY_ARGS = [
     "--allow-untyped-decorators",
     "--no-error-summary",
     "--no-pretty",
+    # 必须有：mypy 增量缓存会让「全量扫一次」与「再扫一次」的报错数不一致
+    # （实测 2026-10-23 出现过同一文件 57 → 0 的假象），baseline 比对就失去意义。
+    "--no-incremental",
 ]
 
 # mypy 输出形如：src\x\y.py:12: error: Incompatible return value  [return-value]
@@ -48,38 +51,47 @@ def _norm(path: str) -> str:
 
 
 def _scan_files() -> list[str]:
+    """扫描待检文件，返回**相对 ROOT** 的 posix 路径。
+
+    必须是相对路径：``--check`` 的 restrict 来自命令行（相对），若这里返回绝对路径，
+    过滤后 targets 为空 → 报「N → 0 个错误」的假绿（2026-10-23 实测踩过）。
+    """
     scanned: list[str] = []
     for directory in SCAN_DIRS:
-        scanned.extend(sorted(p.as_posix() for p in (ROOT / directory).rglob("*.py")))
+        scanned.extend(sorted(p.relative_to(ROOT).as_posix()
+                              for p in (ROOT / directory).rglob("*.py")))
     return scanned
 
 
 def _run_mypy(files: list[str], restrict: set[str] | None = None) -> dict[str, int]:
-    """返回 {相对路径: strict 错误数}。mypy 退出码 1 = 有类型错误，属正常。
+    """逐文件跑 mypy，返回 {相对路径: strict 错误数}。
 
-    ``restrict``：只返回这些文件的计数，但 mypy 仍按传入的**全量** ``files`` 跑。
-    为什么必须这样：mypy 的判定依赖同一批文件（unused-ignore 之类会随调用范围
-    变化）。baseline 用全量生成、check 若只传单文件，会出现 57 vs 59 的假红
-    （2026-10-23 实测踩过）。同上下文才可比。
+    为什么逐文件而不是一次全量：实测（2026-10-23）把 core/ 的 74 个文件一次性交给
+    mypy --strict 时，它只吐出 1 条错误、退出码 2（stderr 空）——进程中途崩了，
+    于是"全量结果"只是部分结果，baseline 直接变成垃圾（同一文件一会儿 57、一会儿 0）。
+    逐文件调用慢一些（每文件 ~0.8s），但每次的上下文完全一致，计数可复现。
+
+    ``restrict``：只跑这些文件（check 用），但语义与 update 完全相同。
     """
-    if not files:
-        return {}
-    proc = subprocess.run(
-        [sys.executable, *MYPY_ARGS, *files],
-        cwd=str(ROOT), capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
-    )
-    if proc.returncode not in (0, 1):
-        print(f"[mypy-gate] mypy 自身失败（exit {proc.returncode}）：\n{proc.stderr[-1500:]}")
-        raise SystemExit(1)
+    targets = [f for f in files if restrict is None or _norm(f) in restrict]
     counts: dict[str, int] = {}
-    for line in proc.stdout.splitlines():
-        match = _ERROR_LINE.match(line.strip())
-        if match:
-            key = _norm(match.group(1))
-            counts[key] = counts.get(key, 0) + 1
-    if restrict is not None:
-        counts = {k: v for k, v in counts.items() if k in restrict}
+    for target in targets:
+        proc = subprocess.run(
+            [sys.executable, *MYPY_ARGS, target],
+            cwd=str(ROOT), capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+        # mypy 的退出码语义：0 无错、1 有类型错误、2 内部/命令行错误。实测会返回 2
+        # 且 stderr 为空、stdout 却有完整 error 行 —— 判据是**有没有 error 输出**。
+        if proc.returncode not in (0, 1) and "error:" not in proc.stdout:
+            print(f"[mypy-gate] mypy 自身失败（{target}, exit {proc.returncode}）：\n"
+                  f"{proc.stderr[-800:]}")
+            raise SystemExit(1)
+        for line in proc.stdout.splitlines():
+            match = _ERROR_LINE.match(line.strip())
+            if match:
+                key = _norm(match.group(1))
+                counts[key] = counts.get(key, 0) + 1
     return counts
 
 
