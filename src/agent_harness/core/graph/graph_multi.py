@@ -46,6 +46,7 @@ from ..budget import BudgetLevel, TokenBudget
 from ..pipeline.circuit_breaker import CircuitBreaker, new_scoped_breaker
 from ..pipeline.llm import ledger_total
 from ..pipeline.state import SupervisorState, WorkerResult
+from ..pipeline.termination import AnyOf, CallbackCondition, StateFlag, StopReason
 from ..pipeline.tracing import TraceCollector
 from ..retry import NoProgressError, _default_call_key, with_no_progress_guard
 
@@ -104,6 +105,41 @@ def _breaker_tripped(cb: CircuitBreaker | None) -> bool:
         return False
     _feed_breaker_tokens(cb)
     return bool(cb.check()["tripped"])
+
+
+# ─── 终止条件组合（P1-7）───
+# 原 supervisor_route 是一串 if：breaker → budget → no_progress → infeasible。
+# 拆成可组合条件后，顺序即优先级（AnyOf 短路），新增判据只需往元组里加一项，
+# 不必再改 route 的控制流；同时这些条件可以单独测（见 tests/test_termination_compose.py）。
+# 注意：max_rounds / all_done 仍留在 route 里 —— 前者是「正常用满预算」，
+# 后者是「活干完了」，都不是「异常终止」，混进终止条件会让日志语义变糊。
+
+def _breaker_hit(state: Any) -> StopReason | None:
+    cb = state.get("circuit_breaker") if isinstance(state, dict) else None
+    if not _breaker_tripped(cb):
+        return None
+    reasons = "; ".join(cb.check()["reasons"]) if cb is not None else ""
+    return StopReason("circuit_breaker",
+                      f"熔断已触发（{reasons}）" if reasons else "熔断已触发")
+
+
+def _budget_blocks(state: Any) -> StopReason | None:
+    level = _feed_budget(state)
+    if _budget_allows_continue(state, level):
+        return None
+    return StopReason("token_budget", f"Token 预算级别 {level.value}，已阻止继续")
+
+
+def termination_conditions() -> AnyOf:
+    """本 run 的终止条件（顺序 = 优先级，与原 if-链逐条对应）。"""
+    return AnyOf(
+        CallbackCondition("circuit_breaker", _breaker_hit, "熔断已触发"),
+        CallbackCondition("token_budget", _budget_blocks, "Token 预算已阻止继续"),
+        StateFlag("no_progress_tripped", name="no_progress",
+                  message="无进展熔断（连续同 tool+同参）"),
+        StateFlag("feasibility", equals="infeasible", name="infeasible",
+                  message="判定任务不可行"),
+    )
 
 
 # ─── Token 预算三层软限制（WARN / ASK / STOP）接线 ───
@@ -579,25 +615,11 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
 
 def supervisor_route(state: SupervisorState) -> Literal["replan", "finalize"]:
     """Decide whether to do another round or finalize."""
-    cb = state.get("circuit_breaker")  # type: ignore[union-attr]
-    if _breaker_tripped(cb):
-        print("[Supervisor] 🔥 熔断已触发，停止 Replan 提前收尾", file=sys.stderr)
-        return "finalize"
-    # Token 预算三层软限制：ASK（未确认）/ STOP / kill switch → 立即收尾
-    budget_level = _feed_budget(state)
-    if not _budget_allows_continue(state, budget_level):
-        print(f"[Supervisor] 💰 Token 预算级别 {budget_level.value}，停止 Replan 提前收尾",
-              file=sys.stderr)
-        return "finalize"
-    # P1-3: 主回路无进展熔断 → 立即收尾，不再 replan（否则只会重复空转）
-    if state.get("no_progress_tripped"):
-        print("[Supervisor] 🔥 无进展熔断（连续同 tool+同参），停止 Replan 提前收尾",
-              file=sys.stderr)
-        return "finalize"
-    # WP16: infeasible task → finalize immediately, straight to the abstention
-    # path (never replan, never fabricate a research report).
-    if state.get("feasibility") == "infeasible":
-        print("[Supervisor] ⚠️ 判定任务不可行，声明无法完成（不走调研报告）", file=sys.stderr)
+    # 异常终止判据走组合器（P1-7）：breaker → budget → no_progress → infeasible，
+    # 顺序即优先级，与原 if-链一致；新增判据只改 termination_conditions()。
+    reason = termination_conditions()(state)
+    if reason is not None:
+        print(f"[Supervisor] 🔥 {reason.message}，停止 Replan 提前收尾", file=sys.stderr)
         return "finalize"
     if state.get("all_done"):
         return "finalize"
