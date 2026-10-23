@@ -1,11 +1,10 @@
 """Tests for llm.py caching — monkeypatch to avoid real HTTP calls."""
 
 import time
-import hashlib
-import json
 
 import pytest
 
+import agent_harness.core.pipeline.llm as llm_mod
 from agent_harness.core.pipeline.llm import (
     _llm_cache_key,
     _llm_cache_get,
@@ -87,7 +86,6 @@ def test_call_llama_skips_cache_high_temp(monkeypatch):
     monkeypatch.setattr("agent_harness.core.pipeline.llm._llm_cache_get", tracking_get)
 
     # Mock the POST to avoid real HTTP
-    import requests
 
     class MockResp:
         status_code = 200
@@ -98,10 +96,10 @@ def test_call_llama_skips_cache_high_temp(monkeypatch):
                 "usage": {"total_tokens": 10},
             }
 
-    monkeypatch.setattr(requests.Session, "post", lambda *a, **kw: MockResp())
+    monkeypatch.setattr(llm_mod._session, "post", lambda *a, **kw: MockResp())
 
     monkeypatch.setattr("agent_harness.core.pipeline.llm.MODEL_LLAMA", "test-model")
-    monkeypatch.setattr("agent_harness.core.pipeline.llm.LLAMA_API", "http://test/api")
+    monkeypatch.setattr("agent_harness.core.pipeline.llm.LLAMA_API", "http://127.0.0.1:1/api")
 
     content, tokens = call_llama(
         [{"role": "user", "content": "hi"}],
@@ -114,7 +112,6 @@ def test_call_llama_skips_cache_high_temp(monkeypatch):
 @pytest.mark.integration          # 需要真实 LLM 后端（llama.cpp :8080），CI 默认不跑
 def test_call_llama_saves_cache(monkeypatch):
     """On successful response, content should be cached."""
-    import requests
 
     class MockResp:
         status_code = 200
@@ -125,9 +122,9 @@ def test_call_llama_saves_cache(monkeypatch):
                 "usage": {"total_tokens": 5},
             }
 
-    monkeypatch.setattr(requests.Session, "post", lambda *a, **kw: MockResp())
+    monkeypatch.setattr(llm_mod._session, "post", lambda *a, **kw: MockResp())
     monkeypatch.setattr("agent_harness.core.pipeline.llm.MODEL_LLAMA", "test-model")
-    monkeypatch.setattr("agent_harness.core.pipeline.llm.LLAMA_API", "http://test/api")
+    monkeypatch.setattr("agent_harness.core.pipeline.llm.LLAMA_API", "http://127.0.0.1:1/api")
 
     content, tokens = call_llama(
         [{"role": "user", "content": "save me"}],
@@ -141,7 +138,6 @@ def test_call_llama_saves_cache(monkeypatch):
 
 def test_call_llama_http_error_returns_empty(monkeypatch):
     """When HTTP fails, call_llama returns ('', 0) without caching."""
-    import requests
 
     class MockResp:
         status_code = 500
@@ -149,9 +145,9 @@ def test_call_llama_http_error_returns_empty(monkeypatch):
         def json(self):
             return {}
 
-    monkeypatch.setattr(requests.Session, "post", lambda *a, **kw: MockResp())
+    monkeypatch.setattr(llm_mod._session, "post", lambda *a, **kw: MockResp())
     monkeypatch.setattr("agent_harness.core.pipeline.llm.MODEL_LLAMA", "test-model")
-    monkeypatch.setattr("agent_harness.core.pipeline.llm.LLAMA_API", "http://test/api")
+    monkeypatch.setattr("agent_harness.core.pipeline.llm.LLAMA_API", "http://127.0.0.1:1/api")
 
     content, tokens = call_llama(
         [{"role": "user", "content": "fail"}],
