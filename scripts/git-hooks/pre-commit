@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# pre-commit: 版本一致性检查 + 测试验证
+set -e
+
+REPO_DIR=$(git rev-parse --show-toplevel)
+PYPROJECT="$REPO_DIR/pyproject.toml"
+AGENTS="$REPO_DIR/AGENTS.md"
+VERSION_MODULE="$REPO_DIR/src/agent_harness/__init__.py"
+
+# 只检查有代码变更的提交（grep -c 无匹配时退出码为 1，set -e 下会静默中止整个 hook，故兜 || true）
+SRC_CHANGES=$(git diff --cached --name-only | grep -v "^AGENTS.md" | grep -v "^pyproject.toml" | grep -c "." || true)
+if [ "$SRC_CHANGES" -eq 0 ]; then
+  exit 0
+fi
+
+# ── 测试验证 ────────────────────────────────────
+echo "🧪 运行测试..."
+cd "$REPO_DIR"
+
+# 用项目 venv（PATH 上的 python 可能是无关解释器，例如 Hermes 自带 python 无 pytest）
+# worktree 场景：.venv 只在主仓库存在 → 通过 git-common-dir 回溯主仓库根
+COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null || echo "")
+MAIN_ROOT=""
+if [ -n "$COMMON_DIR" ]; then
+  MAIN_ROOT=$(cd "$COMMON_DIR/.." 2>/dev/null && pwd || echo "")
+fi
+
+PYBIN=""
+for CAND in "$REPO_DIR/.venv/Scripts/python.exe" "$MAIN_ROOT/.venv/Scripts/python.exe"; do
+  if [ -n "$CAND" ] && [ -x "$CAND" ]; then
+    PYBIN="$CAND"
+    break
+  fi
+done
+if [ -z "$PYBIN" ]; then
+  PYBIN=$(command -v python || echo "")
+fi
+
+if [ -n "$PYBIN" ]; then
+  "$PYBIN" -m pytest -x -q tests/ 2>&1 | tail -10
+  PYTEST_EXIT=${PIPESTATUS[0]}
+else
+  echo "⚠️  未找到 Python，跳过测试"
+  PYTEST_EXIT=0
+fi
+
+if [ "$PYTEST_EXIT" -ne 0 ]; then
+  echo ""
+  echo "❌ 测试未通过，请修复后再提交"
+  echo "   跳过测试: git commit --no-verify"
+  exit 1
+fi
+echo "✅ 测试通过"
+
+# ── 版本一致性检查 ──────────────────────────────
+
+PYPROJ_VER=$(grep -m1 'version\s*=' "$PYPROJECT" 2>/dev/null | sed 's/.*= *"//' | sed 's/\".*//')
+PKG_VER=$(grep -m1 '__version__' "$VERSION_MODULE" 2>/dev/null | sed 's/.*= *"//' | sed 's/\".*//')
+# 取 AGENTS.md 中首个 vX.Y.Z 作为其声明版本。
+# 旧实现依赖「当前已发布 (vX.Y.Z)」标记或表格行格式，文档改写后会把「当前版本」
+# 这种非版本串当版本号比对，导致误报不一致。用正则直接抓第一个语义版本号。
+AGENTS_VER=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' "$AGENTS" 2>/dev/null | head -1 | tr -d 'v')
+
+norm() { echo "$1" | sed 's/\.0$//'; }
+NORM_PYPROJ=$(norm "$PYPROJ_VER")
+NORM_PKG=$(norm "$PKG_VER")
+NORM_AGENTS=$(norm "$AGENTS_VER")
+
+ERRORS=""
+if [ -n "$PYPROJ_VER" ] && [ -n "$PKG_VER" ] && [ "$NORM_PYPROJ" != "$NORM_PKG" ]; then
+  ERRORS+="  ❌ pyproject.toml ($PYPROJ_VER) != __version__ ($PKG_VER)\n"
+fi
+if [ -n "$AGENTS_VER" ] && [ -n "$PKG_VER" ] && [ "$NORM_AGENTS" != "$NORM_PKG" ]; then
+  ERRORS+="  ❌ AGENTS.md ($AGENTS_VER) != __version__ ($PKG_VER)\n"
+fi
+
+if [ -n "$ERRORS" ]; then
+  echo ""
+  echo "⚠️  版本号不一致！__version__ 是唯一来源，其他文件需同步："
+  echo -e "$ERRORS"
+  echo "  修复: python $REPO_DIR/scripts/sync-version.py"
+  echo "  跳过: git commit --no-verify"
+  echo ""
+  exit 1
+fi
+
+exit 0
