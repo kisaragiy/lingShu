@@ -234,62 +234,80 @@ def _handle_budget_level(state: SupervisorState, level: BudgetLevel) -> list[dic
 
 NO_PROGRESS_MAX_REPEATS = 3
 
-_no_progress_enabled: bool = False
-_no_progress_max_repeats: int = NO_PROGRESS_MAX_REPEATS
-_no_progress_key_fn = None  # type: ignore[var-annotated]  # (worker_name, task) -> hashable
-_no_progress_guards: dict = {}
-
-
 def _worker_call_key(wname: str, task: Any) -> tuple:
     """默认 tool 粒度指纹：worker 名（tool）+ 任务参数指纹。"""
     return (str(wname), _default_call_key((str(task),), {}))
 
 
+class NoProgressTracker:
+    """per-run 的无进展跟踪器（P2-4）。
+
+    原实现把 guards 放在模块全局、每次 run 开头清空 —— 两个任务并发时，后启动的
+    那个会把先启动者的计数一并清掉（互相掩盖空转）；先启动者的 guard 闭包被丢弃
+    后，它的计数也永久丢失。状态属于一次 run，就该放进 state。
+    """
+
+    def __init__(self, enabled: bool = True,
+                 max_repeats: int = NO_PROGRESS_MAX_REPEATS, key_fn=None) -> None:
+        self.enabled = bool(enabled)
+        self.max_repeats = int(max_repeats)
+        self.key_fn = key_fn
+        self.guards: dict = {}
+
+    def configure(self, enabled: bool, max_repeats: int, key_fn=None) -> None:
+        if max_repeats < 1:
+            raise ValueError("max_repeats 必须 >= 1")
+        self.enabled = bool(enabled)
+        self.max_repeats = int(max_repeats)
+        self.key_fn = key_fn
+        self.guards.clear()
+
+    def guard_for(self, wname: str):
+        """取（或建）某 worker 专属的 no-progress guard（per-tool 独立计数）。"""
+        g = self.guards.get(wname)
+        if g is None:
+            base = self.key_fn or _worker_call_key
+
+            def _kf(task, _w=wname, _base=base):
+                return _base(_w, task)
+
+            @with_no_progress_guard(max_repeats=self.max_repeats, key_fn=_kf)
+            def _guard(task):
+                return task
+
+            g = _guard
+            self.guards[wname] = g
+        return g
+
+    def check(self, wname: str, task: Any) -> None:
+        if not self.enabled:
+            return
+        self.guard_for(wname)(task)
+
+
+# 默认 tracker：给不走 run_multi_agent 的调用方（测试 / 单线程脚本）用。
+_default_no_progress = NoProgressTracker(enabled=False)
+
+
 def set_no_progress_detection(enabled: bool = True,
                               max_repeats: int = NO_PROGRESS_MAX_REPEATS,
                               key_fn=None) -> None:
-    """启用/配置主回路无进展熔断（每次 `run_multi_agent` 前调用）。
+    """配置**默认** tracker（兼容入口）。
 
-    Args:
-        enabled: 是否启用；False 时 `check_no_progress` 一律 no-op（默认关闭，向后兼容）。
-        max_repeats: 连续同 (worker, task) 达到该次数即熔断（>=1）。
-        key_fn: 可注入的 (worker_name, task) -> hashable 指纹；默认 worker 名 + 任务指纹。
+    run_multi_agent 不再调用它重置全局状态 —— 每次 run 自建 ``NoProgressTracker``
+    放进 state（P2-4）。此函数保留给测试与单线程场景。
     """
-    global _no_progress_enabled, _no_progress_max_repeats, _no_progress_key_fn, _no_progress_guards
-    if max_repeats < 1:
-        raise ValueError("max_repeats 必须 >= 1")
-    _no_progress_enabled = bool(enabled)
-    _no_progress_max_repeats = int(max_repeats)
-    _no_progress_key_fn = key_fn
-    _no_progress_guards = {}
+    _default_no_progress.configure(enabled, max_repeats, key_fn)
 
 
-def _guard_for(wname: str):
-    """取（或建）某 worker 专属的 no-progress guard（per-tool 独立计数）。"""
-    g = _no_progress_guards.get(wname)
-    if g is None:
-        base = _no_progress_key_fn or _worker_call_key
-
-        def _kf(task, _w=wname, _base=base):
-            return _base(_w, task)
-
-        @with_no_progress_guard(max_repeats=_no_progress_max_repeats, key_fn=_kf)
-        def _guard(task):
-            return task
-
-        g = _guard
-        _no_progress_guards[wname] = g
-    return g
-
-
-def check_no_progress(wname: str, task: Any) -> None:
+def check_no_progress(wname: str, task: Any, tracker=None) -> None:
     """派发前检查：连续 K 次同 (worker, task) → 抛 :class:`NoProgressError`。
 
-    检测未启用时一律 no-op。**在调用线程（主派发线程）串行执行**，避免并发竞争。
+    ``tracker`` 缺省用默认 tracker（兼容旧调用）；run_multi_agent 传
+    ``state["no_progress"]``，保证并发 run 之间互不串计数。
+    检测未启用时一律 no-op；**在调用线程（主派发线程）串行执行**。
     """
-    if not _no_progress_enabled:
-        return
-    _guard_for(wname)(task)
+    (tracker or _default_no_progress).check(wname, task)
 
 
 def _record_no_progress_trip(wname: str, task: Any, exc: NoProgressError,
@@ -441,7 +459,7 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
             task = worker_tasks.get(wname, state["request"])
             # P1-3: 派发前无进展检查 —— 连续同 tool+同参则熔断，跳过本次执行
             try:
-                check_no_progress(wname, task)
+                check_no_progress(wname, task, state.get("no_progress"))
             except NoProgressError as e:
                 no_progress_tripped = True
                 _record_no_progress_trip(wname, task, e, results, no_progress_events)
@@ -532,7 +550,7 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
         task = worker_tasks.get(wname, state["request"])
         # P1-3: 串行分支同样做派发前无进展检查
         try:
-            check_no_progress(wname, task)
+            check_no_progress(wname, task, state.get("no_progress"))
         except NoProgressError as e:
             no_progress_tripped = True
             _record_no_progress_trip(wname, task, e, results, no_progress_events)
@@ -1438,8 +1456,9 @@ def run_multi_agent(
     t0 = time.time()
     trace_id = trace_id or str(uuid.uuid4())
 
-    # P1-3: 启用主回路无进展熔断（每次 run 重置 guard 状态，避免跨任务串计数）
-    set_no_progress_detection(True, NO_PROGRESS_MAX_REPEATS)
+    # P2-4: 无进展 tracker 属于这次 run（下面塞进 state），不再重置模块全局 guards
+    # —— 全局 guards 会让并发任务的计数互相清掉（后启动的清掉先启动的）。
+    no_progress_tracker = NoProgressTracker(True, NO_PROGRESS_MAX_REPEATS)
 
     print(f"\n{'='*60}")
     print(f"[Multi-Agent] 任务: {request[:100]}...")
@@ -1478,6 +1497,7 @@ def run_multi_agent(
         "task_id": task_id,
         "trace_steps": [],
         "circuit_breaker": _new_circuit_breaker(),
+        "no_progress": no_progress_tracker,
         # 会话级 token 预算（WARN/ASK/STOP 三层软限制）；水位线锚在本 run 起飞点
         "token_budget": _new_token_budget(),
         "budget_level": "ok",
