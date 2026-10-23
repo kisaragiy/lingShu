@@ -1200,12 +1200,68 @@ def supervisor_finalize(state: SupervisorState) -> dict:
     }
 
 
+# ─── Checkpointer（P0-3：长任务崩了能续）───
+
+# 与审计/工单同源，可被 HARNESS_DATA_DIR 重定向
+CHECKPOINT_DB = os.path.join(
+    os.environ.get("HARNESS_DATA_DIR") or os.path.expanduser("~/.agent-harness"),
+    "checkpoints.sqlite",
+)
+
+_CHECKPOINTER_SINGLETON: Any = None
+
+
+def make_sqlite_checkpointer(db_path: str = "") -> Any:
+    """造一个 SQLite checkpointer（**跨进程**可续，这才是「崩溃不白烧」）。
+
+    失败返回 None 而不是抛 —— checkpointer 不可用应当降级为无状态运行，
+    不能让可观测性设施把主流程带崩。
+    连接由返回的 SqliteSaver 持有，调用方要保存返回值。
+    """
+    try:
+        import sqlite3
+
+        from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        db = db_path or CHECKPOINT_DB
+        parent = os.path.dirname(db)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        conn = sqlite3.connect(db, check_same_thread=False)
+        # pickle_fallback 默认关闭，而 state 里有 CircuitBreaker/TokenBudget 这类
+        # 自定义对象 —— 不开就 TypeError: Type is not msgpack serializable。
+        # 安全边界：checkpoint 只读本机自产的 sqlite 文件，不接受外部输入。
+        serde = JsonPlusSerializer(pickle_fallback=True)
+        saver = SqliteSaver(conn, serde=serde)
+        # 必须显式建表：SqliteSaver 构造时不自动 setup，否则 put 报 no such table
+        saver.setup()
+        return saver
+    except Exception as exc:  # noqa: BLE001
+        print(f"[checkpointer] SQLite 不可用，降级为无状态运行: {exc}", file=sys.stderr)
+        return None
+
+
+def default_checkpointer() -> Any:
+    """进程级单例（每次 run 新建 sqlite 连接会泄漏）。不可用时返回 None。"""
+    global _CHECKPOINTER_SINGLETON
+    if _CHECKPOINTER_SINGLETON is None:
+        _CHECKPOINTER_SINGLETON = make_sqlite_checkpointer() or False
+    return _CHECKPOINTER_SINGLETON or None
+
+
 # ─── Build multi-agent graph ───
 
-def build_multi_agent() -> StateGraph:
+def build_multi_agent(checkpointer: Any = None) -> StateGraph:
     """Build the Supervisor-Worker multi-agent graph.
 
-    Returns a compiled LangGraph graph.
+    Args:
+        checkpointer: LangGraph checkpointer（如 InMemorySaver / SqliteSaver）。
+            传 None 时行为与接入前完全一致（无状态快照，崩了全丢）。
+            P0-3：原先无 checkpointer，600s 任务在任何节点崩溃都要从零重跑。
+
+    Returns:
+        A compiled LangGraph graph.
     """
     graph = StateGraph(SupervisorState)
 
@@ -1229,7 +1285,7 @@ def build_multi_agent() -> StateGraph:
     graph.add_edge("replan", "dispatch")
     graph.add_edge("finalize", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 
 # ─── Run entry point ───
@@ -1240,6 +1296,8 @@ def run_multi_agent(
     trace_id: str = "",
     enable_tracing: bool = False,
     task_id: str = "",
+    checkpointer: Any = None,
+    resume: bool = False,
 ) -> dict[str, Any]:
     """Run the multi-agent pipeline from a single request.
 
@@ -1249,6 +1307,8 @@ def run_multi_agent(
         trace_id: Optional trace ID for logging
         enable_tracing: If True, collect detailed trace spans
         task_id: 取消作用域 ID（API 传 session_id）。空串 → 回落全局兜底事件（CLI）
+        checkpointer: 状态快照后端；复用 task_id 作 thread_id
+        resume: 仅当带 checkpointer 时生效 —— 从该 thread 的最后 checkpoint 续跑
 
     Returns:
         Dict with final_output, trace_steps, errors, elapsed, trace_tree (if enabled)
@@ -1269,7 +1329,11 @@ def run_multi_agent(
         collector = TraceCollector(trace_id)
         set_trace_collector(collector)
 
-    graph = build_multi_agent()
+    graph = build_multi_agent(checkpointer=checkpointer)
+    invoke_config: dict[str, Any] = {"recursion_limit": 100}
+    if checkpointer is not None:
+        # thread_id 复用 task_id（API 传 session_id）→ 同一会话崩溃后可续
+        invoke_config["configurable"] = {"thread_id": task_id or trace_id}
 
     initial_state: SupervisorState = {
         "request": request,
@@ -1297,15 +1361,26 @@ def run_multi_agent(
         "budget_events": [],
     }
 
+    def _invoke() -> dict[str, Any]:
+        """resume=True 且带 checkpointer 时从 checkpoint 续跑（输入传 None）。
+
+        契约：已完成节点不重算，**崩溃点那个节点会重跑** —— 所以节点必须幂等
+        （写文件用覆盖而非追加、外部副作用带去重键）。这是 LangGraph 的语义，
+        不是本项目的缺陷，调用方要按幂等写节点。
+        """
+        if resume and checkpointer is not None:
+            return graph.invoke(None, config=invoke_config)  # type: ignore[arg-type]
+        return graph.invoke(initial_state, config=invoke_config)
+
     if collector:
         with collector.span("multi_agent_root", "supervisor", request=request[:100]):
-            final = graph.invoke(initial_state, config={"recursion_limit": 100})
-            # Check circuit breaker
-            cb: CircuitBreaker = initial_state.get("circuit_breaker")  # type: ignore
+            final = _invoke()
+            # Check circuit breaker：resume 时只有续跑的 state 才准
+            cb: CircuitBreaker = final.get("circuit_breaker") or initial_state.get("circuit_breaker")  # type: ignore
             if cb and cb.check()["tripped"]:
                 collector.mark_circuit_breaker("; ".join(cb.check()["reasons"]))
     else:
-        final = graph.invoke(initial_state, config={"recursion_limit": 100})
+        final = _invoke()
 
     elapsed = time.time() - t0
     print(f"\n[Multi-Agent] 完成 ({elapsed:.1f}s, {final.get('round', 1)} 轮)")
@@ -1324,7 +1399,7 @@ def run_multi_agent(
         "factcheck": final.get("factcheck", {}),
         "provenance": final.get("provenance", []),
         # 预算摘要：成本/级别/cache 命中率在一等公民字段里可见
-        "budget": initial_state["token_budget"].summary(),
+        "budget": (final.get("token_budget") or initial_state["token_budget"]).summary(),
         "budget_level": final.get("budget_level", "ok"),
         "budget_events": final.get("budget_events", []),
     }

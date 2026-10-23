@@ -19,6 +19,8 @@ classifiers = [
 
 dependencies = [
     "langgraph>=0.2.0",
+    # P0-3：崩溃续跑必须用持久化 checkpointer；内存 saver 只能防同进程内中断
+    "langgraph-checkpoint-sqlite>=3.1",
     "langchain-core>=0.4.0",
     "fastapi>=0.115.0",
     "python-multipart>=0.0.9",

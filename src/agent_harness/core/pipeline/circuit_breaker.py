@@ -85,6 +85,25 @@ class CircuitBreaker:
         # 兼容旧属性（旧代码可能读 cb._tripped）
         self._tripped = False
 
+    # ── 持久化（checkpoint 序列化）──
+    def __getstate__(self) -> dict:
+        """给 checkpointer 用：锁和 lambda 时钟不可序列化，只存可重建的状态。
+
+        没有这两个方法时，SQLite checkpointer 的 put 会直接失败（TypeError:
+        Type is not msgpack serializable / Can't pickle local object '<lambda>'），
+        表现为 checkpoint 一条都写不进 —— 崩了照样从零重跑。
+        自定义 time_fn 不跨进程传递（函数对象跨进程无意义），恢复时回落默认时钟。
+        """
+        st = self.__dict__.copy()
+        st.pop("_lock", None)
+        st.pop("_time_fn", None)
+        return st
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        self._lock = threading.Lock()
+        self._time_fn = lambda: time.time()  # noqa: E731
+
     # ── 时钟 ──
     def _now(self) -> float:
         return float(self._time_fn())

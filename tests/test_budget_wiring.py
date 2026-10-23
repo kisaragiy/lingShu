@@ -232,7 +232,7 @@ def test_run_multi_agent_creates_and_reports_budget(monkeypatch):
             return {**state, "final_output": "ok", "budget_level": "ok",
                     "budget_events": []}
 
-    monkeypatch.setattr(gm, "build_multi_agent", lambda: _FakeGraph())
+    monkeypatch.setattr(gm, "build_multi_agent", lambda checkpointer=None: _FakeGraph())
     res = gm.run_multi_agent("研究 X")
 
     assert isinstance(seen["budget"], TokenBudget), "run 必须注入会话级 TokenBudget"
@@ -249,7 +249,7 @@ def test_run_multi_agent_honours_env_limit(monkeypatch):
         def invoke(self, state, config=None):
             return {**state, "final_output": "ok"}
 
-    monkeypatch.setattr(gm, "build_multi_agent", lambda: _FakeGraph())
+    monkeypatch.setattr(gm, "build_multi_agent", lambda checkpointer=None: _FakeGraph())
     res = gm.run_multi_agent("研究 X")
     assert res["budget"]["limit"] == 7777
     assert res["budget_level"] == "ok"
