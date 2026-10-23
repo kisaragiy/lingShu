@@ -33,6 +33,10 @@ def _isolated_config(tmp_path, monkeypatch):
     cdir = tmp_path / "cfg"
     monkeypatch.setattr(cm, "CONFIG_DIR", cdir, raising=False)
     monkeypatch.setattr(cm, "CONFIG_PATH", cdir / "config.json", raising=False)
+    # `_ACL_HARDENED` 是模块级一次性开关：前一个用例把它置 True 后，本用例换到新
+    # CONFIG_DIR 时 `_hard_dir_permissions()` 会直接 return，新目录根本没被 chmod
+    # → 权限断言在 Linux 上随机红（2026-10-23 CI 实测）。每个用例都要从干净状态开始。
+    monkeypatch.setattr(cm, "_ACL_HARDENED", False, raising=False)
     for k in ("HARNESS_LLAMA_API", "HARNESS_CLOUD_KEY", "HARNESS_MODEL_LLAMA"):
         monkeypatch.delenv(k, raising=False)
     # 每个用例都从干净的身份缓存开始（有用例会改 _machine_id）

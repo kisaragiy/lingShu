@@ -142,6 +142,10 @@ jobs:
       HARNESS_API_HOST: "127.0.0.1"
       HARNESS_API_PORT: "8788"
       PYTHONUTF8: "1"
+      # 服务端与测试共用同一个数据根，且指向 runner 临时目录。不加这行时默认落
+      # ~/.agent-harness，测试写出的 session log/报告会被 ADR#5 守卫在 teardown
+      # 判成「测试改动了真实用户数据」（2026-10-23 CI 实测：新增 sessions/cs_*.log）。
+      HARNESS_DATA_DIR: ${{ runner.temp }}/lingshu-data
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

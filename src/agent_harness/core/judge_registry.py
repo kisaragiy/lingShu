@@ -22,11 +22,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 import statistics
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from agent_harness.core.versioning import version_stamp
 

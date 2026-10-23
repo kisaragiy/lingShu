@@ -13,6 +13,7 @@
 安全：本文件把 `subprocess.Popen` 换成记录器，测试**不会真的启动任何程序**。
 """
 import os
+import sys
 
 import pytest
 
@@ -99,12 +100,16 @@ def test_user_writable_dir_never_allows_unknown_app(payload):
     )
 
 
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="断言 Windows 盘符/安装目录的白名单语义；POSIX 上不适用")
 def test_user_writable_dir_still_allows_known_app():
     """反向控制：用户目录下的**已知应用**仍要放行（别把功能一刀切掉）。"""
     assert desktop._is_allowed_app(r"D:\Steam\steam.exe"), "Steam 装在 D 盘被误杀"
     assert desktop._is_allowed_app(r"C:\Users\zwq\AppData\Local\Programs\msedge.exe")
 
 
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="断言 Windows 盘符/安装目录的白名单语义；POSIX 上不适用")
 def test_trusted_install_dir_not_over_tightened():
     """可信安装目录（Program Files 等）不应被过度收紧。"""
     assert desktop._is_allowed_app(r"C:\Program Files\Docker\Docker Desktop.exe")
