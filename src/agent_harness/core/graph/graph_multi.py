@@ -26,7 +26,7 @@ import sys
 import threading
 import time
 import uuid
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from langgraph.graph import END, StateGraph
 
