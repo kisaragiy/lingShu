@@ -129,12 +129,17 @@ def test_execute_multi_wires_scope_into_agent_run(monkeypatch):
 
     captured = {}
 
-    def fake_run_multi_agent(prompt, task_id=""):
+    def fake_run_multi_agent(prompt, task_id="", checkpointer=None):
         captured["scope"] = rag_store.current_scope()
+        captured["checkpointer"] = checkpointer
         return {"ok": True}
 
     monkeypatch.setattr(
         "agent_harness.core.graph.graph_multi.run_multi_agent", fake_run_multi_agent
+    )
+    # 隔离副作用：不让单测真去建 ~/.agent-harness/checkpoints.sqlite
+    monkeypatch.setattr(
+        "agent_harness.core.graph.graph_multi.default_checkpointer", lambda: None
     )
     anchor = rag_store.set_scope("caller_scope_")   # 模拟调用方已有上下文
     try:

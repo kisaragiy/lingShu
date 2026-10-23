@@ -247,7 +247,11 @@ def _sse_done(result_text: str) -> str:
 # ─── Execute harness ───
 
 def _execute_multi(prompt: str, history_context: str, session_id: str = "", kb_scope: str = "") -> dict:
-    from agent_harness.core.graph.graph_multi import _progress_queue, run_multi_agent
+    from agent_harness.core.graph.graph_multi import (
+        _progress_queue,
+        default_checkpointer,
+        run_multi_agent,
+    )
     enhanced = prompt
     if history_context:
         enhanced = (
@@ -288,7 +292,13 @@ def _execute_multi(prompt: str, history_context: str, session_id: str = "", kb_s
     from agent_harness.core.tools import rag_store as _rag_scope_store
     _scope_tok = _rag_scope_store.set_scope(kb_scope)
     try:
-        return run_multi_agent(enhanced, task_id=session_id)
+        # P0-3：session_id 作 thread_id + SQLite checkpointer → 崩溃后用
+        # resume=True 同 session 续跑，已完成节点不重算
+        return run_multi_agent(
+            enhanced,
+            task_id=session_id,
+            checkpointer=default_checkpointer(),
+        )
     finally:
         _rag_scope_store.reset_scope(_scope_tok)
 
