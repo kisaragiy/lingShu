@@ -158,6 +158,10 @@ jobs:
         # workflow 校验失败（"run likely failed because of a workflow file issue"）。
         env:
           HARNESS_DATA_DIR: ${{ runner.temp }}/lingshu-data
+          # session 日志读的是 HARNESS_SESSION_DIR（session_store.py 的模块常量），
+          # 与 audit 的 HARNESS_DATA_DIR 是两套变量 —— 只设后者时 session 仍写
+          # ~/.agent-harness/sessions，ADR#5 守卫照旧报「测试改动了真实用户数据」。
+          HARNESS_SESSION_DIR: ${{ runner.temp }}/lingshu-data/sessions
         run: |
           uv run python -m agent_harness.main > server.log 2>&1 &
           server_pid=$!
@@ -202,6 +206,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
+          # ci 上 post-job 的 cache prune 会卡满 5 分钟被杀（exit code 2）；
+          # 这个 job 在临时目录跑一次，不需要 uv 缓存。
+          enable-cache: false
 
       - name: "按 README 快速开始：cp .env.example .env + 装依赖"
         run: |
