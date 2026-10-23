@@ -202,8 +202,14 @@ jobs:
           uv sync --extra dev --frozen
 
       - name: "断言服务起得来（/health == 200）"
+        # 用 README:151 与 Dockerfile:37 的真实命令 `agent-harness serve`
+        # （pyproject entry point → agent_harness.apps.research.run:main）。
+        # 原先这里用 `python -m agent_harness.main` —— 那是**另一条入口**
+        # （agent-api 用的），测它等于测一条用户不会走的路，README/Dockerfile
+        # 坏了也照样绿。2026-10-23 本地实测 `agent-harness serve` 起得来、
+        # /health 第 3 次探测 200（状态 degraded 但 HTTP 200）。
         run: |
-          uv run python -m agent_harness.main > server.log 2>&1 &
+          uv run agent-harness serve > server.log 2>&1 &
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8788/health || true)
             if [ "$code" = "200" ]; then echo "✅ /health 200（第 $i 次探测）"; exit 0; fi
