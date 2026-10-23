@@ -17,6 +17,8 @@ memory/
 eval_report.json
 comic_output/
 *.json
+# mypy 增量门禁的基线必须提交（CI 用它判断「新增」错误）
+!mypy_baseline.json
 # 例外：测试夹具/数据允许入库（全局 `*.json` 是黑名单式地雷，会静默吃掉未来的 fixture）
 !tests/**/*.json
 # 例外：PWA manifest 是静态资源，被 `*.json` 吃掉会导致部署后 404 → SW install 整单失败、PWA 失效

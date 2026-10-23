@@ -64,7 +64,11 @@ jobs:
           if [ "${#files[@]}" -eq 0 ]; then
             echo "没有改动的 src Python 文件，无需类型检查"
           else
-            uv run mypy --strict --follow-imports=skip --ignore-missing-imports --allow-untyped-decorators "${files[@]}"
+            # 只拦「新增」strict 错误：core/ 里 59 个文件本来就有 662 个 strict 错误
+            # （2026-10-23 实测）。裸 --strict 全量必然红；「只查改动文件」同样必然红
+            # ——改到任何脏文件就红，等于禁止碰核心代码。baseline 在
+            # mypy_baseline.json（文件→错误数），只许往下调；退出码 2 = 有新增。
+            uv run python scripts/mypy_baseline.py --check "${files[@]}"
           fi
 
       - name: Bandit SAST
