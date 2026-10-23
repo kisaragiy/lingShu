@@ -26,7 +26,7 @@ import sys
 import threading
 import time
 import uuid
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from langgraph.graph import END, StateGraph
 
@@ -234,7 +234,7 @@ def _handle_budget_level(state: SupervisorState, level: BudgetLevel) -> list[dic
 
 NO_PROGRESS_MAX_REPEATS = 3
 
-def _worker_call_key(wname: str, task: Any) -> tuple:
+def _worker_call_key(wname: str, task: Any) -> tuple[Any, ...]:
     """默认 tool 粒度指纹：worker 名（tool）+ 任务参数指纹。"""
     return (str(wname), _default_call_key((str(task),), {}))
 
@@ -248,13 +248,14 @@ class NoProgressTracker:
     """
 
     def __init__(self, enabled: bool = True,
-                 max_repeats: int = NO_PROGRESS_MAX_REPEATS, key_fn=None) -> None:
+                 max_repeats: int = NO_PROGRESS_MAX_REPEATS,
+                 key_fn: Any = None) -> None:
         self.enabled = bool(enabled)
         self.max_repeats = int(max_repeats)
         self.key_fn = key_fn
-        self.guards: dict = {}
+        self.guards: dict[str, Any] = {}
 
-    def configure(self, enabled: bool, max_repeats: int, key_fn=None) -> None:
+    def configure(self, enabled: bool, max_repeats: int, key_fn: Any = None) -> None:
         if max_repeats < 1:
             raise ValueError("max_repeats 必须 >= 1")
         self.enabled = bool(enabled)
@@ -262,17 +263,17 @@ class NoProgressTracker:
         self.key_fn = key_fn
         self.guards.clear()
 
-    def guard_for(self, wname: str):
+    def guard_for(self, wname: str) -> Any:
         """取（或建）某 worker 专属的 no-progress guard（per-tool 独立计数）。"""
         g = self.guards.get(wname)
         if g is None:
             base = self.key_fn or _worker_call_key
 
-            def _kf(task, _w=wname, _base=base):
+            def _kf(task: Any, _w: str = wname, _base: Any = base) -> Any:
                 return _base(_w, task)
 
             @with_no_progress_guard(max_repeats=self.max_repeats, key_fn=_kf)
-            def _guard(task):
+            def _guard(task: Any) -> Any:
                 return task
 
             g = _guard
@@ -291,7 +292,7 @@ _default_no_progress = NoProgressTracker(enabled=False)
 
 def set_no_progress_detection(enabled: bool = True,
                               max_repeats: int = NO_PROGRESS_MAX_REPEATS,
-                              key_fn=None) -> None:
+                              key_fn: Any = None) -> None:
     """配置**默认** tracker（兼容入口）。
 
     run_multi_agent 不再调用它重置全局状态 —— 每次 run 自建 ``NoProgressTracker``
@@ -300,7 +301,7 @@ def set_no_progress_detection(enabled: bool = True,
     _default_no_progress.configure(enabled, max_repeats, key_fn)
 
 
-def check_no_progress(wname: str, task: Any, tracker=None) -> None:
+def check_no_progress(wname: str, task: Any, tracker: Any = None) -> None:
     """派发前检查：连续 K 次同 (worker, task) → 抛 :class:`NoProgressError`。
 
     ``tracker`` 缺省用默认 tracker（兼容旧调用）；run_multi_agent 传
