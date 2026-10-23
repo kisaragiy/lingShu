@@ -8,7 +8,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-1c3d5a?logo=langchain)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-f5de17)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1080%20passed-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-1103%20passed-brightgreen)]()
 [![GitHub stars](https://img.shields.io/github/stars/kisaragiy/lingShu?style=flat&logo=github)](https://github.com/kisaragiy/lingShu)
 
 > **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
@@ -195,6 +195,24 @@ agent-harness serve
 
 ---
 
+## 🛡️ 失效边界与防线
+
+长任务的价值不在顺利时跑得快，而在出问题时不会把已花的成本全部清零。下表列出的是**失败时的行为** —— 它们不进演示截图，但决定了系统在真实环境里能否跑完。每条都对应一个可直接运行的测试；没有测试的承诺不写进这张表。
+
+| 失效场景 | 处理方式 | 验证 |
+|---|---|---|
+| 任务在节点中途崩溃 | SQLite checkpointer 落盘（`HARNESS_DATA_DIR/checkpoints.sqlite`），`thread_id` 复用 `session_id`；续跑时已完成的 superstep 不重算，不重复消耗 LLM 调用 | `pytest tests/test_graph_resume.py -v` |
+| 崩溃点节点的副作用重复 | checkpoint 粒度是 superstep：节点内抛异常时该 superstep 不落盘，续跑从上一个成功 superstep 末尾开始 —— 因此节点按幂等实现（覆盖写、外部副作用带去重键） | `pytest tests/test_graph_resume.py -k resume_skips -v` |
+| checkpointer 自身不可用 | 降级返回 `None` 并告警，主流程照常运行（可观测性设施不得把业务带崩） | `pytest tests/test_graph_resume.py -k degrades -v` |
+| 状态含不可序列化对象 | 熔断器实现 `__getstate__`/`__setstate__`，锁与时钟在反序列化时重建 —— 否则 checkpoint 一条都写不进，现象是「接了等于没接」 | `pytest tests/test_graph_resume.py -k pickle -v` |
+| 不可逆工具被默认放行 | `default` 模式下一律拒绝（不看调用方传入的 `auto_confirm`），待批请求落 `pending/req_*.json`；只有 `full` 放行 | `pytest tests/test_permission_default_denies.py -v` |
+| `full` 模式被长时间遗忘 | `HARNESS_FULL_ACCESS_TTL`（默认 1800s）到期自动回落 `default` 并留审计；进程重启不给旧权限续命 | `pytest tests/test_permission_default_denies.py -k expir -v` |
+| 历史消费算进本次预算 | token 台账是进程级累计，熔断器与预算锚定 run 起飞点水位线，跨 run 不互相熔断 | `pytest tests/test_ledger_scoping.py -v` |
+
+**不做什么**：不做多实例共享 checkpoint（sqlite 写锁与单进程设计冲突，需要时应换服务端状态存储）；不做「点一下确认就走」的不可逆工具放行（确认弹窗是交互，不是权限边界）；不在 run 之间清零 token 台账（会掩盖真实累计消费，让成本失控无从发现）。
+
+---
+
 ## 🛠️ 技术栈
 
 | 领域 | 技术 |
@@ -275,7 +293,7 @@ agent-harness eval          # 运行回归测试
 
 覆盖：搜索、RAG、代码执行、桌面操作、多轮对话、客服场景等。
 
-> 项目共 1080 个测试用例通过（`pytest`，2026-10-23 实测 **1080 passed / 3 skipped**，收集 1083、8 个 integration 默认 deselect），覆盖工具链路、鉴权与安全护栏、架构边界与数据根隔离、HTTP 契约、证据链持久化与回溯、报告索引原子性与并发、可观测性、RAG 作用域隔离、成本控制、推理缓存、评测口径（事实性断言）、SSE 并发与取消、密钥与日志脱敏等模块；其中 8 个集成用例需本地起服务（`cs_demo :8788` / `llama.cpp :8080`），默认不收集，用 `pytest -m integration` 显式运行。测试数量以仓库实测为准。
+> 项目共 1103 个测试用例通过（`pytest`，2026-10-23 实测 **1103 passed / 3 skipped**，收集 1106、8 个 integration 默认 deselect），覆盖工具链路、鉴权与安全护栏、架构边界与数据根隔离、HTTP 契约、证据链持久化与回溯、报告索引原子性与并发、可观测性、RAG 作用域隔离、成本控制与计量作用域、崩溃续跑与 checkpoint 序列化、权限边界与待批工单、推理缓存、评测口径（事实性断言）、SSE 并发与取消、密钥与日志脱敏等模块；其中 8 个集成用例需本地起服务（`cs_demo :8788` / `llama.cpp :8080`），默认不收集，用 `pytest -m integration` 显式运行。测试数量以仓库实测为准。
 
 ---
 
