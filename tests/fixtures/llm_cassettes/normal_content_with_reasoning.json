@@ -1,0 +1,34 @@
+{
+  "name": "normal_content_with_reasoning",
+  "why": "思考与答案并存：答案走 content，思考单独交还，两条通道永不合并",
+  "request": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "列出三条测试建议"
+      }
+    ],
+    "system_prompt": "你是测试助手"
+  },
+  "response": {
+    "id": "chatcmpl-c1",
+    "model": "deepseek-chat",
+    "choices": [
+      {
+        "index": 0,
+        "finish_reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": "1. 覆盖失败路径\n2. 断言可复现\n3. 夹具与代码同源",
+          "reasoning_content": "用户要三条建议，先分组再排序……"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 18,
+      "completion_tokens": 26,
+      "total_tokens": 44
+    }
+  },
+  "prompt_hash": "e8a670da84d430cd7e7a9a358cdd638a420e230cc5dcd6fc60a78298f621e78e"
+}

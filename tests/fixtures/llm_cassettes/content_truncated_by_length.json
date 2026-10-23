@@ -1,0 +1,33 @@
+{
+  "name": "content_truncated_by_length",
+  "why": "答案写了一半被 max_tokens 截断：content 照常返回，仍是可缓存结果",
+  "request": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "解释一下熔断器半开状态"
+      }
+    ],
+    "system_prompt": "你是后端助手"
+  },
+  "response": {
+    "id": "chatcmpl-c4",
+    "model": "deepseek-chat",
+    "choices": [
+      {
+        "index": 0,
+        "finish_reason": "length",
+        "message": {
+          "role": "assistant",
+          "content": "半开状态指的是熔断器在冷却期后放行少量请求"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 20,
+      "completion_tokens": 40,
+      "total_tokens": 60
+    }
+  },
+  "prompt_hash": "059819d836b242a08360b36e9f6319b7266858c6673d001cb093109b257d38cb"
+}

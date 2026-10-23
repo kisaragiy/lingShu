@@ -1,0 +1,29 @@
+{
+  "name": "ollama_reasoning_field",
+  "why": "ollama /v1 用 reasoning 字段而非 reasoning_content —— 字段名差异不能让思考轨迹漏进答案通道",
+  "request": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "1+1 等于几"
+      }
+    ],
+    "system_prompt": "你是助手"
+  },
+  "response": {
+    "id": "chatcmpl-c7",
+    "model": "qwen3.5:9b",
+    "choices": [
+      {
+        "index": 0,
+        "finish_reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": "2",
+          "reasoning": "这是最基础的加法……"
+        }
+      }
+    ]
+  },
+  "prompt_hash": "48bcfb7f664405b40588469a301313b7f5afd60863680b9f81d9b0988b3eae78"
+}

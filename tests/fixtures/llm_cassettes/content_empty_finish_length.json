@@ -1,0 +1,34 @@
+{
+  "name": "content_empty_finish_length",
+  "why": "预算被思考吃光、答案还没开始写 —— 必须返回空串让调用方加预算重试，绝不能把思考轨迹当答案交出去",
+  "request": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "证明根号 2 是无理数"
+      }
+    ],
+    "system_prompt": "你是数学助手"
+  },
+  "response": {
+    "id": "chatcmpl-c2",
+    "model": "deepseek-reasoner",
+    "choices": [
+      {
+        "index": 0,
+        "finish_reason": "length",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "假设根号2=p/q，p、q互质，则p²=2q²，故p为偶数……"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 22,
+      "completion_tokens": 4096,
+      "total_tokens": 4118
+    }
+  },
+  "prompt_hash": "f0333e9dbb9a919ac1f2200bcdaf26f5cddb62fffeb61fe03962f5e26da8bf47"
+}
