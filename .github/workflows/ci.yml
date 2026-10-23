@@ -81,6 +81,13 @@ jobs:
         # 真正该拉的是 HTTP 边界路径覆盖（本轮之前为 0），总覆盖率是它的副产品。
         run: uv run pytest tests/ -q --cov=src/agent_harness --cov-report=term --cov-fail-under=35
 
+      - name: Core pipeline and graph coverage gate (blocking)
+        # 2026-10-23 Windows 实测：pipeline 69.96%、graph 79.79%，合计 TOTAL 74.10%。
+        # 核心可靠性路径单独守门，避免全局覆盖率掩盖退化；保留上方全局 35% 门禁。
+        # 按 floor(min(实测 TOTAL - 2, 70)) 取 70：留 2pt 平台差余量，沿用同仓全局门禁先例。
+        # 这是可执行的 ratchet：门槛只许升不许降，不能用降低门槛掩盖覆盖率回退。
+        run: uv run pytest tests/ -q --cov=src/agent_harness/core/pipeline --cov=src/agent_harness/core/graph --cov-report=term --cov-fail-under=70
+
       - name: Mutation testing (core modules)
         # informational by design：变异存活率尚无稳定基线，先观察再制定可执行阈值。
         run: |
