@@ -14,7 +14,27 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-DB_PATH = Path(__file__).parent.parent.parent / "data" / "audit.db"
+# 数据根绑定（模块级可见：架构边界测试的运行时归属断言按属性名核对）
+data_dir = os.environ.get("HARNESS_DATA_DIR")
+
+
+def _resolve_db_path() -> Path:
+    """审计库位置：显式变量 > 数据根 > 用户家目录（**绝不**落安装目录）。
+
+    原实现 ``Path(__file__).parent.parent.parent / "data" / "audit.db"`` 指向
+    ``src/data/audit.db``：pip 安装后 ``site-packages`` 不可写 → 审计静默失效；
+    跑测试则在源码树里写脏文件。其它数据根（session_store / safety.mode）都读
+    环境变量，这里对齐。
+    """
+    explicit = os.environ.get("HARNESS_AUDIT_DB")
+    if explicit:
+        return Path(explicit)
+    if data_dir:
+        return Path(data_dir) / "audit.db"
+    return Path.home() / ".agent-harness" / "audit.db"
+
+
+DB_PATH = _resolve_db_path()
 
 
 def _get_conn():

@@ -23,6 +23,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import uuid
 from typing import Any, Literal
@@ -48,10 +49,24 @@ from ..pipeline.state import SupervisorState, WorkerResult
 from ..pipeline.tracing import TraceCollector
 from ..retry import NoProgressError, _default_call_key, with_no_progress_guard
 
-# Module-level trace collector — set before graph invocation
-_trace_collector: TraceCollector | None = None
-# Module-level progress queue — set before graph invocation for SSE streaming
-_progress_queue = None
+# ─── Run-scoped progress / trace 注册表（P0-2）───
+# 原实现是模块级单例：并发两个会话时 set(B) 顶掉 A（A 的事件全丢），A 结束
+# clear() 又把 B 置空（B 的 SSE 只收到 done 后静默掐断）。改为按 key（task_id /
+# session_id / trace_id）存取：clear 只删自己的 key；跨线程与跨执行器都不依赖
+# contextvars 传播，节点内用 state["task_id"] 查表即可。
+# 空串 = 无 task_id 的 CLI 单跑默认槽（向后兼容）。
+_progress_queues: dict[str, Any] = {}
+_trace_collectors: dict[str, TraceCollector] = {}
+_registry_lock = threading.Lock()
+
+# Worker 并发等待的总 deadline（秒）。层级：worker < round < task 的 600s 墙钟。
+# 环境变量可覆盖（测试/压测用）；0 或非法值回落默认 120。
+try:
+    WORKER_DEADLINE_S = float(os.environ.get("HARNESS_WORKER_DEADLINE_S") or 120)
+except ValueError:
+    WORKER_DEADLINE_S = 120.0
+if WORKER_DEADLINE_S <= 0:
+    WORKER_DEADLINE_S = 120.0
 
 
 # ─── Circuit-breaker feeding helpers ───
@@ -164,8 +179,9 @@ def _handle_budget_level(state: SupervisorState, level: BudgetLevel) -> list[dic
         budget.kill(reason)
         msg = f"🔥 Token 预算急停（kill switch）：{reason}"
     print(f"[Supervisor] {msg}", file=sys.stderr)
-    if _progress_queue:
-        _progress_queue.put({"type": "progress", "content": msg + "\n"})
+    _pq = _progress(state.get("task_id") if isinstance(state, dict) else None)
+    if _pq:
+        _pq.put({"type": "progress", "content": msg + "\n"})
     return [{"level": level.value, "used": budget.used,
              "soft_limit": budget.soft_limit, "message": msg}]
 
@@ -251,22 +267,49 @@ def _record_no_progress_trip(wname: str, task: Any, exc: NoProgressError,
     events.append({"worker": wname, "task": str(task)[:120], "repeats": exc.repeats})
 
 
-def set_trace_collector(collector: TraceCollector):
-    """Set the trace collector for the current execution."""
-    global _trace_collector
-    _trace_collector = collector
+def set_trace_collector(collector: TraceCollector, key: str | None = None) -> str:
+    """登记本 run 的 trace collector，返回存放用的 key（清理时原样传回）。"""
+    k = key or ""
+    with _registry_lock:
+        _trace_collectors[k] = collector
+    return k
 
 
-def set_progress_queue(q):
-    """Set a queue for real-time progress events (SSE streaming)."""
-    global _progress_queue
-    _progress_queue = q
+def get_trace_collector(key: str | None = None):
+    """取本 run 的 collector；没登记过 → None（不跨 run 串挂）。"""
+    with _registry_lock:
+        return _trace_collectors.get(key or "")
 
 
-def clear_progress_queue():
-    """Clear the progress queue after execution."""
-    global _progress_queue
-    _progress_queue = None
+def clear_trace_collector(key: str | None = None) -> None:
+    """只清指定 run 的 collector（绝不无条件清全局）。"""
+    with _registry_lock:
+        _trace_collectors.pop(key or "", None)
+
+
+def set_progress_queue(q, key: str | None = None) -> str:
+    """登记本 run 的进度队列（SSE），返回 key（清理时原样传回）。"""
+    k = key or ""
+    with _registry_lock:
+        _progress_queues[k] = q
+    return k
+
+
+def get_progress_queue(key: str | None = None):
+    """取本 run 的进度队列；未登记 → None。"""
+    with _registry_lock:
+        return _progress_queues.get(key or "")
+
+
+def clear_progress_queue(key: str | None = None) -> None:
+    """只清指定 run 的队列（A 结束不会把 B 的流置空）。"""
+    with _registry_lock:
+        _progress_queues.pop(key or "", None)
+
+
+def _progress(key: str | None = None):
+    """节点内取进度队列的简写（key 用 state["task_id"]）。"""
+    return get_progress_queue(key)
 
 
 # ─── Dispatch: run workers in parallel ───
@@ -290,20 +333,24 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
     """Fan-out tasks to workers, running them in parallel."""
     workers_assigned = state.get("workers_assigned", [])
     worker_tasks = state.get("worker_tasks", {})
+    # P0-2：本 run 的进度队列 / trace 按 task_id 取，不读进程单例（并发不串台）
+    run_key = state.get("task_id", "")
+    _pq = _progress(run_key)
+    _tc = get_trace_collector(run_key)
 
     # Check cancellation before dispatching（ENG-21：只查本 session 的信号）
     if is_cancelled(state.get("task_id", "")):
         print("[Supervisor] ⛔ 用户取消了任务")
-        if _progress_queue:
-            _progress_queue.put({"type": "progress", "content": "⛔ 任务已取消\n"})
+        if _pq:
+            _pq.put({"type": "progress", "content": "⛔ 任务已取消\n"})
         return {"all_done": True, "final_output": "⛔ 任务已被用户取消"}
 
     if not workers_assigned:
         return {"all_done": True}
 
     print(f"\n[Supervisor] 调度 {len(workers_assigned)} 个 Worker: {workers_assigned}")
-    if _progress_queue:
-        _progress_queue.put({
+    if _pq:
+        _pq.put({
             "type": "progress",
             "content": f"🔀 分配 {len(workers_assigned)} 个 Worker: {', '.join(workers_assigned)}\n"
         })
@@ -316,8 +363,8 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
         parallel_workers = _safe + [_risky[0]]
         serial_workers = _risky[1:]
         print(f"[Supervisor] 副作用 Worker 串行化: 并行 {parallel_workers}，串行 {serial_workers}")
-        if _progress_queue:
-            _progress_queue.put({
+        if _pq:
+            _pq.put({
                 "type": "progress",
                 "content": f"🛡️ {len(serial_workers)} 个副作用 Worker 转串行（防并行冲突）\n"
             })
@@ -331,24 +378,28 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
     no_progress_events: list[dict] = []
 
     def _run_with_trace(wname: str, task: str):
-        """Run worker with optional trace span."""
-        if _progress_queue:
-            _progress_queue.put({
+        """Run worker with optional trace span.
+
+        contextvars 由**调用方在提交前**拷贝（见池提交处 / 串行分支）——
+        在这里 copy 已经晚了：本函数就跑在 worker 线程里，拷到的是空上下文。
+        """
+        if _pq:
+            _pq.put({
                 "type": "progress",
                 "content": f"▶️ {wname} 开始工作: {task[:60]}...\n"
             })
         task_id = state.get("task_id", "")
-        # SEC-2：ThreadPoolExecutor 不传播 contextvars —— 不显式 copy 的话，worker 线程里
-        # RAG 可见作用域是空串（=全见），rag_query 工具就能被诱导读到别人的 collection。
-        ctx = contextvars.copy_context()
-        if _trace_collector:
-            with _trace_collector.span(f"worker:{wname}", "worker", task=task[:80]):
-                result = ctx.run(run_worker, wname, task, task_id=task_id)
-                _trace_collector.record_metadata("output_preview", str(result.get("output", ""))[:100])
+        if _tc:
+            with _tc.span(f"worker:{wname}", "worker", task=task[:80]):
+                result = run_worker(wname, task, task_id=task_id)
+                _tc.record_metadata("output_preview", str(result.get("output", ""))[:100])
                 return result
-        return ctx.run(run_worker, wname, task, task_id=task_id)
+        return run_worker(wname, task, task_id=task_id)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(parallel_workers)) as pool:
+    # P0-8：真 deadline（串行分支复用同一 deadline，层级 worker < round < task）
+    deadline_at = time.time() + WORKER_DEADLINE_S
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(parallel_workers))
+    try:
         futures = {}
         for wname in parallel_workers:
             task = worker_tasks.get(wname, state["request"])
@@ -361,29 +412,32 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
                 print(f"  🔥 {wname}: 无进展熔断（连续 {e.repeats} 次重复），跳过执行")
                 continue
             print(f"  → {wname}: {task[:60]}...")
-            futures[pool.submit(_run_with_trace, wname, task)] = wname
+            # P0-6：contextvars 必须在**提交线程**拷贝。原先 copy_context() 写在
+            # _run_with_trace 内部（worker 线程里）→ 拷到的是空上下文，RAG scope
+            # 恒为空串（=全见），SEC-2 知识库隔离在多 Agent 路径上等于没装。
+            ctx = contextvars.copy_context()
+            futures[pool.submit(ctx.run, _run_with_trace, wname, task)] = wname
 
-        for future in concurrent.futures.as_completed(futures):
-            # Check cancellation
-            if is_cancelled(state.get("task_id", "")):
-                print("[Supervisor] ⛔ 取消检测到，停止等待 Worker")
-                for f in futures:
-                    f.cancel()
-                break
+        # P0-8：真 deadline。原 `as_completed` + `future.result(timeout=120)` 是死参数
+        # （as_completed 只 yield 已完成的 future），单个卡在阻塞调用的 worker 能把
+        # dispatch 无限挂起，熔断器的 600s 墙钟检查永远轮不到。
+        pending = set(futures)
+
+        def _collect(future) -> None:
             wname = futures[future]
             try:
-                result = future.result(timeout=120)
+                result = future.result()
                 results[wname] = result
                 status = "✅" if result.get("success") else "❌"
                 print(f"  {status} {wname} ({result.get('elapsed_s', 0):.1f}s): "
                       f"{str(result.get('output', ''))[:80]}")
-                if _progress_queue:
+                if _pq:
                     snippet = str(result.get("output", ""))[:60]
-                    _progress_queue.put({
+                    _pq.put({
                         "type": "progress",
                         "content": f"{status} {wname} 完成 ({result.get('elapsed_s', 0):.1f}s): {snippet}\n"
                     })
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — 单个 worker 异常不能拖垮本轮
                 results[wname] = WorkerResult(
                     worker_name=wname, success=False, output="",
                     data=None, trace_steps=[], errors=[str(e)], elapsed_s=0,
@@ -391,11 +445,54 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
                 errors[wname] = [str(e)]
                 print(f"  ❌ {wname}: {e}")
 
+        while pending:
+            if is_cancelled(state.get("task_id", "")):
+                print("[Supervisor] ⛔ 取消检测到，停止等待 Worker")
+                for f in futures:
+                    f.cancel()
+                break
+            remaining = deadline_at - time.time()
+            if remaining <= 0:
+                for f in pending:
+                    wname = futures[f]
+                    f.cancel()
+                    msg = f"worker 超时（>{WORKER_DEADLINE_S:g}s 未返回，已放弃等待）"
+                    results[wname] = WorkerResult(
+                        worker_name=wname, success=False, output="",
+                        data=None, trace_steps=[], errors=[msg],
+                        elapsed_s=WORKER_DEADLINE_S,
+                    )
+                    errors[wname] = [msg]
+                    print(f"  ⏱ {wname}: {msg}")
+                    if _pq:
+                        _pq.put({"type": "progress", "content": f"⏱ {wname}：{msg}\n"})
+                pending = set()
+                break
+            done, pending = concurrent.futures.wait(
+                pending, timeout=min(remaining, 0.25),
+                return_when=concurrent.futures.ALL_COMPLETED,
+            )
+            for future in done:
+                _collect(future)
+    finally:
+        # 绝不在退出时 join 卡住的 worker（那会让 deadline 失效、把 dispatch 拖回去）。
+        # 未启动的任务直接取消；已在跑的线程各自有内部超时，跑完自然退出。
+        pool.shutdown(wait=False, cancel_futures=True)
+
     # Serial tail: remaining side-effect workers run one by one (Cognition P2)
     for wname in serial_workers:
         if is_cancelled(state.get("task_id", "")):
             print("[Supervisor] ⛔ 取消检测到，跳过串行 Worker")
             break
+        if time.time() >= deadline_at:
+            msg = f"worker 超时（>总 deadline {WORKER_DEADLINE_S:g}s，串行队列未启动）"
+            results[wname] = WorkerResult(
+                worker_name=wname, success=False, output="",
+                data=None, trace_steps=[], errors=[msg], elapsed_s=0,
+            )
+            errors[wname] = [msg]
+            print(f"  ⏱ {wname} (串行): {msg}")
+            continue
         task = worker_tasks.get(wname, state["request"])
         # P1-3: 串行分支同样做派发前无进展检查
         try:
@@ -407,7 +504,10 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
             continue
         print(f"  → {wname} (串行): {task[:60]}...")
         try:
-            result = _run_with_trace(wname, task)
+            # 串行分支在本线程执行，但同样显式拷贝 context：一次 copy 配一次 run，
+            # 保证 RAG scope / 其它 contextvars 与并行分支行为一致。
+            ctx = contextvars.copy_context()
+            result = ctx.run(_run_with_trace, wname, task)
             results[wname] = result
             status = "✅" if result.get("success") else "❌"
             print(f"  {status} {wname} (串行) ({result.get('elapsed_s', 0):.1f}s): "
@@ -430,8 +530,8 @@ def supervisor_dispatch(state: SupervisorState) -> dict:
         if _breaker_tripped(cb):
             print(f"[Supervisor] 🔥 熔断触发: {'; '.join(cb.check()['reasons'])}",
                   file=sys.stderr)
-            if _progress_queue:
-                _progress_queue.put({
+            if _pq:
+                _pq.put({
                     "type": "progress",
                     "content": "🔥 任务熔断（token 超预算/超时/无进展），提前收尾\n",
                 })
@@ -1323,11 +1423,12 @@ def run_multi_agent(
     print(f"[Multi-Agent] 任务: {request[:100]}...")
     print(f"{'='*60}")
 
-    # Setup tracing
+    # Setup tracing（P0-2：collector 按 task_id 登记，run 结束清掉 —— 不再全局单例）
     collector = None
+    _trace_key = task_id
     if enable_tracing:
         collector = TraceCollector(trace_id)
-        set_trace_collector(collector)
+        set_trace_collector(collector, key=_trace_key)
 
     graph = build_multi_agent(checkpointer=checkpointer)
     invoke_config: dict[str, Any] = {"recursion_limit": 100}
@@ -1372,15 +1473,21 @@ def run_multi_agent(
             return graph.invoke(None, config=invoke_config)  # type: ignore[arg-type]
         return graph.invoke(initial_state, config=invoke_config)
 
-    if collector:
-        with collector.span("multi_agent_root", "supervisor", request=request[:100]):
+    try:
+        if collector:
+            with collector.span("multi_agent_root", "supervisor", request=request[:100]):
+                final = _invoke()
+                # Check circuit breaker：resume 时只有续跑的 state 才准
+                cb: CircuitBreaker = final.get("circuit_breaker") or initial_state.get("circuit_breaker")  # type: ignore
+                if cb and cb.check()["tripped"]:
+                    collector.mark_circuit_breaker("; ".join(cb.check()["reasons"]))
+        else:
             final = _invoke()
-            # Check circuit breaker：resume 时只有续跑的 state 才准
-            cb: CircuitBreaker = final.get("circuit_breaker") or initial_state.get("circuit_breaker")  # type: ignore
-            if cb and cb.check()["tripped"]:
-                collector.mark_circuit_breaker("; ".join(cb.check()["reasons"]))
-    else:
-        final = _invoke()
+    except Exception:
+        # 异常路径也必须回收注册项，否则每失败一次就多一个常驻 collector
+        if collector:
+            clear_trace_collector(_trace_key)
+        raise
 
     elapsed = time.time() - t0
     print(f"\n[Multi-Agent] 完成 ({elapsed:.1f}s, {final.get('round', 1)} 轮)")
@@ -1408,5 +1515,6 @@ def run_multi_agent(
         trace_tree = collector.build()
         result["trace_tree"] = trace_tree
         print(f"\n{trace_tree.summary()}")
+        clear_trace_collector(_trace_key)
 
     return result

@@ -72,6 +72,9 @@ PINNED: dict[tuple[str, str], str | None] = {
     ("apps/research/pipeline/report_store.py", "REPORTS_DIR"): "HARNESS_REPORTS_DIR",
     ("core/agent_cron.py", "SCHEDULER_DIR"): "HARNESS_SCHEDULER_DIR",
     ("core/agent_log.py", "LOG_DIR"): "HARNESS_DATA_DIR",
+    # P1-2：审计库从 __file__ 三级（写进源码树）改为读数据根；另有 HARNESS_AUDIT_DB
+    # 做文件级覆盖（审计库是**文件**不是目录，conftest 单独重定向），两者都不新增根名。
+    ("core/audit.py", "data_dir"): "HARNESS_DATA_DIR",
     ("core/auth/api_security.py", "HARNESS_DIR"): "HARNESS_DATA_DIR",
     ("core/auth/auth_db.py", "HARNESS_DIR"): "HARNESS_DATA_DIR",
     ("core/pipeline/config_manager.py", "CONFIG_DIR"): "HARNESS_CONFIG_DIR",
