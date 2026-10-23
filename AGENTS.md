@@ -57,7 +57,7 @@ pytest -q                      # 全量
 pytest tests/ -q -k "not integration"
 ```
 
-基线（2026-10-23 实测）：`1106 collected, 1103 passed, 3 skipped`（8 个 integration 默认 deselect）。改动后跑全量：passed **只增不减**，出现任何 failed/error 即视为回归；新增用例后同步更新本行数字。
+基线（2026-10-23 实测，8 个 integration 默认 deselect）：具体数字只写在 `README.md` 徽章一处，这里不重复——两处数字必然漂移。改动后跑全量：通过数**只增不减**，出现任何 failed/error 即视为回归；新增用例后同步更新 README 徽章。
 
 发版门禁测试（不要绕过）：
 
