@@ -228,3 +228,34 @@ class CircuitBreaker:
             "tripped": self._tripped,
             "open_hard": self._open_hard,
         }
+
+
+# ─── 作用域正确的构造入口 ───
+
+def _ledger_snapshot() -> int:
+    """当前全局 token 台账累计（延迟 import，避免 pipeline 包内循环依赖）。"""
+    from .llm import ledger_total
+
+    return ledger_total()
+
+
+def new_scoped_breaker(**kwargs) -> CircuitBreaker:
+    """构造 run 级熔断器，并把 token 水位线锚在当前全局台账累计上。
+
+    背景：``pipeline.llm._LLM_TOKEN_LEDGER`` 是**进程级**累计（所有 run 共享），
+    而熔断器是**每 run 新建**。若水位线从 0 起算，首次喂数会把历史所有 run 的
+    token 算进本次 —— 进程累计一旦超过 ``max_tokens``，之后每个新任务开局即硬
+    熔断（进 OPEN 且 ``_open_hard=True``，永久停、不冷却），外层表现为空报告。
+
+    锚定起飞点后，喂数 delta 恒等于本 run 的真实消耗。
+
+    Args:
+        **kwargs: 透传给 ``CircuitBreaker``（max_tokens / max_time_s /
+            max_no_progress / time_fn）。
+
+    Returns:
+        已设置 ``_ledger_total`` 水位线的 ``CircuitBreaker`` 实例。
+    """
+    cb = CircuitBreaker(**kwargs)
+    cb._ledger_total = _ledger_snapshot()  # type: ignore[attr-defined]
+    return cb

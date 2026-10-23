@@ -262,7 +262,20 @@ def test_run_multi_agent_honours_env_limit(monkeypatch):
 # 阈值刻意选 1000 << 熔断器硬阈值 100000，保证是**预算**（非硬熔断）在起作用。
 
 def _fixed_ledger(n: int):
-    return lambda: n
+    """模拟进程级台账：**起飞点读到 0，之后涨到 n**（代表本 run 的真实消耗）。
+
+    作用域修复后，熔断器与预算在 ``run_multi_agent`` 的 initial_state 里各读一次
+    台账作为 delta 基准（起飞点），因此前两次读取必须返回 0；此后返回 n，喂数
+    才计算得到增量 n。修复前是「总量即本次」，所以旧写法用 ``lambda: n`` 也能过 ——
+    那种写法在修复后会退化成「历史消耗」，恰好是本次要消除的行为。
+    """
+    calls = {"n": 0}
+
+    def _read() -> int:
+        calls["n"] += 1
+        return 0 if calls["n"] <= 2 else n
+
+    return _read
 
 
 def test_e2e_real_graph_stops_on_budget(mock_session, monkeypatch, capsys):
