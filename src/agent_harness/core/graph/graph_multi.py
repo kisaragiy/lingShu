@@ -42,7 +42,7 @@ from ..pipeline.cancel import (
     is_cancelled,
 )
 from ..budget import BudgetLevel, TokenBudget
-from ..pipeline.circuit_breaker import CircuitBreaker
+from ..pipeline.circuit_breaker import CircuitBreaker, new_scoped_breaker
 from ..pipeline.llm import ledger_total
 from ..pipeline.state import SupervisorState, WorkerResult
 from ..pipeline.tracing import TraceCollector
@@ -58,7 +58,15 @@ _progress_queue = None
 # Token counts are accumulated in pipeline.llm's module ledger by every LLM call
 # site (supervisor / workers / llm.py). We feed the breaker with the delta since
 # the last feed so token-budget + no-progress detection actually fire mid-run.
-# The last-fed watermark is stashed on the breaker instance (fresh per run).
+# The last-fed watermark is stashed on the breaker instance.
+#
+# 注意：实例每 run 新建，**但台账是进程级累计**。水位线必须锚在 run 起飞点
+# （new_scoped_breaker），否则首次喂数会把历史所有 run 的 token 算进本次。
+
+def _new_circuit_breaker() -> CircuitBreaker:
+    """构造 run 级熔断器，token 水位线锚在当前全局台账累计（见 new_scoped_breaker）。"""
+    return new_scoped_breaker()
+
 
 def _feed_breaker_tokens(cb: CircuitBreaker) -> None:
     """Feed cumulative LLM token delta into the breaker."""
@@ -91,11 +99,17 @@ def _breaker_tripped(cb: CircuitBreaker | None) -> bool:
 #   * CircuitBreaker：硬阈值，撞上即停（token / 超时 / 无进展）。
 #   * TokenBudget  ：软限制三层 —— 先记日志提醒，再告警请求确认，最后强制急停。
 # 预算实例存在 `state["token_budget"]`；喂数的水位线 `_ledger_total` 挂在实例上
-# （每次 run 新建，不跨任务串计数）。缺此字段的旧调用方行为完全不变。
+# 实例每 run 新建，但台账是进程级累计 —— 水位线锚在 run 起飞点，否则历史消耗
+# 会算进本次（见 _new_token_budget）。缺此字段的旧调用方行为完全不变。
 
 def _new_token_budget() -> TokenBudget:
-    """构造会话级 TokenBudget；阈值可用环境变量覆盖（非法值忽略并提示）。"""
+    """构造会话级 TokenBudget；阈值可用环境变量覆盖（非法值忽略并提示）。
+
+    token 水位线同样锚在当前全局台账累计上 —— 预算与熔断器共用
+    ``_LLM_TOKEN_LEDGER``，同一个作用域坑必须一起修，否则新会话开局即被判超预算。
+    """
     budget = TokenBudget()
+    budget._ledger_total = ledger_total()  # type: ignore[attr-defined]
     for attr, env_name in (("soft_limit", "HARNESS_TOKEN_SOFT_LIMIT"),
                            ("hard_limit", "HARNESS_TOKEN_HARD_LIMIT")):
         raw = os.environ.get(env_name)
@@ -1276,8 +1290,8 @@ def run_multi_agent(
         "trace_id": trace_id,
         "task_id": task_id,
         "trace_steps": [],
-        "circuit_breaker": CircuitBreaker(),
-        # 会话级 token 预算（WARN/ASK/STOP 三层软限制）；水位线每次 run 重置
+        "circuit_breaker": _new_circuit_breaker(),
+        # 会话级 token 预算（WARN/ASK/STOP 三层软限制）；水位线锚在本 run 起飞点
         "token_budget": _new_token_budget(),
         "budget_level": "ok",
         "budget_events": [],

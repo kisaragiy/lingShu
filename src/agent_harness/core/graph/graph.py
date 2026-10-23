@@ -11,7 +11,7 @@ from typing import Literal
 from langgraph.graph import END, StateGraph
 
 from ..config import MAX_RETRIES
-from ..pipeline.circuit_breaker import CircuitBreaker
+from ..pipeline.circuit_breaker import CircuitBreaker, new_scoped_breaker
 from ..pipeline.llm import (
     extract_answer,
     ledger_bump,
@@ -226,7 +226,7 @@ def run(request: str) -> str:
         "validator_fixes": [],
         "trace_id": "",
         "trace_steps": [],
-        "_circuit_breaker": CircuitBreaker(),
+        "_circuit_breaker": new_scoped_breaker(),
     }
     final = graph.invoke(state)
     return final.get("final_output", "")
