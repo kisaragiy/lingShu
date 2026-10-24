@@ -14,6 +14,7 @@ from langgraph.graph import END, StateGraph
 
 from ..agents.supervisor import WORKER_CAPABILITIES
 from ..pipeline.cancel import is_cancelled
+from ..pipeline.provider_guard import guarded_post
 from ..pipeline.llm import ledger_bump
 from ..pipeline.state import WorkerResult, WorkerState
 from ..tools.registry import TOOL_REGISTRY, call_tool, validate_result
@@ -89,8 +90,6 @@ def _fallback_worker_result(worker_type: str, query: str) -> str:
 def _call_llm(messages: list[dict], system_prompt: str = "",
               max_tokens: int = 4096, task_hint: str = "") -> str:
     """Call the configured LLM. Simple tasks get a smaller budget, not another endpoint."""
-    import requests as req_lib
-
     from ..config import get_llm_config
     from ..pipeline.llm import (
         THINKING_MIN_BUDGET, _extract_openai_content, _thinking_mode,
@@ -117,7 +116,7 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
     if mode != "on":
         payload["thinking"] = {"type": "disabled"}
     try:
-        resp = req_lib.post(api_url, json=payload, timeout=300 if not use_local else 60)
+        resp = guarded_post(api_url, json=payload, timeout=300 if not use_local else 60)
         if resp.status_code != 200:
             print(f"[Worker] LLM 返回 HTTP {resp.status_code}，本步产出为空", file=sys.stderr)
             return ""

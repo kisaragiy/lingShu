@@ -4,6 +4,7 @@ import json
 
 from ..config import SUPERVISOR_MAX_ROUNDS
 from ..pipeline.cancel import is_cancelled
+from ..pipeline.provider_guard import guarded_post
 from ..pipeline.llm import (
     extract_answer,
     ledger_bump,
@@ -154,8 +155,6 @@ def _call_llm_full(messages: list[dict], system_prompt: str = "",
     配置与取值统一走 pipeline/llm 的三个入口：端点每调用重读（不吃 import 快照）、
     答案只从 content 取（思考轨迹不冒充答案）、thinking 跟随 HARNESS_LLM_THINKING。
     """
-    import requests as req_lib
-
     api_url, model = runtime_endpoint()
     if not api_url:
         print(
@@ -176,7 +175,7 @@ def _call_llm_full(messages: list[dict], system_prompt: str = "",
         **thinking_payload(),
     }
     try:
-        resp = req_lib.post(api_url, json=payload, timeout=timeout)
+        resp = guarded_post(api_url, json=payload, timeout=timeout)
         if resp.status_code == 200:
             data = resp.json()
             choice = data["choices"][0]
