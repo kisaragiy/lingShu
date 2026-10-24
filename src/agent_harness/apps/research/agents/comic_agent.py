@@ -17,6 +17,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from ....core.pipeline.provider_guard import guarded_post
 from agent_harness.core.pipeline.llm import (
     extract_answer,
     runtime_endpoint,
@@ -92,8 +93,6 @@ Output ONLY the JSON, no other text."""
 
 def generate_script(user_prompt: str, scene_count: int = 6) -> ComicScript:
     """Generate storyboard using LLM."""
-    import requests as req_lib
-
     user_msg = (
         f"Create a {scene_count * 5}-second anime short video storyboard.\n"
         f"User request: {user_prompt}\n\n"
@@ -117,7 +116,7 @@ def generate_script(user_prompt: str, scene_count: int = 6) -> ComicScript:
         if not api_url:
             raw = ""
         else:
-            resp = req_lib.post(api_url, json=payload, timeout=300)
+            resp = guarded_post(api_url, json=payload, timeout=300)
             if resp.status_code == 200:
                 raw = extract_answer(resp.json(), 2048)
             else:

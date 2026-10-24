@@ -12,6 +12,7 @@ from langgraph.graph import END, StateGraph
 
 from ..config import MAX_RETRIES
 from ..pipeline.circuit_breaker import CircuitBreaker, new_scoped_breaker
+from ..pipeline.provider_guard import guarded_post
 from ..pipeline.llm import (
     extract_answer,
     ledger_bump,
@@ -27,9 +28,6 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
               max_tokens: int = 4096, temperature: float = 0.3) -> str:
     """端点/模型每调用重读配置；答案只取 content（思考轨迹不冒充答案）。"""
     import sys
-
-    import requests as req_lib
-
     api_url, model = runtime_endpoint()
     if not api_url:
         print("[graph] 未配置 LLM 端点 —— 设置 HARNESS_LLAMA_API 或 HARNESS_DEEPSEEK_API",
@@ -44,7 +42,7 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
         **thinking_payload(),
     }
     try:
-        resp = req_lib.post(api_url, json=payload, timeout=300)
+        resp = guarded_post(api_url, json=payload, timeout=300)
         if resp.status_code == 200:
             data = resp.json()
             ledger_bump(data.get("usage", {}).get("total_tokens", 0))
