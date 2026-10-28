@@ -568,6 +568,8 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None,
     border-radius: 4px; font-size: 10.5px; }}
   /* ─── Footer / Print bar ─── */
   .footer {{ text-align: center; font-size: 12px; color: #94a3b8; padding: 24px 0; }}
+  pre {{ background: #f1f5f9; padding: 16px; border-radius: 10px; overflow-x: auto; white-space: pre; line-height: 1.7; }}
+  code {{ font-family: ui-monospace, monospace; font-size: 0.9em; }}
   .print-bar {{ text-align: center; margin-bottom: 12px; }}
   .print-btn {{
     background: #2563eb; color: #fff; border: none; padding: 8px 20px;
@@ -677,9 +679,19 @@ def _markdown_to_html(text: str) -> str:
     in_table = False
     in_list = ""
     prev_table_row = None   # 暂存上一表格行，等下一行裁决它是表头还是数据行
+    in_code = False
+    code_lines: list[str] = []
 
     for line in lines:
         stripped = line.strip()
+        if in_code:
+            if stripped.startswith("```"):
+                html.append('<pre><code>' + '\n'.join(code_lines) + '</code></pre>')
+                code_lines = []
+                in_code = False
+            else:
+                code_lines.append(line)
+            continue
         list_kind = "ul" if stripped.startswith(("- ", "* ")) else "ol" if re.match(r"^\d+[.、]\s", stripped) else ""
         if in_list and list_kind != in_list:
             html.append(f"</{in_list}>")
@@ -719,6 +731,9 @@ def _markdown_to_html(text: str) -> str:
                 html.append("</table>")
                 in_table = False
 
+        if stripped.startswith("```"):
+            in_code = True
+            continue
         stripped = _report_inline(stripped)
         # Headers
         if stripped.startswith("### "):
@@ -754,6 +769,8 @@ def _markdown_to_html(text: str) -> str:
             else:
                 html.append(f"<p>{stripped}</p>")
 
+    if in_code:
+        html.append('<pre><code>' + '\n'.join(code_lines) + '</code></pre>')
     if prev_table_row is not None:      # 文末残留的最后一行表格
         if not in_table:
             html.append("<table>")
