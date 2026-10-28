@@ -33,15 +33,17 @@ function renderSidebarList() {
   }
   list.innerHTML = filtered.map(s => {
     const isActive = s.id === chatSessionId;
-    const displayName = (s.title || s.preview || '新会话').slice(0, 35);
+    const displayName = (s.title || s.preview || '新会话').replace(/^#+\s*/, '').slice(0, 35);
     const pinIcon = s.pinned ? '📌 ' : '';
     const time = formatSidebarTime(s.last_active);
     return `<div class="session-item ${isActive ? 'active' : ''}" onclick="switchToSession('${s.id}')" data-sid="${s.id}">
       <div class="session-item-title">${pinIcon}${escHtml(displayName)}</div>
       <div class="session-item-preview">${s.exchanges || 0} 条消息 · ${time}</div>
-      <button class="btn btn-sm" style="padding:1px 6px;font-size:10px;margin-right:2px" onclick="event.stopPropagation();renameSession('${s.id}')">✏️</button>
+      <div class="session-item-actions">
+      <button class="btn btn-sm" title="重命名会话" style="padding:1px 6px;font-size:10px;margin-right:2px" onclick="event.stopPropagation();renameSession('${s.id}')">✏️</button>
       <button class="btn btn-sm" style="padding:1px 6px;font-size:10px;margin-right:2px" onclick="event.stopPropagation();togglePinSession('${s.id}',${!s.pinned})">${s.pinned ? '📌' : '📍'}</button>
-      <button class="btn btn-sm" style="padding:1px 6px;font-size:10px" onclick="event.stopPropagation();downloadExport('/v1/sessions/${s.id}/export','session_${s.id}.json')">⬇</button>
+      <button class="btn btn-sm" title="导出会话" style="padding:1px 6px;font-size:10px" onclick="event.stopPropagation();downloadExport('/v1/sessions/${s.id}/export','session_${s.id}.json')">⬇</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -183,10 +185,11 @@ async function switchToSession(sessionId) {
 function switchToNewSession() {
   chatSessionId = 'chat-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
   chatHistory = [];
+  if (dashTab !== 'chat') { switchTab('chat'); }
   renderSidebarList();
   const container = document.getElementById('chat-messages');
   if (container) {
-    container.innerHTML = '<div class="text-center text-muted text-sm" style="padding:40px">输入消息开始与灵枢对话</div>';
+    container.innerHTML = chatWelcomeHtml();
   }
   const count = document.getElementById('chat-msg-count');
   if (count) count.textContent = '';

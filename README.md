@@ -8,7 +8,8 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-1c3d5a?logo=langchain)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-f5de17)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1257%20passed-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-1258%20passed-brightgreen)]()
+[![CI](https://github.com/kisaragiy/lingShu/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/kisaragiy/lingShu/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/kisaragiy/lingShu?style=flat&logo=github)](https://github.com/kisaragiy/lingShu)
 
 > **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
@@ -38,10 +39,31 @@
 ## 🖥️ 效果
 
 <p align="center">
-  <img src="docs/screenshots/lingShu-orchestrate.png" alt="灵枢 Agent 编排拓扑界面" width="700">
+  <img src="docs/screenshots/research-home.png" alt="灵枢 v0.75.6 调研首页：问题示例、报告入口与工作台导航" width="960">
   <br>
-  <em>Agent 编排拓扑（Supervisor-Worker · LangGraph 状态机 · 实时工具注册表）</em>
+  <em>调研首页：示例只填入问题，由用户确认后发送。</em>
 </p>
+
+<details>
+<summary>查看真实任务历史输出与报告截图</summary>
+
+以下是 2026-10-28 一次真实云端调研的历史输出，用 v0.75.6 重新呈现；本轮截图没有重新调用模型。任务为根据 Python 官方文档比较 `asyncio.to_thread` 与 `loop.run_in_executor`。
+
+![真实任务的用户问题、助手输出与对比表格](docs/screenshots/real-research-chat.png)
+
+*历史会话在当前界面中的呈现，非排版样例或新一轮推理。*
+
+![报告目录、执行摘要与待人工核查状态](docs/screenshots/real-report-review.png)
+
+*正式报告保留“待人工核查”状态；有输出不等于事实验收通过。*
+
+![报告中的来源编号和技术方案对比表格](docs/screenshots/real-report-analysis.png)
+
+*报告正文、编号引用和表格。截图说明与验证范围见[截图说明](docs/screenshots/README.md)。*
+
+</details>
+
+工程验证可查看 [GitHub Actions](https://github.com/kisaragiy/lingShu/actions/workflows/ci.yml)：离线回归、真实 HTTP 集成、首次克隆上手、源码与镜像检查均在 CI 中执行。截图用于展示界面和历史输出，不替代运行日志、独立任务集评估或内容核查。
 
 ---
 

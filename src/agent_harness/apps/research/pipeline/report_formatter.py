@@ -568,6 +568,8 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None,
     border-radius: 4px; font-size: 10.5px; }}
   /* ─── Footer / Print bar ─── */
   .footer {{ text-align: center; font-size: 12px; color: #94a3b8; padding: 24px 0; }}
+  pre {{ background: #f1f5f9; padding: 16px; border-radius: 10px; overflow-x: auto; white-space: pre; line-height: 1.7; }}
+  code {{ font-family: ui-monospace, monospace; font-size: 0.9em; }}
   .print-bar {{ text-align: center; margin-bottom: 12px; }}
   .print-btn {{
     background: #2563eb; color: #fff; border: none; padding: 8px 20px;
@@ -651,6 +653,17 @@ def save_formal_report(title: str, html: str, tags: list[str] = None, source_ses
     return meta
 
 
+def _report_inline(text: str) -> str:
+    """Format escaped text without touching trusted citation tag attributes."""
+    parts = re.split(r"(<[^>]+>|`[^`]+`)", text)
+    return "".join(
+        part if part.startswith("<") else
+        f"<code>{part[1:-1]}</code>" if part.startswith("`") and part.endswith("`") else
+        re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", part)
+        for part in parts
+    )
+
+
 def _markdown_to_html(text: str) -> str:
     """Simple Markdown to HTML conversion for report content.
 
@@ -664,15 +677,29 @@ def _markdown_to_html(text: str) -> str:
     lines = text.split("\n")
     html = []
     in_table = False
-    in_list = False
+    in_list = ""
     prev_table_row = None   # 暂存上一表格行，等下一行裁决它是表头还是数据行
+    in_code = False
+    code_lines: list[str] = []
 
     for line in lines:
         stripped = line.strip()
+        if in_code:
+            if stripped.startswith("```"):
+                html.append('<pre><code>' + '\n'.join(code_lines) + '</code></pre>')
+                code_lines = []
+                in_code = False
+            else:
+                code_lines.append(line)
+            continue
+        list_kind = "ul" if stripped.startswith(("- ", "* ")) else "ol" if re.match(r"^\d+[.、]\s", stripped) else ""
+        if in_list and list_kind != in_list:
+            html.append(f"</{in_list}>")
+            in_list = ""
 
         # Table row
         if stripped.startswith("|") and stripped.endswith("|"):
-            cells = [c.strip() for c in stripped.split("|")[1:-1]]
+            cells = [_report_inline(c.strip()) for c in stripped.split("|")[1:-1]]
             is_sep = all(set(c) <= set(":-") for c in cells)
             if is_sep:
                 # 分隔行 ⟹ 上一行是表头。此前直接 continue，表头被当数据行渲染成 <td>，
@@ -704,6 +731,10 @@ def _markdown_to_html(text: str) -> str:
                 html.append("</table>")
                 in_table = False
 
+        if stripped.startswith("```"):
+            in_code = True
+            continue
+        stripped = _report_inline(stripped)
         # Headers
         if stripped.startswith("### "):
             html.append(f"<h3>{stripped[4:]}</h3>")
@@ -716,19 +747,19 @@ def _markdown_to_html(text: str) -> str:
             content = stripped[2:]
             if not in_list:
                 html.append("<ul>")
-                in_list = True
+                in_list = "ul"
             html.append(f"<li>{content}</li>")
         # Ordered list
         elif re.match(r"^\d+[.、]\s", stripped):
             content = re.sub(r"^\d+[.、]\s", "", stripped)
             if not in_list:
                 html.append("<ol>")
-                in_list = True
+                in_list = "ol"
             html.append(f"<li>{content}</li>")
         else:
             if in_list:
-                html.append("</ul>")
-                in_list = False
+                html.append(f"</{in_list}>")
+                in_list = ""
             # Empty line = paragraph break
             if not stripped:
                 pass
@@ -738,6 +769,8 @@ def _markdown_to_html(text: str) -> str:
             else:
                 html.append(f"<p>{stripped}</p>")
 
+    if in_code:
+        html.append('<pre><code>' + '\n'.join(code_lines) + '</code></pre>')
     if prev_table_row is not None:      # 文末残留的最后一行表格
         if not in_table:
             html.append("<table>")
@@ -747,7 +780,7 @@ def _markdown_to_html(text: str) -> str:
     if in_table:
         html.append("</table>")
     if in_list:
-        html.append("</ul>")
+        html.append(f"</{in_list}>")
 
     return "\n".join(html)
 

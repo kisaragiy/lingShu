@@ -523,7 +523,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-actions">
           <button class="sidebar-new-btn" onclick="switchToNewSession()">
-            <span>✕</span> 新会话
+            <span>＋</span> 新会话
           </button>
           <button class="btn btn-sm" style="padding:4px 8px;font-size:11px" onclick="toggleMessageSearch()" title="搜索消息内容">🔍</button>
         </div>
@@ -558,9 +558,12 @@ function renderDashboard() {
 
 function renderTabBar() {
   const bar = document.getElementById('main-tabs');
-  bar.innerHTML = _visibleTabs().map(t =>
-    `<a class="main-tab" data-tab="${t.id}" href="#" onclick="return switchTab('${t.id}')">${t.icon} ${t.label}</a>`
-  ).join('');
+  const tabs = _visibleTabs();
+  const primary = ['chat', 'reports', 'knowledge'];
+  const link = t => `<a class="main-tab" data-tab="${t.id}" href="#" onclick="document.getElementById('more-tabs').open=false;return switchTab('${t.id}')">${t.icon} ${t.label}</a>`;
+  bar.innerHTML = tabs.filter(t => primary.includes(t.id)).map(link).join('') +
+    '<details class="more-tabs" id="more-tabs"><summary>工作台与设置 ▾</summary><div class="more-tabs-menu">' +
+    tabs.filter(t => !primary.includes(t.id)).map(link).join('') + '</div></details>';
 }
 
 // ═══════════════════════════════════
@@ -653,7 +656,7 @@ async function renderDashStatus() {
 async function renderReports() {
   const el = document.getElementById('dash-content');
   el.innerHTML = '<div class="card"><div class="flex-between"><div class="card-title">📄 报告列表</div><button class="btn btn-secondary btn-sm" onclick="renderReports()">🔄 刷新</button></div>' +
-    '<div style="display:flex;gap:8px;margin-bottom:12px">' +
+    '<div class="report-search-row">' +
     '<input class="form-input" id="report-search-input" placeholder="搜索报告标题或标签..." onkeydown="if(event.key===\'Enter\') searchReports()">' +
     '<button class="btn btn-primary btn-sm" onclick="searchReports()">搜索</button>' +
     '</div><div id="report-list"><div class="text-center"><span class="spinner"></span> 加载中...</div></div></div>';
