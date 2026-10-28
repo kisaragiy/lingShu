@@ -21,7 +21,10 @@ RUN apt-get update && \
 
 # Copy and install the built wheel from builder
 COPY --from=builder /build/dist/*.whl .
-RUN pip install --no-cache-dir *.whl && rm -f *.whl
+# Build tooling is not a runtime dependency. Remove its vendored copies too.
+RUN pip install --no-cache-dir *.whl && \
+    rm -f *.whl && \
+    python -m pip uninstall --yes setuptools wheel
 
 # 静态资源已由 pyproject 的 package-data 打进 wheel：
 #   agent_harness/apps/research/static/（主前端，main.py 的 RESEARCH_STATIC_DIR）

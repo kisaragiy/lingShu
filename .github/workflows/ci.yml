@@ -83,6 +83,16 @@ jobs:
           extra_args: --no-verification
       - name: Build the actual revision
         run: docker build -t lingshu:ci .
+      - name: Smoke test the runtime image
+        shell: bash
+        run: |
+          docker run -d --name lingshu-smoke -e HARNESS_DISABLE_AUTH=1 -e HARNESS_API_HOST=0.0.0.0 -p 127.0.0.1:18788:8788 lingshu:ci
+          trap 'docker logs lingshu-smoke; docker rm -f lingshu-smoke' EXIT
+          for i in $(seq 1 30); do
+            if curl --fail --silent --max-time 3 http://127.0.0.1:18788/health > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
       - name: Scan the built image (blocking)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
