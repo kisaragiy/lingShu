@@ -121,7 +121,7 @@ class CircuitBreaker:
         因前缀差异永远不相等，无进展检测会形同虚设。
         """
         text = str(output)[:200] if output else ""
-        fp = hashlib.md5(text.encode("utf-8", "ignore")).hexdigest()
+        fp = hashlib.md5(text.encode("utf-8", "ignore"), usedforsecurity=False).hexdigest()
         with self._lock:
             self._worker_fingerprints[wname] = fp
             self._recent_fps.append(fp)

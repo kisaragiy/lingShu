@@ -222,6 +222,22 @@ def init_store():
     clean_expired()
 
 
+def claim_session(session_id: str, owner_id: str, *, is_admin: bool = False) -> str:
+    """Claim a new chat ID before execution; existing ownership is immutable."""
+    if not owner_id:
+        raise PermissionError("Authenticated session owner required")
+    with _lock:
+        meta = _load_meta(session_id)
+        existing = bool(meta) or os.path.exists(_log_path(session_id)) or os.path.exists(_session_path(session_id))
+        if existing:
+            saved_owner = str(meta.get("owner_id", ""))
+            if not is_admin and saved_owner != owner_id:
+                raise PermissionError("Session unavailable")
+            return saved_owner
+        _write_json_atomic(_meta_path(session_id), {"session_id": session_id, "owner_id": owner_id})
+        return owner_id
+
+
 def save_session(session_id: str, messages: list[dict], owner_id: str = ""):
     """Save a session's messages (event-sourced). Preserves title/pinned from meta."""
     if not messages:
@@ -230,6 +246,10 @@ def save_session(session_id: str, messages: list[dict], owner_id: str = ""):
     meta_path = _meta_path(session_id)
 
     with _lock:
+        saved_owner = _load_meta(session_id).get("owner_id", "")
+        if saved_owner and owner_id and saved_owner != owner_id:
+            raise PermissionError("Session ownership cannot be reassigned")
+        owner_id = saved_owner or owner_id
         current, last_seq = _project_cached(session_id)
 
         # 决定追加哪些事件

@@ -97,6 +97,19 @@ _AUTH_EXEMPT_V1 = (
     + (("/v1/auth/mp-login",) if _MP_LOGIN_ENABLED else ())
 )
 
+async def _acquire_agent_slot() -> bool:
+    """Wait without blocking the event loop or leaving a waiter after cancellation."""
+    deadline = time.monotonic() + _SEMAPHORE_TIMEOUT_S
+    while _agent_semaphore is not None:
+        if _agent_semaphore.acquire(blocking=False):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(0.05, remaining))
+    return False
+
+
 # ─── Token optimization: conversation window ───
 MAX_HISTORY_ROUNDS = int(os.environ.get("HARNESS_MAX_HISTORY", "8"))
 MAX_HISTORY_MSGS = MAX_HISTORY_ROUNDS * 2
@@ -454,7 +467,7 @@ async def _stream_progress(prompt: str, history: str, model: str, session_id: st
         yield _sse_chunk("", role="assistant")
         while True:
             try:
-                event = q.get(timeout=0.5)
+                event = await asyncio.to_thread(q.get, timeout=0.5)
             except queue.Empty:
                 if not t.is_alive():
                     break
@@ -492,7 +505,7 @@ async def _stream_progress(prompt: str, history: str, model: str, session_id: st
             # 半截 session 不保存；只发取消信号，让 worker 在下一个 checkpoint 早退
             _cancel_task(session_id)
         # 给 worker 收尾窗口（有界，避免无限等一个卡死的工具调用）
-        t.join(timeout=_STREAM_JOIN_TIMEOUT_S)
+        await asyncio.to_thread(t.join, timeout=_STREAM_JOIN_TIMEOUT_S)
         _unregister_running_task(session_id)
         if sem_acquired and _agent_semaphore is not None:
             _agent_semaphore.release()
@@ -571,6 +584,19 @@ async def chat_completions(req: ChatRequest, request: Request):
     if not last_user_msg:
         return JSONResponse({"error": "No user message found"}, status_code=400)
 
+    try:
+        session_id = _safe_path_param(session_id)
+    except ValueError:
+        return JSONResponse({"error": "Invalid session ID"}, status_code=400)
+    from agent_harness.core.pipeline.session_store import claim_session
+    user = getattr(request.state, "user", None) or {}
+    if not user.get("id"):
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    try:
+        session_owner = claim_session(session_id, user["id"], is_admin=user.get("role") == "admin")
+    except PermissionError:
+        return JSONResponse({"error": "Session unavailable"}, status_code=404)
+
     # ── Demo mode: no LLM backend → use injected fallback ──
     # 由 composition root（main.py）注入 cs_demo 的能力：**app 之间不互相 import**
     # （ADR#9 rule2）。此前这里是 lazy `from apps.cs_demo... import run_cs_agent`，
@@ -608,13 +634,11 @@ async def chat_completions(req: ChatRequest, request: Request):
 
     if req.stream:
         # ENG-19：默认路径（前端 stream=true）也必须过并发闸门。信号量是 threading 的，
-        # 直接在 async handler 里 acquire 会阻塞 event loop —— 必须 to_thread。
+        # 直接阻塞 acquire 会卡住 event loop；使用可取消的异步等待。
         sem_acquired = False
         if _agent_semaphore is not None:
-            # 注意：Semaphore.acquire 的首个位置参数是 blocking，timeout 必须用关键字
-            sem_acquired = await asyncio.to_thread(
-                lambda: _agent_semaphore.acquire(timeout=_SEMAPHORE_TIMEOUT_S)
-            )
+            # 取消等待不会留下后台 acquire，也不会丢失名额。
+            sem_acquired = await _acquire_agent_slot()
             if not sem_acquired:
                 return JSONResponse(
                     {"error": f"服务器繁忙，当前有 {_MAX_CONCURRENT_AGENTS} 个任务在执行中，请稍后重试"},
@@ -622,7 +646,7 @@ async def chat_completions(req: ChatRequest, request: Request):
                 )
         return StreamingResponse(
             _stream_progress(last_user_msg, history_context, req.model, session_id,
-                             _kb_scope_prefix(request), getattr(request.state, "user", {}).get("id", ""),
+                             _kb_scope_prefix(request), session_owner,
                              sem_acquired=sem_acquired),
             media_type="text/event-stream",
             headers={
@@ -633,11 +657,11 @@ async def chat_completions(req: ChatRequest, request: Request):
             },
         )
 
-    owner_id = getattr(request.state, "user", {}).get("id", "")
+    owner_id = session_owner
     acquired = False
     try:
         if _agent_semaphore is not None:
-            acquired = _agent_semaphore.acquire(timeout=300)
+            acquired = await _acquire_agent_slot()
             if not acquired:
                 return JSONResponse(
                     {"error": f"服务器繁忙，当前有 {_MAX_CONCURRENT_AGENTS} 个任务在执行中，请稍后重试"},

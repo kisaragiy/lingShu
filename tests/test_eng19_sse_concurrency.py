@@ -26,7 +26,7 @@ from agent_harness.core.pipeline import cancel as cancel_mod
 
 
 class _FakeState:
-    user: dict = {}
+    user: dict = {"id": "sse-test-user", "role": "user"}
 
 
 class _FakeRequest:

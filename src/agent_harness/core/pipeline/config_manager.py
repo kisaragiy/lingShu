@@ -6,6 +6,7 @@ Provides fix actions for one-click environment setup.
 """
 
 import copy
+from typing import Any
 import json
 import logging
 import os
@@ -26,7 +27,7 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 # 目录权限只收紧一次（每进程一次 icacls 子进程，不在每次 load_config 里付这个成本）
 _ACL_HARDENED = False
 
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "setup_complete": True,
     "llm": {
         "backend": "model_proxy",

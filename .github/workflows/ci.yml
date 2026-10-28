@@ -5,131 +5,108 @@ on:
     branches: [master, main]
   pull_request:
     branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      mutation:
+        description: Run optional mutation analysis (Linux only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   quality:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11"]
-
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          # 增量类型门禁需要基准提交，浅克隆会漏掉跨多提交的改动。
           fetch-depth: 0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        # dev 依赖在 [project.optional-dependencies]（extras），不是 PEP 735 的
-        # [dependency-groups] —— `uv sync --group dev` 会报
-        # "Group `dev` is not defined in the project's dependency-groups table" 并 exit 2，
-        # 导致后面 10 个质量步骤全部 skipped（2026-08-23 → 09-07 连续 8 次红，无人发现）。
-        run: uv sync --extra dev --frozen
-
-      - name: "Ruff lint check (blocking) — 语法错 / 重定义 / 未定义名 / F 档"
-        # F821 于 2026-09-10 归零（core/tools/web.py 的 `re` → `_re`，那条是活 bug：
-        # NameError 被 except: pass 吞掉，工具 100% 静默退化成"不分解"）；随后 27 条 F 档
-        # （21 F401 / 3 F541 / 3 F841）也批修清零 → 整档升为 blocking。
-        # 升档前先按两档批修：普通 F401 可 `--fix`；探测型 import（rev_utils.py 的 `import frida`）
-        # 必须先改 `importlib.util.find_spec`，否则 `--fix` 会静默削掉一条能力探测路径。
+          python-version: '3.11'
+      - run: uv sync --extra dev --frozen
+      - name: Syntax and undefined names (blocking)
         run: uv run ruff check src/ --select F,E9
-
-      - name: "Ruff format check (informational) — 68/91 文件未格式化"
-        # informational by design：历史格式债会产生大面积 diff，需独立整理，避免污染功能审查。
-        run: uv run ruff format --check src/
-        continue-on-error: true
-
-      - name: Mypy changed files (blocking, strict)
-        # 保留 pyproject 的 strict 契约；历史未标注代码不阻塞无关文件，改动文件必须达标。
-        # skip 只隔离被导入的历史模块，不忽略本次选中文件的类型错误。
-        shell: bash
+      - name: Incremental strict types (blocking)
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BASE_SHA: ${{ github.event.before }}
+        shell: bash
         run: |
           base="${PR_BASE_SHA:-$PUSH_BASE_SHA}"
           if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
-            diff_base=$(git merge-base "$base" HEAD)
-            git diff --name-only -z --diff-filter=ACMR "$diff_base" HEAD -- 'src/**/*.py' > /tmp/mypy-files
+            git diff --name-only -z --diff-filter=ACMR "$(git merge-base "$base" HEAD)" HEAD -- 'src/**/*.py' > /tmp/mypy-files
           else
-            # 首次推送或历史缺失时查全量，不能因无基准静默漏检。
             git ls-files -z -- 'src/**/*.py' > /tmp/mypy-files
           fi
           mapfile -d '' -t files < /tmp/mypy-files
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "没有改动的 src Python 文件，无需类型检查"
-          else
-            # 只拦「新增」strict 错误：core/ 里 59 个文件本来就有 662 个 strict 错误
-            # （2026-10-23 实测）。裸 --strict 全量必然红；「只查改动文件」同样必然红
-            # ——改到任何脏文件就红，等于禁止碰核心代码。baseline 在
-            # mypy_baseline.json（文件→错误数），只许往下调；退出码 2 = 有新增。
-            uv run python scripts/mypy_baseline.py --check "${files[@]}"
-          fi
-
-      - name: Bandit SAST
-        run: uv run bandit -r src/ -c pyproject.toml -f json -o bandit_report.json 2>&1 || echo "⚠️ SAST scan completed"
-
-      - name: Run tests with coverage
-        # 覆盖率门槛：**ratchet**，不是愿望。实测 36.6%（7599 语句 / 4815 未覆盖），
-        # 取 35 留 1.6pt 平台差余量（CI 是 Linux，本地是 Windows）。只许升不许降；
-        # 从 70% 降到 35% 不是降低标准——原先是"空头门槛"，必然被跳过或无视。
-        # 真正该拉的是 HTTP 边界路径覆盖（本轮之前为 0），总覆盖率是它的副产品。
-        run: uv run pytest tests/ -q --cov=src/agent_harness --cov-report=term --cov-fail-under=35
-
-      - name: Core pipeline and graph coverage gate (blocking)
-        # 2026-10-23 Windows 实测：pipeline 69.96%、graph 79.79%，合计 TOTAL 74.10%。
-        # 核心可靠性路径单独守门，避免全局覆盖率掩盖退化；保留上方全局 35% 门禁。
-        # 按 floor(min(实测 TOTAL - 2, 70)) 取 70：留 2pt 平台差余量，沿用同仓全局门禁先例。
-        # 这是可执行的 ratchet：门槛只许升不许降，不能用降低门槛掩盖覆盖率回退。
-        run: uv run pytest tests/ -q --cov=src/agent_harness/core/pipeline --cov=src/agent_harness/core/graph --cov-report=term --cov-fail-under=70
-
-      - name: Mutation testing (core modules)
-        # informational by design：变异存活率尚无稳定基线，先观察再制定可执行阈值。
+          uv run python scripts/mypy_baseline.py --check "${files[@]}"
+      - name: High confidence high severity SAST (blocking)
+        run: uv run bandit -r src/ -c pyproject.toml -lll -iii -f json -o bandit_report.json
+      - name: Offline regression and global coverage (blocking)
+        run: uv run pytest tests/ -q --cov=src/agent_harness --cov-report=term --cov-report=xml --cov-fail-under=35
+      - name: Core pipeline and graph coverage (blocking)
+        run: uv run coverage report --include='*/core/pipeline/*,*/core/graph/*' --fail-under=70
+      - name: Locked runtime dependency audit (blocking)
         run: |
-          uv run mutmut run --paths src/agent_harness/core/tools/web.py src/agent_harness/core/safety/ --runner "python -m pytest -x -q" 2>&1 | tail -20 || echo "⚠️ Mutation test completed, review results"
-        continue-on-error: true
-
-      - name: Security audit (pip-audit, informational) — lock 内 55 条已知漏洞待升级
-        # 为什么不是 blocking（2026-10-23 实测，别想当然）：
-        #   ① 直接扫环境必红：项目自身是 editable 安装，`pip-audit --strict` 报
-        #      "agent-harness: Dependency not found on PyPI and could not be audited" → exit 1；
-        #      `--skip-editable` 在 --strict 下同样 exit 1。
-        #   ② 改扫 `uv export --no-dev` 的依赖清单可跑通，但当前 lock 里有
-        #      **55 条已知漏洞 / 10 个包**（aiohttp、urllib3、pypdf、chromadb、anyio、certifi…）。
-        #      此时设成 blocking = CI 永久红，下一个人只会把这一步删掉或加 continue-on-error
-        #      —— 那是比 informational 更差的结局（门禁被关掉，还留个"我们做过审计"的假象）。
-        # 打开 blocking 的路径（做完就把 || echo 删掉，并把步骤名改回 blocking）：
-        #   1) uv lock --upgrade-package aiohttp --upgrade-package urllib3 --upgrade-package pypdf …
-        #   2) uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt > /tmp/req.txt
-        #   3) uv run pip-audit -r /tmp/req.txt --strict  → 归零即改 blocking
-        run: |
-          uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt > /tmp/req.txt
-          uv run pip-audit -r /tmp/req.txt --strict --progress-spinner=off 2>&1 || echo "⚠️ 有已知漏洞依赖（55 条历史债，升级路径见本步骤注释）"
-
-      - name: Version consistency check
-        run: |
-          PKG_VER=$(grep -m1 '__version__' src/agent_harness/__init__.py 2>/dev/null | sed 's/.*"//;s/".*//')
-          echo "Version: $PKG_VER"
-
-      # informational by design：扫描远端标签而非本提交镜像，无法可靠归因本次改动。
-      - name: Docker security scan (Trivy)
-        if: github.event_name == 'push'
-        uses: aquasecurity/trivy-action@master
+          uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt > audit-requirements.txt
+          uv run pip-audit -r audit-requirements.txt --no-deps --disable-pip --strict --progress-spinner=off --format=json --output pip-audit.json
+      - name: Version consistency (blocking)
+        run: uv run python scripts/check_release_version.py
+      - name: Upload validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          image-ref: 'docker.io/library/agent-harness:latest'
-          format: 'table'
-          severity: 'HIGH,CRITICAL'
-          exit-code: '0'
-        continue-on-error: true
+          name: validation-reports
+          path: |
+            bandit_report.json
+            coverage.xml
+            pip-audit.json
 
-      - name: Secret leak scan (truffleHog)
-        run: |
-          uv run trufflehog filesystem --no-verification . 2>&1 || echo "⚠️ 发现潜在密钥泄漏，请手动检查"
+  source-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scanning (no credential verification)
+        uses: trufflesecurity/trufflehog@v3.99.7
+        with:
+          version: v3.99.7
+          extra_args: --no-verification --fail
+      - name: Build the actual revision
+        run: docker build -t lingshu:ci .
+      - name: Scan the built image (blocking)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: lingshu:ci
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+  mutation:
+    if: github.event_name == 'workflow_dispatch' && inputs.mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.11'
+      - run: uv sync --extra dev --frozen
+      - name: Run mutation analysis (optional, no score gate yet)
+        run: uv run mutmut run
+      - name: Show mutation results
+        if: always()
+        run: uv run mutmut results
 
   integration:
     name: "Integration (live server)"

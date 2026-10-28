@@ -43,6 +43,7 @@ def test_progress_freshness(tmp_path, payload, exit_code, message):
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
         timeout=20,
     )
     output = result.stdout + result.stderr
