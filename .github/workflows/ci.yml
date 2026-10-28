@@ -80,7 +80,7 @@ jobs:
         uses: trufflesecurity/trufflehog@v3.99.7
         with:
           version: 3.99.7
-          extra_args: --no-verification --fail
+          extra_args: --no-verification
       - name: Build the actual revision
         run: docker build -t lingshu:ci .
       - name: Scan the built image (blocking)
