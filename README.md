@@ -8,11 +8,11 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-1c3d5a?logo=langchain)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-f5de17)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-1207%20passed-brightgreen)]()
+[![tests](https://img.shields.io/badge/tests-1239%20passed-brightgreen)]()
 [![GitHub stars](https://img.shields.io/github/stars/kisaragiy/lingShu?style=flat&logo=github)](https://github.com/kisaragiy/lingShu)
 
 > **灵枢者，智之枢也。** 以 Supervisor 为枢，Worker 为四肢，调度万端。
-> 一条指令并行跑完检索、交叉验证与成稿：每条结论都带可回溯的来源（工具名 + 原始 URL + 抓取时间），核不到的显式标注「未找到强相关依据」。
+> 一条指令完成检索、分析与成稿，保留工具名、原始 URL 和抓取时间。引用无法明确绑定时显示「未解析」；数字匹配仅作辅助检查，报告内容仍需人工核查。
 
 </div>
 
@@ -24,7 +24,7 @@
 
 | 场景 | 痛点 | 灵枢对应 |
 |---|---|---|
-| 尽调 · 研报 | 引用的数据无法核实，而报告签的是自己的名字 | 结论带 provenance（工具名 + 原始 URL + 抓取时间）；核验不到的显式标注「未找到强相关依据」 |
+| 尽调 · 研报 | 引用的数据无法核实，而报告签的是自己的名字 | 保留来源记录，显示未解析引用与数字比对结果；实体、指标、统计期和分母仍需人工核查 |
 | 政策 · 合规解读 | 来源敏感、数据不能出域 | 本地优先：模型与知识库都可跑在本机 |
 | 竞品研究 | 检索 → 分析 → 排版耗人力 | 一条指令并行执行，输出带引用的 HTML 报告 |
 
@@ -32,6 +32,8 @@
 > 场景来源为 2026-10 公开行业调研（采购公告、从业者一手文章），调研笔记不入库。
 
 ---
+
+内容核查边界与示例见 [报告核查说明](docs/report-verification.md)。
 
 ## 🖥️ 效果
 

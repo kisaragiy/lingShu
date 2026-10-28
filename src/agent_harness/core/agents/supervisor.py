@@ -9,6 +9,7 @@ from ..pipeline.llm import (
     extract_answer,
     ledger_bump,
     runtime_endpoint,
+    runtime_auth_headers,
     thinking_payload,
 )
 from ..pipeline.state import SupervisorState
@@ -175,7 +176,7 @@ def _call_llm_full(messages: list[dict], system_prompt: str = "",
         **thinking_payload(),
     }
     try:
-        resp = guarded_post(api_url, json=payload, timeout=timeout)
+        resp = guarded_post(api_url, json=payload, headers=runtime_auth_headers(api_url), timeout=timeout)
         if resp.status_code == 200:
             data = resp.json()
             choice = data["choices"][0]

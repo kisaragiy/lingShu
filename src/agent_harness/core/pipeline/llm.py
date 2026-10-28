@@ -126,9 +126,23 @@ def extract_answer(data: dict, max_tokens: int = 2048) -> str:
     return _extract_openai_content(data, max_tokens)[0]
 
 
-def thinking_payload() -> dict:
-    """思考开关 → 请求体片段。off 时显式禁用；on 时不发该字段（交给后端默认）。"""
-    return {} if _thinking_mode() == "on" else {"thinking": {"type": "disabled"}}
+def runtime_auth_headers(api_url: str) -> dict[str, str]:
+    """Use the current key only for its configured endpoint; never expose it in logs."""
+    cfg = get_llm_config() or {}
+    key = cfg.get("api_key") or ""
+    if key and cfg.get("api_url") == api_url:
+        return {"Authorization": f"Bearer {key}"}
+    return {}
+
+
+def thinking_payload(config: dict | None = None) -> dict:
+    """Translate the thinking switch to the configured provider's request format."""
+    if _thinking_mode() == "on":
+        return {}
+    cfg = config if config is not None else get_llm_config() or {}
+    if cfg.get("backend") == "ollama":
+        return {"reasoning_effort": "none"}
+    return {"thinking": {"type": "disabled"}}
 
 
 # Shared HTTP session
@@ -253,10 +267,11 @@ def call_llama(messages: list[dict], system_prompt: str = "",
     }
     if mode != "on":
         # 只在「本次不希望思考」时显式关闭；开思考时不发这个字段，让模型自主决定
-        payload["thinking"] = {"type": "disabled"}
+        payload.update(thinking_payload(_cfg))
     _api_url = _cfg.get("api_url") or LLAMA_API
     try:
-        resp = _http_post(_session, _api_url, payload, timeout=300)
+        resp = _http_post(_session, _api_url, payload,
+                          headers=runtime_auth_headers(_api_url), timeout=300)
         if resp.status_code == 200:
             data = resp.json()
             content, reasoning, finish, content_cacheable = _extract_openai_content(data, budget)
@@ -271,7 +286,8 @@ def call_llama(messages: list[dict], system_prompt: str = "",
                     file=sys.stderr,
                 )
                 payload["max_tokens"] = retry_budget
-                resp2 = _http_post(_session, _api_url, payload, timeout=300)
+                resp2 = _http_post(_session, _api_url, payload,
+                                   headers=runtime_auth_headers(_api_url), timeout=300)
                 if resp2.status_code == 200:
                     data = resp2.json()
                     retry_content, retry_reasoning, finish, content_cacheable = _extract_openai_content(
@@ -341,7 +357,7 @@ def _post_cloud(messages: list[dict], system_prompt: str = "",
     if cloud_mode != "on":
         # 云端 Qwen3 系默认开思考模式 → content 恒空、答案全进 reasoning_content。
         # 只有明确「本次不要思考」时才关（ENG-23 / HARNESS_LLM_THINKING）。
-        payload["thinking"] = {"type": "disabled"}
+        payload.update(thinking_payload(cfg))
     # Check cache for cloud calls —— key 带上 thinking 与预算（ENG-24：不同配置的结果不可互换）
     cache_key = _llm_cache_key(model, payload["messages"], system_prompt, 0.7,
                                thinking=cloud_mode, max_tokens=cloud_budget)

@@ -93,6 +93,7 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
     from ..config import get_llm_config
     from ..pipeline.llm import (
         THINKING_MIN_BUDGET, _extract_openai_content, _thinking_mode,
+        runtime_auth_headers, thinking_payload,
     )
 
     use_local = bool(task_hint and _is_simple_task(task_hint))
@@ -114,9 +115,9 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
         "stream": False,
     }
     if mode != "on":
-        payload["thinking"] = {"type": "disabled"}
+        payload.update(thinking_payload(cfg))
     try:
-        resp = guarded_post(api_url, json=payload, timeout=300 if not use_local else 60)
+        resp = guarded_post(api_url, json=payload, headers=runtime_auth_headers(api_url), timeout=300 if not use_local else 60)
         if resp.status_code != 200:
             print(f"[Worker] LLM 返回 HTTP {resp.status_code}，本步产出为空", file=sys.stderr)
             return ""

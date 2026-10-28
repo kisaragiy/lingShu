@@ -601,8 +601,9 @@ async def chat_completions(req: ChatRequest, request: Request):
     # 由 composition root（main.py）注入 cs_demo 的能力：**app 之间不互相 import**
     # （ADR#9 rule2）。此前这里是 lazy `from apps.cs_demo... import run_cs_agent`，
     # 人眼和 grep 都容易漏，是 AST 守卫抓出来的。
-    from agent_harness.core.config import LLAMA_API, CLOUD_API_KEY
-    if not LLAMA_API and not CLOUD_API_KEY:
+    from agent_harness.core.config import get_llm_config
+    runtime_config = get_llm_config() or {}
+    if not runtime_config.get("api_url"):
         if _demo_chat_fallback is None:
             return JSONResponse(
                 {"error": "demo 回退未注册（应由 main.py 注入 cs_demo 能力）"}, status_code=503)

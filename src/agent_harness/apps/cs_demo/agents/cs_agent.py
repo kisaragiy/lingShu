@@ -306,7 +306,7 @@ def _call_cs_llm_stream_tokens(
 
     import requests as req_lib
 
-    from agent_harness.core.pipeline.llm import runtime_endpoint, thinking_payload
+    from agent_harness.core.pipeline.llm import runtime_endpoint, runtime_auth_headers, thinking_payload
 
     system = (
         "你是灵枢电商平台的智能客服助手。你的风格：专业、耐心、有同理心。\n\n"
@@ -349,7 +349,7 @@ def _call_cs_llm_stream_tokens(
 
     tokens: list[str] = []
     try:
-        resp = req_lib.post(api_url, json=payload, stream=True, timeout=(5, 60))
+        resp = req_lib.post(api_url, json=payload, headers=runtime_auth_headers(api_url), stream=True, timeout=(5, 60))
         for line in resp.iter_lines():
             if line:
                 decoded = line.decode("utf-8")

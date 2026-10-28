@@ -17,7 +17,7 @@ HTML 报告，把证据链（工具名 / URL / 抓取时间 / 核验结论）摊
 
 退出码（契约）
 --------------
-    0  成功，且有 provenance（证据链完整）
+    0  成功，且有 provenance（存在来源记录，内容待复核）
     2  成功，但零 provenance —— 报告没有可核对来源，属于「看起来能用但不可信」，告警
     1  失败（LLM 不可用 / 报告为空 / 异常）
 
@@ -121,10 +121,10 @@ def main(argv: list[str] | None = None) -> int:
 
     info = _summary(result)
     print(f"[demo] 报告：{out_path}  ({len(html):,} 字符, 总耗时 {time.time() - t0:.1f}s)")
-    print(f"[demo] 一手来源：{info['provenance_count']} 条 / 去重 URL {info['unique_urls']} 个"
+    print(f"[demo] 来源记录：{info['provenance_count']} 条 / 去重 URL {info['unique_urls']} 个"
           + (f" / 工具 {', '.join(info['tools'])}" if info["tools"] else ""))
     if info["factcheck_checked"]:
-        print(f"[demo] 数字核验：已核对来源正文，未找到依据 {info['not_found']} 项")
+        print(f"[demo] 来源片段数字比对已执行（不代表事实核验），未匹配 {info['not_found']} 项")
     elif info["factcheck_skipped"]:
         print(f"[demo] 数字核验：未执行（{info['factcheck_reason'] or '无可用来源正文'}）")
     else:

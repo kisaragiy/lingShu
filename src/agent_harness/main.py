@@ -277,7 +277,7 @@ async def serve_frontend():
         # Demo mode banner
         from agent_harness.core.config import DISABLE_AUTH
         if DISABLE_AUTH:
-            banner = '<div style="background:#fef3c7;color:#92400e;text-align:center;padding:6px 12px;font-size:13px;border-bottom:1px solid #fbbf24">[Demo Mode] Replies are template examples, not real LLM output.</div>'
+            banner = '<div style="background:#fef3c7;color:#92400e;text-align:center;padding:6px 12px;font-size:13px;border-bottom:1px solid #fbbf24">本地演示模式：身份认证已关闭。回复使用已配置模型；客服场景在模型不可用时可能回退到模板。</div>'
             if "<body>" in html:
                 html = html.replace("<body>", "<body>" + banner)
         return HTMLResponse(html)

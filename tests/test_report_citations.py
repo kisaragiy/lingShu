@@ -110,3 +110,31 @@ class TestLinkSources:
     def test_no_sources_returns_unchanged(self):
         text = "Some content."
         assert _link_sources(text, []) == text
+
+
+def test_declared_bibliography_is_not_replaced_by_search_result_order():
+    from agent_harness.apps.research.pipeline.report_formatter import generate_report_html
+    text = 'A claim [来源 1].\n\n[来源 1] Official API - https://docs.python.org/3/library/asyncio-task.html\n'
+    rendered = generate_report_html('Report', text,
+        sources=[{'url': 'https://unrelated.example/search', 'title': 'Unrelated search result'}])
+    first = rendered.split('id="source-1"', 1)[1].split('</li>', 1)[0]
+    assert 'href="https://docs.python.org/3/library/asyncio-task.html"' in first
+    assert 'unrelated.example' not in first
+
+
+def test_bracket_urls_do_not_reuse_declared_citation_numbers():
+    text = 'Claim [来源 1] and [https://additional.example/reference]'
+    converted, mapping = _format_citations(text, {1: 'https://docs.python.org/3/library/contextvars.html'})
+    assert '[来源 1]' in converted
+    assert '[2]' in converted
+    assert mapping[1] == 'https://docs.python.org/3/library/contextvars.html'
+    assert mapping[2] == 'https://additional.example/reference'
+
+
+def test_graph_factcheck_records_are_rendered_as_counts():
+    from agent_harness.apps.research.pipeline.report_formatter import generate_report_html
+    rendered = generate_report_html('Report', 'Claim: 2025',
+        factcheck={'checked': True, 'not_found': [{'num': 2025.0, 'url': ''}], 'provenance_count': 2})
+    assert '数值未匹配 1 项' in rendered
+    assert "{'num':" not in rendered
+    assert '仅比对来源片段中的数字' in rendered

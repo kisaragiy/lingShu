@@ -103,3 +103,26 @@ def test_silent_stream_keeps_loop_responsive(monkeypatch):
         assert elapsed < .1
         await gen.aclose()
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('stream', [False, True])
+def test_runtime_configured_research_does_not_enter_cs_fallback(chat, monkeypatch, stream):
+    monkeypatch.setattr(config, 'LLAMA_API', '')
+    monkeypatch.setattr(config, 'CLOUD_API_KEY', '')
+    monkeypatch.setattr(config, 'get_llm_config', lambda: {
+        'api_url': 'http://configured.invalid/v1/chat/completions', 'model': 'runtime-model'})
+    def wrong_fallback(*args):
+        raise AssertionError('Configured research requests must not enter customer-service fallback')
+    monkeypatch.setattr(api, '_demo_chat_fallback', wrong_fallback)
+    if stream:
+        def research_worker(prompt, history, model, q, *args, **kwargs):
+            chat.append(prompt)
+            q.put({'type': 'result', 'content': 'synthetic reply'})
+            q.put({'type': 'done'})
+        monkeypatch.setattr(api, '_run_with_queue', research_worker)
+    response = client('owner', 'user').post('/v1/chat/completions',
+        headers={'X-Session-Id': 'victim'}, json={'model': 'agent-harness-single',
+        'stream': stream, 'messages': [{'role': 'user', 'content': 'research question'}]})
+    assert response.status_code == 200
+    assert 'synthetic reply' in response.text
+    assert chat

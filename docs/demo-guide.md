@@ -13,6 +13,8 @@ README 首屏那句「每条结论都带可回溯的来源（工具名 + 原始 
 
 需要**一个 OpenAI 兼容的 LLM 端点** + **一个搜索来源**。两者都不内置，必须自带：
 
+在设置中选择实际后端类型（本地 Ollama 填 `ollama`），并检查模型与搜索均可用。运行脚本与 Web 页面都应读取同一份运行时配置。
+
 - LLM：本地 ollama、DeepSeek、OpenAI 任选其一（设置页填地址 + 模型名）
 - 搜索：DeepSeek 搜索 key 或 Tavily key（设置页「🔎 搜索来源（自带 Key）」粘贴，密文落盘，界面只显示「已配置」）
 
@@ -27,8 +29,8 @@ python scripts/demo_research.py "2025 年中国新能源汽车销量" --json
 
 ```
 [demo] 报告：outputs/demo-report-20261023-004122.html  (16,7xx 字符, 总耗时 300.xs)
-[demo] 一手来源：15 条 / 去重 URL 15 个 / 工具 search,fetch
-[demo] 数字核验：已核对来源正文，未找到依据 0 项
+[demo] 来源记录：15 条 / 去重 URL 15 个 / 工具 search,fetch
+[demo] 来源片段数字比对已执行（不代表事实核验），未匹配 0 项
 {"out": "outputs/demo-report-....html", "summary": {"provenance_count": 15, "unique_urls": 15, ...}}
 ```
 
@@ -36,7 +38,7 @@ python scripts/demo_research.py "2025 年中国新能源汽车销量" --json
 
 | 码 | 含义 | 为什么这么定 |
 |---|---|---|
-| `0` | 成功，且带 provenance | 证据链完整 |
+| `0` | 生成成功，且存在来源记录 | 内容与引用仍待复核 |
 | `2` | 报告生成了，但**零来源** | 可读不可核对，属于「看起来能用但不可信」，必须告警而不是静默成功 |
 | `1` | 失败（LLM 不可达 / 报告为空 / 异常） | 不落任何半截文件 |
 
@@ -44,7 +46,7 @@ python scripts/demo_research.py "2025 年中国新能源汽车销量" --json
 
 打开生成的 HTML，翻到文末「事实核验说明」：每条结论标注核验状态（已核 / 部分 / 未核），并给出工具名、原始 URL、抓取时间。核不到依据的项列在「未找到强相关依据」里，不隐藏。
 
-`--json` 输出的 `summary` 可直接被 CI 断言（`provenance_count` / `unique_urls` / `factcheck_checked` / `not_found`）。
+`--json` 输出的 `summary` 可用于检查链路（`provenance_count` / `unique_urls` / `factcheck_checked` / `not_found`）。退出码 0 和来源数量只表示生成及溯源链路有产物；搜索结果不全是一手来源，数字核验也不等于语义核验。演示前仍需逐条检查正文与引用、访问日期及字数约束。
 
 不想现在跑也没关系：`docs/samples/demo-report-2025-nev.html` 是某次真实运行的产物（15 条一手来源），直接打开就能看到「事实核验说明」长什么样。
 
@@ -102,9 +104,9 @@ SearXNG 三个常见坑（都是真踩过的）：
 
 | 项 | 值 | 怎么自己核 |
 |---|---|---|
-| 测试 | **1059 passed / 3 skipped**（收集 1062，8 个 integration 默认 deselect） | `pytest` |
-| 版本 | **v0.75.3** | `grep '^version' pyproject.toml` |
-| 版本记录 | CHANGELOG 共 **53** 个版本标签 | `grep -c '^## ' CHANGELOG.md` |
+| 测试 | 以当前 pytest 实测为准（离线回归与真实模型彩排分开记录） | `pytest` |
+| 版本 | 以 `pyproject.toml` 为准 | `grep '^version' pyproject.toml` |
+| 版本记录 | 以当前 CHANGELOG 为准 | `grep -c '^## ' CHANGELOG.md` |
 | 注册工具 | **37 个**（read-only 25 / reversible 4 / irreversible 8） | `python -c "import agent_harness.apps.research.api; from agent_harness.core.tools.registry import TOOL_REGISTRY as R; print(len(R))"` |
 
 > 37 是**完整应用导入链**下的注册数。单独 import 某个工具模块可能多注册（只在该模块内注册的工具），那不是运行时形态。
@@ -132,3 +134,7 @@ SearXNG 三个常见坑（都是真踩过的）：
 | demo 退出码 `2`（零来源） | 搜索链全部失败 | 依次查：搜索 key 是否配置 → SearXNG 是否在跑 → `format=json` 是否 403 → 容器能否出网 |
 | 设置页「未配置」但 `.env` 有 key | 优先级：`config.json` 密文 → `llm.api_key` → 环境变量 | 在设置页粘贴一次，会以密文落到 `~/.agent-harness/config.json` |
 | `agent-harness serve` 起不来 | 端口被占 / 依赖缺失 | `agent-harness --help` 确认子命令；换 `HARNESS_API_PORT` |
+
+## 内容核查边界
+
+退出码0只表示生成成功且存在来源记录。报告会显示待人工核查；无法唯一绑定URL的引用显示未解析，不能按搜索顺序推定。已经结束的预测期及混合市场范围会提示复核。详见[报告核查说明](report-verification.md)。

@@ -167,7 +167,8 @@ def get_llm_config() -> dict:
                     key = ""
             model = llm.get("model") or ""
             if url:  # config.json 有明确 api_url 时优先
-                return {"api_url": url, "api_key": key, "model": model}
+                return {"api_url": url, "api_key": key, "model": model,
+                        "backend": llm.get("backend") or "auto"}
         except (_json.JSONDecodeError, OSError):
             pass
 

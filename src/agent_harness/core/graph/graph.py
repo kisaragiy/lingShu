@@ -17,6 +17,7 @@ from ..pipeline.llm import (
     extract_answer,
     ledger_bump,
     runtime_endpoint,
+    runtime_auth_headers,
     thinking_payload,
 )
 from ..pipeline.state import HarnessState
@@ -42,7 +43,7 @@ def _call_llm(messages: list[dict], system_prompt: str = "",
         **thinking_payload(),
     }
     try:
-        resp = guarded_post(api_url, json=payload, timeout=300)
+        resp = guarded_post(api_url, json=payload, headers=runtime_auth_headers(api_url), timeout=300)
         if resp.status_code == 200:
             data = resp.json()
             ledger_bump(data.get("usage", {}).get("total_tokens", 0))
