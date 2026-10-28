@@ -124,7 +124,7 @@ pre-commit 做两件事：有代码变更时跑 `pytest -x -q tests/`；校验 p
 
 ## 七、版本与变更
 
-当前版本 **v0.75.5**。版本记录见 [CHANGELOG.md](CHANGELOG.md)。版本节奏偏慢（v0.X.Y 小步），每次改动同步更新本文件与 CHANGELOG。
+当前版本 **v0.75.6**。版本记录见 [CHANGELOG.md](CHANGELOG.md)。版本节奏偏慢（v0.X.Y 小步），每次改动同步更新本文件与 CHANGELOG。
 
 ### v0.75.4 收尾修复（2026-10-28）
 聊天写入口在执行前原子确认会话归属；管理员写入保留原 owner；异步队列/并发等待不阻塞事件循环。离线回归、真实 HTTP 集成及扫描结果见 docs/closeout-2026-10-28.md。仍保持单 worker、本机优先的范围。

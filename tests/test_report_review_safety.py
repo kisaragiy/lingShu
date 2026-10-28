@@ -129,6 +129,17 @@ def test_unbalanced_url_is_unresolved_instead_of_silently_truncated():
     assert '[来源 1：未解析]' in html
 
 
+def test_inline_markdown_formats_lists_without_executing_html():
+    html = generate_report_html('Report', '- **指标**：`**literal**` <img src=x onerror=alert(1)>\n\n'
+        '1. **第一步**\n2. 第二步\n## 下一节\n正文 **重点**')
+    assert '<strong>指标</strong>' in html
+    assert '<code>**literal**</code>' in html
+    assert '<strong>第一步</strong>' in html and '<strong>重点</strong>' in html
+    assert '<img src=x' not in html
+    assert '&lt;img' in html
+    assert '</ol>\n<h2 ' in html
+
+
 @pytest.mark.parametrize('report,evidence', [
     ('949亿美元', 'USD 94.9 billion'),
     ('1.2万亿美元', 'USD 1.2 trillion'),

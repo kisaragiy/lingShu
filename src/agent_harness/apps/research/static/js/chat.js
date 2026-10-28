@@ -15,26 +15,72 @@ function escapeRegex(s) {
 
 function mdToHtml(text) {
   if (!text) return '';
-  // Escape HTML first
-  let h = escHtml(text);
-  // Code blocks (```...```) — must be before inline code
-  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, function(m, lang, code) {
-    const label = lang ? '<div class="code-lang-label">' + escHtml(lang) + '</div>' : '';
-    return '<div class="code-block-wrapper">' + label + '<pre><code class="lang-' + escHtml(lang) + '">' + code.trim() + '</code></pre></div>';
-  });
-  // Inline code
-  h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Bold (**text**)
-  h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  // Unordered lists (- item)
-  h = h.replace(/^- (.+)$/gm, '<li>$1</li>');
-  h = h.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-  // Headers (## / ###)
-  h = h.replace(/^### (.+)$/gm, '<h4>$1</h4>');
-  h = h.replace(/^## (.+)$/gm, '<h3>$1</h3>');
-  // Newlines → <br>
-  h = h.replace(/\n/g, '<br>');
-  return h;
+  const inline = s => s.split(/(`[^`]+`)/g).map(part => part.startsWith('`')
+    ? '<code>' + escHtml(part.slice(1,-1)) + '</code>'
+    : escHtml(part).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')).join('');
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const cells = line => line.trim().replace(/^\||\|$/g, '').split('|').map(s => s.trim());
+  const out = [];
+  let list = '';
+  const closeList = () => { if (list) { out.push('</' + list + '>'); list = ''; } };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith('```')) {
+      closeList();
+      const lang = line.slice(3).trim();
+      const code = [];
+      while (++i < lines.length && !lines[i].trim().startsWith('```')) code.push(lines[i]);
+      out.push('<div class="code-block-wrapper"><div class="code-lang-label">' + escHtml(lang) + '</div><pre><code>' + escHtml(code.join('\n')) + '</code></pre></div>');
+    } else if (line.startsWith('|') && i + 1 < lines.length &&
+               cells(lines[i+1]).every(c => /^:?-{3,}:?$/.test(c))) {
+      closeList();
+      out.push('<div class="chat-table"><table><thead><tr>' + cells(line).map(c => '<th>' + inline(c) + '</th>').join('') + '</tr></thead><tbody>');
+      i++;
+      while (i + 1 < lines.length && lines[i+1].trim().startsWith('|')) {
+        out.push('<tr>' + cells(lines[++i]).map(c => '<td>' + inline(c) + '</td>').join('') + '</tr>');
+      }
+      out.push('</tbody></table></div>');
+    } else {
+      const item = line.match(/^(?:[-*]\s+|\d+[.、]\s+)(.+)$/);
+      if (item) {
+        const kind = /^\d/.test(line) ? 'ol' : 'ul';
+        if (kind !== list) { closeList(); out.push('<' + kind + '>'); list = kind; }
+        out.push('<li>' + inline(item[1]) + '</li>');
+      } else {
+        closeList();
+        const header = line.match(/^(#{1,3})\s+(.+)$/);
+        if (header) { const level = header[1].length + 1; out.push('<h' + level + '>' + inline(header[2]) + '</h' + level + '>'); }
+        else if (line) out.push('<p>' + inline(line) + '</p>');
+      }
+    }
+  }
+  closeList();
+  return out.join('\n');
+}
+
+function chatWelcomeHtml() {
+  return `<section class="chat-welcome">
+    <div class="welcome-eyebrow">灵枢 · AI 调研助手</div>
+    <h1>从一个问题，到一份研究报告。</h1>
+    <p class="welcome-lead">从搜索、分析到汇总，沿着来源查看结果，保留需要人工核查的地方。</p>
+    <div class="welcome-steps"><span>01 提出问题</span><span>02 搜集与分析</span><span>03 阅读报告与来源</span></div>
+    <div class="welcome-examples">
+      <button onclick="useResearchExample(0)"><strong>比较技术方案</strong><span>FastAPI 与 Flask：小型 API 服务如何选型？</span></button>
+      <button onclick="useResearchExample(1)"><strong>梳理行业趋势</strong><span>检索近一年储能行业资料，区分事实与预测。</span></button>
+      <button onclick="useResearchExample(2)"><strong>形成研究提纲</strong><span>为企业知识库问答整理需求、风险与验证方法。</span></button>
+    </div>
+    <div class="welcome-footer"><button class="btn btn-secondary" onclick="switchTab('reports')">查看已有报告 →</button><span>示例仅填入问题，由你确认后发送。</span></div>
+  </section>`;
+}
+
+function useResearchExample(index) {
+  const examples = [
+    '比较 FastAPI 与 Flask 在小型 API 服务中的适用场景，请引用官方资料，说明选择依据和限制。',
+    '调研近一年储能行业趋势，请注明来源与发布日期，区分实际数据、预测和未证实判断。',
+    '为企业知识库问答项目整理需求、技术方案、主要风险与可验证的验收方法。'
+  ];
+  const input = document.getElementById('chat-input');
+  if (input && examples[index]) { input.value = examples[index]; input.focus(); }
 }
 
 // Render a chat message (user or assistant)
@@ -51,11 +97,7 @@ function renderDashChat() {
   el.innerHTML = `
     <div class="chat-card">
       <div class="chat-messages" id="chat-messages">
-        <div class="chat-empty">
-          <div class="chat-empty-icon">⚡</div>
-          <div class="chat-empty-text">灵枢 — AI 调研助手</div>
-          <div class="chat-empty-hint">输入关键词开始调研，或上传文档到知识库</div>
-        </div>
+        ${chatWelcomeHtml()}
       </div>
       <div id="chat-thinking" class="chat-thinking hidden"></div>
       <div class="chat-input-bar">
@@ -66,7 +108,7 @@ function renderDashChat() {
       </div>
     </div>`;
   // Restore session messages if we have one
-  if (chatSessionId && chatHistory.length > 0) {
+  if (chatSessionId) {
     renderMessages(chatHistory.map(h => ({role: h.role, content: h.content})));
     document.getElementById('chat-msg-count')?.remove();
   } else {
@@ -108,7 +150,7 @@ function startNewChat() {
   chatHistory = [];
   const container = document.getElementById('chat-messages');
   if (container) {
-    container.innerHTML = '<div class="text-center text-muted text-sm" style="padding:40px">输入消息开始与灵枢对话</div>';
+    container.innerHTML = chatWelcomeHtml();
   }
 }
 
@@ -117,7 +159,7 @@ function renderMessages(msgs) {
   if (!container) return;
   container.innerHTML = '';
   if (!msgs || msgs.length === 0) {
-    container.innerHTML = '<div class="text-center text-muted text-sm" style="padding:40px">输入消息开始与灵枢对话</div>';
+    container.innerHTML = chatWelcomeHtml();
     return;
   }
   msgs.forEach(m => {
@@ -137,6 +179,7 @@ async function sendChatMessage() {
   if (!msg) return;
 
   document.querySelector('#chat-messages .text-center')?.remove();
+  document.querySelector('#chat-messages .chat-welcome')?.remove();
 
   addChatBubble('user', msg);
   input.value = '';
