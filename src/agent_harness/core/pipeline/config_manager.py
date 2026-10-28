@@ -466,7 +466,7 @@ def _fix_start_model_proxy() -> dict:
             # Launch
             subprocess.Popen(
                 [sys.executable, path],
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -545,7 +545,7 @@ def _fix_start_llamacpp() -> dict:
              "-ngl", "99", "--no-mmap", "--ctx-size", "131072",
              "--host", "127.0.0.1", "--port", "8080"],
             cwd=llm_dir,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         for _ in range(30):
             time.sleep(3)

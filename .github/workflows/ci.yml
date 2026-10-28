@@ -79,7 +79,7 @@ jobs:
       - name: Secret scanning (no credential verification)
         uses: trufflesecurity/trufflehog@v3.99.7
         with:
-          version: v3.99.7
+          version: 3.99.7
           extra_args: --no-verification --fail
       - name: Build the actual revision
         run: docker build -t lingshu:ci .
