@@ -16,6 +16,7 @@ Supports PDF, DOCX, TXT, Markdown.
 
 import contextlib
 import contextvars
+from typing import Any, cast
 import hashlib
 import json
 import logging
@@ -25,7 +26,6 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
@@ -38,12 +38,12 @@ logger = logging.getLogger(__name__)
 _scope: contextvars.ContextVar[str] = contextvars.ContextVar("rag_scope_prefix", default="")
 
 
-def set_scope(prefix: str) -> contextvars.Token:
+def set_scope(prefix: str) -> contextvars.Token[str]:
     """设置本执行上下文的可见 collection 前缀。空串 = 全见（admin / CLI / demo）。"""
     return _scope.set(str(prefix or ""))
 
 
-def reset_scope(token: contextvars.Token) -> None:
+def reset_scope(token: contextvars.Token[str]) -> None:
     _scope.reset(token)
 
 
@@ -127,24 +127,24 @@ def _embs_path(collection: str) -> str:
     return os.path.join(_coll_dir(collection), "embeddings.npy")
 
 
-def _load_chunks(collection: str) -> list[dict]:
+def _load_chunks(collection: str) -> list[dict[str, Any]]:
     """Load chunks JSON. Returns [] on any error."""
     p = _chunks_path(collection)
     with _lock:
         try:
             if os.path.isfile(p):
                 with open(p, encoding="utf-8") as f:
-                    return json.load(f)
+                    return cast(list[dict[str, Any]], json.load(f))
         except (json.JSONDecodeError, OSError):
             # Corrupted file — will be rebuilt by next index operation
             pass
     return []
 
 
-def _save_chunks(collection: str, chunks: list[dict]):
+def _save_chunks(collection: str, chunks: list[dict[str, Any]]) -> None:
     """Atomic write: tmp → replace."""
     p = _chunks_path(collection)
-    tmp = p + ".tmp." + hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
+    tmp = p + ".tmp." + hashlib.md5(str(time.time()).encode(), usedforsecurity=False).hexdigest()[:8]
     with _lock:
         try:
             os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -166,7 +166,7 @@ def _load_embeddings(collection: str) -> np.ndarray | None:
             if os.path.isfile(p):
                 arr = np.load(p)
                 if arr.ndim == 2 and arr.shape[1] == EMBED_DIM:
-                    return arr
+                    return cast(np.ndarray, arr)
         except Exception:
             pass
     return None
@@ -180,7 +180,7 @@ def _save_embeddings(collection: str, embs: np.ndarray) -> None:
     never existed (embeddings were never persisted — pre-existing ENG-11 bug).
     """
     p = _embs_path(collection)
-    tmp = p + ".tmp." + hashlib.md5(str(time.time()).encode()).hexdigest()[:8] + ".npy"
+    tmp = p + ".tmp." + hashlib.md5(str(time.time()).encode(), usedforsecurity=False).hexdigest()[:8] + ".npy"
     with _lock:
         try:
             os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -219,8 +219,8 @@ def _embed(texts: list[str]) -> tuple[np.ndarray, list[str]]:
     if not texts:
         return np.zeros((0, EMBED_DIM), dtype=np.float32), []
 
-    keys = [hashlib.md5(t.encode("utf-8")).hexdigest() for t in texts]
-    out = np.zeros((len(texts), EMBED_DIM), dtype=np.float32)
+    keys = [hashlib.md5(t.encode("utf-8"), usedforsecurity=False).hexdigest() for t in texts]
+    out: np.ndarray = np.zeros((len(texts), EMBED_DIM), dtype=np.float32)
     uncached: list[int] = []
     for i, key in enumerate(keys):
         cached = _EMBED_CACHE.get(key)
@@ -411,7 +411,7 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 # ─── Text chunking ───
 
-def _chunk_text(text: str, chunk_size: int = None, overlap: int = None) -> list[str]:
+def _chunk_text(text: str, chunk_size: int | None = None, overlap: int | None = None) -> list[str]:
     """Split text into overlapping chunks by paragraph."""
     chunk_size = chunk_size or CHUNK_SIZE
     overlap = overlap or CHUNK_OVERLAP
@@ -461,7 +461,7 @@ def _parse_file(filepath: str) -> str:
                     from PyPDF2 import PdfReader
                 else:
                     from pdfminer.high_level import extract_text
-                    return extract_text(filepath)
+                    return str(extract_text(filepath))
                 reader = PdfReader(filepath)
                 pages = []
                 for page in reader.pages:
@@ -491,7 +491,7 @@ def _parse_file(filepath: str) -> str:
 
 # ─── Public API ───
 
-def index(text: str, source: str, collection: str = "default") -> dict:
+def index(text: str, source: str, collection: str = "default") -> dict[str, Any]:
     """Index text into vector store.
 
     ENG-11 fix (vector↔text misalignment):
@@ -536,7 +536,7 @@ def index(text: str, source: str, collection: str = "default") -> dict:
         for i, chunk in enumerate(chunks):
             chunk_id = hashlib.md5(
                 (source + str(n_before + i)).encode()
-            ).hexdigest()[:12]
+            , usedforsecurity=False).hexdigest()[:12]
             existing.append({
                 "id": chunk_id,
                 "text": chunk,
@@ -584,7 +584,7 @@ def index(text: str, source: str, collection: str = "default") -> dict:
         }
 
 
-def index_file(filepath: str, collection: str = "default", filename: str = "") -> dict:
+def index_file(filepath: str, collection: str = "default", filename: str = "") -> dict[str, Any]:
     """Parse and index a file.
 
     Args:
@@ -605,7 +605,7 @@ def index_file(filepath: str, collection: str = "default", filename: str = "") -
 
 def query(
     query_text: str, collection: str = "default", top_k: int = 5
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Search for most relevant chunks.
 
     Search strategy (in order):
@@ -642,7 +642,7 @@ def query(
             collection, embeddings.shape[0], len(chunks),
         )
 
-    if use_vector:
+    if use_vector and embeddings is not None:
         try:
             query_emb, _ = _embed([query_text])
             if query_emb.ndim == 2 and query_emb.shape[0] > 0:
@@ -715,7 +715,7 @@ def delete_collection(collection: str) -> bool:
     return False
 
 
-def collection_info(collection: str) -> dict:
+def collection_info(collection: str) -> dict[str, Any]:
     """Get info about a collection (incl. embedding↔chunk alignment)."""
     chunks = _load_chunks(collection)
     sources = set()

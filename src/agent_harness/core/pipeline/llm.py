@@ -155,7 +155,7 @@ def _llm_cache_key(model: str, messages: list[dict], system_prompt: str, tempera
         [model, messages, system_prompt, round(temperature, 2), mode, max_tokens],
         sort_keys=True, ensure_ascii=False,
     )
-    return hashlib.md5(raw.encode()).hexdigest()
+    return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
 def _llm_cache_get(key: str) -> tuple[str, int] | None:
     """Get cached result if not expired."""

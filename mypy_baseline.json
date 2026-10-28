@@ -24,7 +24,7 @@
   "src/agent_harness/core/module_eval.py": 22,
   "src/agent_harness/core/online_eval.py": 20,
   "src/agent_harness/core/pipeline/circuit_breaker.py": 10,
-  "src/agent_harness/core/pipeline/config_manager.py": 26,
+  "src/agent_harness/core/pipeline/config_manager.py": 24,
   "src/agent_harness/core/pipeline/keystore.py": 5,
   "src/agent_harness/core/pipeline/llm.py": 17,
   "src/agent_harness/core/pipeline/session_store.py": 25,

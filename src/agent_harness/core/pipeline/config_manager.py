@@ -6,6 +6,7 @@ Provides fix actions for one-click environment setup.
 """
 
 import copy
+from typing import Any
 import json
 import logging
 import os
@@ -26,7 +27,7 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 # 目录权限只收紧一次（每进程一次 icacls 子进程，不在每次 load_config 里付这个成本）
 _ACL_HARDENED = False
 
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "setup_complete": True,
     "llm": {
         "backend": "model_proxy",
@@ -465,7 +466,7 @@ def _fix_start_model_proxy() -> dict:
             # Launch
             subprocess.Popen(
                 [sys.executable, path],
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -544,7 +545,7 @@ def _fix_start_llamacpp() -> dict:
              "-ngl", "99", "--no-mmap", "--ctx-size", "131072",
              "--host", "127.0.0.1", "--port", "8080"],
             cwd=llm_dir,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         for _ in range(30):
             time.sleep(3)

@@ -1,6 +1,6 @@
 [project]
 name = "agent-harness"
-version = "0.75.3"
+version = "0.75.4"
 description = "Self-hostable multi-agent research assistant that traces every conclusion to primary sources"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -134,6 +134,7 @@ skips = ["B101", "B311", "B404", "B603", "B607"]
 
 # ─── Mutmut (mutation testing) ───
 [tool.mutmut]
-paths = ["src/agent_harness"]
-backup = false
-runner = "python -m pytest -x -q"
+source_paths = ["src/agent_harness"]
+only_mutate = ["src/agent_harness/core/tools/web.py", "src/agent_harness/core/safety/*"]
+pytest_add_cli_args = ["-x", "-q"]
+pytest_add_cli_args_test_selection = ["tests/"]
