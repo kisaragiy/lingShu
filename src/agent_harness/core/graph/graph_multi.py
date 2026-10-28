@@ -711,12 +711,17 @@ _NUM_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 # ─── ENG-34: 中文单位归一（供 v2 核验 / claim_verifier adapter 共用） ───
 # 单位组把「万亿」放最前（正则交替按顺序匹配，先长后短），
 # 否则 1.2万亿 会被先吃成 1.2万，漏了「亿」。
-_NUM_UNIT_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(万亿|万|亿|千|w|k|m)?", re.IGNORECASE)
+_NUM_UNIT_RE = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)\s*"
+    r"(万亿|万|亿|千|trillion\b|billion\b|million\b|thousand\b|[wkm](?![A-Za-z]))?",
+    re.IGNORECASE,
+)
 _UNIT_MULTIPLIER = {
     "千": 1e3, "k": 1e3,
     "万": 1e4, "w": 1e4,
     "亿": 1e8,
     "万亿": 1e12,
+    "thousand": 1e3, "million": 1e6, "billion": 1e9, "trillion": 1e12,
 }
 
 
@@ -995,6 +1000,7 @@ def verify_report_facts_v2(report: str, state) -> dict:
     保守判据同 v1（round 触顶/无数字/provenance 为空/异常 → skip 不误判）。
     """
     result: dict = {"checked": False, "skipped": True, "reason": "",
+                    "verification_scope": "numeric_presence_only", "semantic_verified": False,
                     "not_found": [], "provenance_count": 0, "backing": {}}
     try:
         if int(state.get("round", 0) or 0) >= SUPERVISOR_MAX_ROUNDS:
@@ -1038,7 +1044,7 @@ def _apply_fact_check_v2(report: str, state) -> tuple[str, dict]:
         )
         report = report + (
             "\n\n---\n"
-            "❌ 未找到依据：以下数字未能在任何一手来源正文里核对上，"
+            "⚠️ 未找到依据（仅数字比对）：以下数值未在来源片段中匹配，"
             f"请谨慎采信 —— {items}\n"
         )
     elif info["skipped"]:
@@ -1124,7 +1130,8 @@ def build_completion_contract(state: SupervisorState) -> dict:
 
 def render_completion_contract(contract: dict) -> str:
     """把完成契约渲染成收尾产物里的显式小节（必带「未完成项」列表）。"""
-    lines = ["", "---", "## ✅ 完成契约"]
+    lines = ["", "---", "## ✅ 完成契约",
+             "以下仅表示执行步骤产生产物；内容准确性、引用与时效仍待核查。"]
     feats = contract.get("features") or []
     if not feats:
         lines.append("- 未声明可验收的 feature（无完成契约）")
@@ -1132,7 +1139,7 @@ def render_completion_contract(contract: dict) -> str:
         lines.append("**未完成项：** 无 feature 可验收（未声明完成契约）")
         return "\n".join(lines)
     for f in feats:
-        mark = "✅ 通过" if f.get("passes") else "❌ 未完成"
+        mark = "✅ 有产物" if f.get("passes") else "❌ 未完成"
         lines.append(f"- [{mark}] {f.get('feature')}")
     lines.append("")
     incomplete = contract.get("incomplete") or []
@@ -1141,7 +1148,7 @@ def render_completion_contract(contract: dict) -> str:
         for f in incomplete:
             lines.append(f"- ❌ {f.get('feature')}")
     else:
-        lines.append("未完成项：无（全部 feature 均已验证通过）")
+        lines.append("未完成项：执行步骤未报告失败；内容准确性、引用与时效尚待核查。")
     return "\n".join(lines)
 
 
@@ -1255,7 +1262,8 @@ def supervisor_finalize(state: SupervisorState) -> dict:
         "4. 表格用于数据对比，列表用于发现枚举\n"
         "5. 末尾列出「📎 参考来源」小节，格式:\n"
         "   [来源 1] 标题 - URL (访问日期: YYYY-MM-DD)\n"
-        "6. 总字数 1000-2000 字"
+        "6. 遵守用户指定的字数上限；用户未指定时总字数 1000-2000 字\n"
+        "7. 不编造访问日期。无法从工具记录确定时省略日期，不使用占位日期。"
     )
     final, fin_reason = _call_llm_full(
         [{"role": "user", "content": f"用户请求: {state['request']}\n\nWorker 结果:\n{combined}"}],

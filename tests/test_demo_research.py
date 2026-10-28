@@ -58,7 +58,9 @@ def test_exit_zero_and_report_contains_sources(demo, monkeypatch, tmp_path):
     assert demo.main(["测试问题", "--out", str(out)]) == 0
     html = out.read_text(encoding="utf-8")
     assert "stats.gov.cn" in html
-    assert "事实核验" in html, "报告里没有核验说明块 —— 证据链没渲染出来"
+    assert "来源与数字比对说明" in html
+    assert "内容状态：待人工核查" in html
+    assert "已核验" not in html
 
 
 def test_dedupes_sources_by_url(demo, monkeypatch, tmp_path):

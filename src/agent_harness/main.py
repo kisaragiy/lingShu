@@ -277,7 +277,7 @@ async def serve_frontend():
         # Demo mode banner
         from agent_harness.core.config import DISABLE_AUTH
         if DISABLE_AUTH:
-            banner = '<div style="background:#fef3c7;color:#92400e;text-align:center;padding:6px 12px;font-size:13px;border-bottom:1px solid #fbbf24">[Demo Mode] Replies are template examples, not real LLM output.</div>'
+            banner = '<div style="background:#fef3c7;color:#92400e;text-align:center;padding:6px 12px;font-size:13px;border-bottom:1px solid #fbbf24">本地演示模式：身份认证已关闭。回复使用已配置模型；客服场景在模型不可用时可能回退到模板。</div>'
             if "<body>" in html:
                 html = html.replace("<body>", "<body>" + banner)
         return HTMLResponse(html)
@@ -388,15 +388,13 @@ def main():
     print("")
 
     # ── Auto-setup LLM backend if not configured ──
-    from agent_harness.core.config import LLAMA_API, DISABLE_AUTH
-    if not LLAMA_API and not DISABLE_AUTH:
+    from agent_harness.core.config import DISABLE_AUTH, get_llm_config
+    if not get_llm_config().get("api_url") and not DISABLE_AUTH:
         from agent_harness.auto_setup import auto_setup
         auto_setup()
 
-    if not LLAMA_API and DISABLE_AUTH:
-        # Demo mode: skip LLM check, server will use template fallbacks
-        pass
-    else:
+    # Re-read after discovery: it persists config.json, not import-time settings.
+    if get_llm_config().get("api_url") or not DISABLE_AUTH:
         require_config()
     try:
         from agent_harness.core.config import print_config_warnings

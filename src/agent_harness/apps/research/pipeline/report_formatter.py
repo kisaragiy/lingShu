@@ -75,7 +75,8 @@ def _extract_sources_from_text(text: str) -> list[dict]:
     return sources
 
 
-def _format_citations(text: str) -> tuple[str, dict[int, str]]:
+def _format_citations(text: str, initial_map: dict[int, str] | None = None,
+                      reserved_numbers: set[int] | None = None) -> tuple[str, dict[int, str]]:
     """Convert [url] patterns in text to numbered [N] citations.
 
     Detects URLs wrapped in square brackets (e.g. "snippet [https://example.com]")
@@ -85,15 +86,16 @@ def _format_citations(text: str) -> tuple[str, dict[int, str]]:
     Returns:
         (modified_text, source_map) where source_map maps N → url
     """
-    seen_urls: dict[str, int] = {}
-    url_order: list[str] = []
-    counter = [0]
+    initial_map = initial_map or {}
+    seen_urls: dict[str, int] = {url: num for num, url in initial_map.items()}
+    url_order: list[str] = list(initial_map.values())
+    counter = [max(set(initial_map) | (reserved_numbers or set()), default=0)]
 
     def _replace(m):
         raw = m.group(1) or m.group(2)
         if not raw:
             return m.group(0)
-        url = raw.rstrip(".,;:!?)")
+        url = _trim_citation_url(raw)
         if url in seen_urls:
             num = seen_urls[url]
         else:
@@ -107,7 +109,7 @@ def _format_citations(text: str) -> tuple[str, dict[int, str]]:
     result = re.sub(r'\[(https?://[^\]]+)\]', _replace, text)
 
     # Build source map maintaining insertion order
-    source_map: dict[int, str] = {}
+    source_map: dict[int, str] = dict(initial_map)
     for url in url_order:
         source_map[seen_urls[url]] = url
 
@@ -129,11 +131,49 @@ def _link_sources(text: str, sources: list[dict]) -> str:
 
     # Replace [来源 N] → <sup class="cite"><a href="#source-N">[N]</a></sup>
     def _replace_source(m):
-        num = m.group(1)
+        num = int(m.group(1))
+        index = num - 1
+        if not (0 <= index < len(sources)) or not _safe_href(sources[index].get("url", "")):
+            return f'<span class="v-unknown">[来源 {num}：未解析]</span>'
         return f'<sup class="cite"><a href="#source-{num}">[{num}]</a></sup>'
 
     text = re.sub(r'\[来源\s*(\d+)\]', _replace_source, text)
     return text
+
+
+def _trim_citation_url(url: str) -> str:
+    """Remove prose/Markdown delimiters, preserving balanced URL parentheses."""
+    url = url.rstrip(".,;:!?。；，）")
+    while url.endswith(")") and url.count(")") > url.count("("):
+        url = url[:-1].rstrip(".,;:!?。；，）")
+    return url
+
+
+def _citation_definitions(content: str) -> tuple[set[int], dict[int, dict]]:
+    """Reserve every explicit number, resolving only unambiguous URL definitions."""
+    markers = {int(n) for n in re.findall(r"\[来源\s*(\d+)\]", content)
+               if 1 <= int(n) <= 1000}
+    candidates: dict[int, set[str]] = {}
+    titles: dict[int, str] = {}
+    for line in content.splitlines():
+        match = re.match(r"^[ \t]*(?:[-*][ \t]*)?\[来源[ \t]*(\d+)\][ \t]*(.*)$", line)
+        if not match:
+            continue
+        number = int(match.group(1))
+        if number not in markers:
+            continue
+        tail = match.group(2)
+        # A second marker belongs to another source, never to this definition.
+        if re.search(r"\[来源\s*\d+\]", tail):
+            continue
+        urls = re.findall(r'https?://[^\s<>\[\]"]+', tail)
+        values = {_trim_citation_url(url) for url in urls}
+        values = {url for url in values if url.count("(") == url.count(")")}
+        candidates.setdefault(number, set()).update(values)
+        titles[number] = re.split(r"https?://", tail, maxsplit=1)[0].strip(" -—:[()")
+    resolved = {n: {"url": next(iter(urls)), "title": titles[n]}
+                for n, urls in candidates.items() if len(urls) == 1}
+    return markers, resolved
 
 
 def _esc(value) -> str:
@@ -175,62 +215,28 @@ def _verdict_three_state(report: str, source_map: dict, provenance: list) -> dic
           "provenance_count","not_found_items"}，供 ``_render_factcheck_html`` 渲染。
     目标场景（如金融研报类尽调，仅作可证伪的演示场景）。
     """
-    from agent_harness.core.graph.graph_multi import (
-        _normalize_number_tokens, _normalize_sources_numbers)
+    from agent_harness.core.graph.graph_multi import _normalize_number_tokens
 
     provenance = provenance or []
-    source_map = source_map or {}
-    reasons: list[str] = []
-    prov_by_url = {p.get("url", ""): p.get("snippet", "") for p in provenance
-                   if isinstance(p, dict)}
-    source_texts = {n: prov_by_url.get(url, "") for n, url in source_map.items()}
-
-    # ── 数字级三态（ENG-32/34 口径：报告数字 vs 来源 snippet 数字集合）──
-    report_nums = sorted(_normalize_number_tokens(report))
-    prov_nums: set = set()
-    for p in provenance:
-        if isinstance(p, dict):
-            # 标题 + snippet 都算来源正文（「2023 年报」这类标题数字不误报）
-            prov_nums |= _normalize_number_tokens(
-                f"{p.get('title', '')} {p.get('snippet', '')}")
-    not_found_items = [n for n in report_nums if n not in prov_nums]
-
-    verified = not_found = 0
-    if provenance and report_nums:
-        not_found = len(not_found_items)
-        verified = len(report_nums) - not_found
-    elif provenance and not report_nums:
-        reasons.append("报告正文无可核对数字，未做数字核验")
-
-    # ── 断言级裁定（claim_verifier：词面覆盖 + 数字锚点；不判语义等价）──
-    try:
-        from agent_harness.core.safety.claim_verifier import (
-            RuleBasedJudge, sources_from_citation_map, verify_claims)
-        sources = sources_from_citation_map(source_map, source_texts=source_texts)
-        sources = _normalize_sources_numbers(sources)   # ENG-34：中文单位同口径
-        claims = [s for s in re.split(r"(?<=[。！？\n])", report or "") if len(s.strip()) > 15]
-        if claims and sources:
-            verdicts = verify_claims(claims, sources, judge=RuleBasedJudge())
-            supported = sum(1 for v in verdicts if v.status == "supported")
-            unsupported = sum(1 for v in verdicts if v.status in ("partial", "unsupported"))
-            if not not_found_items:
-                verified, not_found = supported, unsupported
-    except Exception as exc:   # 校验异常绝不误判 → 落 v-unknown + 显式原因
-        reasons.append(f"校验流程异常（{exc}），已跳过以避免误判")
-
-    unknown = 0
-    if not provenance:
-        unknown = 1
-        reasons.append("未检索到可用来源正文（provenance 为空），无法比对")
-
+    report_nums = _normalize_number_tokens(report)
+    evidence_nums: set = set()
+    for entry in provenance:
+        if isinstance(entry, dict):
+            evidence_nums |= _normalize_number_tokens(
+                f"{entry.get('title', '')} {entry.get('snippet', '')}")
+    comparable = bool(provenance and report_nums)
+    missing = sorted(report_nums - evidence_nums) if comparable else []
     return {
-        "checked": bool(provenance),
-        "verified": verified,
-        "not_found": not_found,
-        "unknown": unknown,
-        "unknown_reasons": reasons,
+        "checked": comparable,
+        "verification_scope": "numeric_presence_only",
+        "semantic_verified": False,
+        "verified": 0,
+        "matched": len(report_nums & evidence_nums) if comparable else 0,
+        "not_found": len(missing),
+        "unknown": 0 if comparable else 1,
+        "unknown_reasons": ["仅比较数值是否出现在来源片段；实体、指标、单位含义、统计期及分母未自动核实。"],
         "provenance_count": len(provenance),
-        "not_found_items": not_found_items[:12],
+        "not_found_items": missing[:12],
     }
 
 
@@ -241,7 +247,7 @@ def _render_factcheck_html(factcheck: dict | None) -> str:
     """
     if not factcheck:
         return ""
-    vr = _esc(factcheck.get("verified", 0))
+    vr = _esc(factcheck.get("matched", 0))
     mf = _esc(factcheck.get("not_found", 0))
     un = _esc(factcheck.get("unknown", 0))
     n_src = _esc(factcheck.get("provenance_count", 0))
@@ -251,7 +257,7 @@ def _render_factcheck_html(factcheck: dict | None) -> str:
     if items:
         from agent_harness.core.graph.graph_multi import _fmt_num
         inner = "、".join(_esc(_fmt_num(n)) for n in items)
-        miss_lis = f'<p class="v v-miss">❌ 未找到依据的数字：{inner}</p>'
+        miss_lis = f'<p class="v v-miss">⚠️ 未找到依据（数值未匹配）：{inner}</p>'
 
     reason_lis = "".join(
         f"<li>{_esc(r)}</li>" for r in (factcheck.get("unknown_reasons") or [])
@@ -259,13 +265,13 @@ def _render_factcheck_html(factcheck: dict | None) -> str:
     reasons_html = f"<ul>{reason_lis}</ul>" if reason_lis else ""
     return f"""
         <div class="section factcheck-summary">
-            <h2>🔍 事实核验说明</h2>
-            <p>本报告关键数字已对照 <b>{n_src}</b> 条一手来源（工具名 + URL + 抓取时间）核验：
-               <span class="v v-ok">✅ 已核验 {vr} 条</span> ·
-               <span class="v v-miss">❌ 未找到依据 {mf} 条</span> ·
-               <span class="v v-unknown">⚠️ 未核验 {un} 条</span>。</p>
+            <h2>🔍 来源与数字比对说明</h2>
+            <p>本报告关键数字已对照 <b>{n_src}</b> 条来源记录（工具名 + URL + 抓取时间）进行数字比对：
+               <span class="v v-ok">数值匹配 {vr} 项</span> ·
+               <span class="v v-miss">数值未匹配 {mf} 项（未找到依据）</span> ·
+               <span class="v v-unknown">未执行比对 {un} 项</span>。</p>
             {miss_lis}
-            <p class="factcheck-hint">未找到依据的断言请勿直接采信；未核验项原因见下。</p>
+            <p class="factcheck-hint">上述计数不是已核实断言数；内容准确性仍待人工核查。</p>
             {reasons_html}
         </div>"""
 
@@ -291,13 +297,51 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None,
     now = datetime.now().strftime("%Y年%m月%d日")
     sources = sources or []
     tags = tags or []
+    # Drop only the previous renderer's machine-generated numeric annotation;
+    # recompute its status below without changing the report's factual claims.
+    content = re.sub(
+        r"(?m)^❌ 未找到依据：以下数字未能在任何一手来源正文里核对上，\s*请谨慎采信[^\n]*(?:\n|$)",
+        "", content,
+    )
     # ─── 安全：入参（title/content/sources/tags）全部不可信，先转义再拼装 ───
     title = _esc(title)
     tags = [_esc(t) for t in tags]
 
-    # Step 1: Convert [url] patterns to [N] numbered citations
-    # Also builds a source_map and a "## 参考来源" section to append
-    formatted_content, source_map = _format_citations(content)
+    # Repair the standard legacy execution footer without rewriting the report's claims.
+    prefix, separator, footer = content.partition("## ✅ 完成契约")
+    if separator:
+        footer = footer.replace("[✅ 通过]", "[✅ 有产物]").replace(
+            "未完成项：无（全部 feature 均已验证通过）",
+            "执行步骤未报告失败；内容准确性、引用与时效尚待核查。")
+        content = prefix + separator + footer
+
+    markers, declared = _citation_definitions(content)
+    declared_map = {n: entry["url"] for n, entry in declared.items()}
+    formatted_content, source_map = _format_citations(content, declared_map, markers)
+    reserved = markers | set(source_map)
+    if reserved:
+        metadata = {entry.get("url"): entry for entry in sources}
+        mapped_urls = set(source_map.values())
+        sources = [
+            {**metadata.get(source_map[n], {}), **declared.get(n, {}), "url": source_map[n]}
+            if n in source_map else {"url": "", "title": f"未解析来源编号 {n}"}
+            for n in range(1, max(reserved) + 1)
+        ] + [entry for entry in sources if entry.get("url") not in mapped_urls]
+    unresolved = markers - set(declared)
+
+    # Graph v2's records describe numeric presence, never semantic verification.
+    if factcheck and isinstance(factcheck.get("not_found"), list):
+        from agent_harness.core.graph.graph_multi import _normalize_number_tokens
+        missing = [entry.get("num") if isinstance(entry, dict) else entry
+                   for entry in factcheck["not_found"]]
+        checked = bool(factcheck.get("checked"))
+        factcheck = {**factcheck, "not_found": len(missing), "verified": 0,
+                     "verification_scope": "numeric_presence_only", "semantic_verified": False,
+                     "not_found_items": missing[:12],
+                     "matched": max(0, len(_normalize_number_tokens(content)) - len(missing)) if checked else 0,
+                     "unknown": 0 if checked else 1,
+                     "unknown_reasons": [factcheck.get("reason") or
+                         "仅比对来源片段中的数字；不代表全文抓取成功或语义核验通过。"]}
 
     # ─── ENG-29: provenance → 核验三态（无 provenance 时不渲染汇总块，旧行为不变）───
     if factcheck is None and provenance is not None:
@@ -312,6 +356,8 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None,
     # Step 2: Build reference section from source_map (from [url] → [N] conversion)
     ref_lines = []
     for num in sorted(source_map.keys()):
+        if num in declared:
+            continue
         url = source_map[num]
         # Try to derive a title from the URL（用独立变量：此前复用 title 覆盖了报告标题，
         # 导致 h1/页面 title 变成最后一个 URL 的路径尾部，且覆盖后不再转义）
@@ -333,6 +379,19 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None,
 
     # Format the main content (simple markdown → HTML conversion)
     body_html = _markdown_to_html(linked_content)
+    from .report_checks import review_warnings
+    diagnostics = review_warnings(content, datetime.now().date())
+    if unresolved:
+        diagnostics.insert(0, {"code": "unresolved_citations", "message":
+            "引用编号 " + "、".join(str(n) for n in sorted(unresolved))
+            + " 缺少唯一明确URL；已标记未解析，没有按搜索结果顺序绑定。"})
+    notes = "".join(f'<li data-review-code="{_esc(item["code"])}">{_esc(item["message"])}</li>'
+                    for item in diagnostics)
+    body_html = ('<div class="section factcheck-summary" data-content-review="pending">'
+                 '<h2>内容状态：待人工核查</h2>'
+                 '<p>引用链接可解析或数值匹配，不代表来源支持该断言。'
+                 '请核对实体、指标、单位、统计期、分母和预测属性。</p>'
+                 f'<ul>{notes}</ul></div>') + body_html
 
     # ─── Build table of contents ───
     toc_items = []
@@ -393,7 +452,8 @@ def generate_report_html(title: str, content: str, sources: list[dict] = None,
             else:
                 # 非允许协议降级为纯文本：绝不进 href（点击不执行）
                 items += f'<span class="source-plain">{title_text}</span>'
-                items += '<span class="source-meta">（链接已禁用：非 http(s) 协议）</span> '
+                note = "缺少明确URL，待补充" if not raw_url else "链接已禁用：非 http(s) 协议"
+                items += f'<span class="source-meta">（{note}）</span> '
             items += f'<span class="source-meta"> · {source_type} · {access_date}</span>'
             if factcheck is None:
                 # ENG-29 第一层：没有任何 provenance/核验数据时，逐条诚实标注「未独立核验」

@@ -3,7 +3,7 @@
 // 历史坑：上一版预缓存的是客服 demo 页面（旧客服路径），且对所有请求缓存优先，
 // 主应用从未注册它 —— 等于装了没用，还可能把 /v1/ 响应读脏。
 
-const CACHE_NAME = 'lingShu-research-v2';
+const CACHE_NAME = 'lingShu-research-v4';
 
 // 只放本应用真实存在的资源：install 时逐个 add，单个 404 不会让整个安装失败。
 const PRECACHE_URLS = [

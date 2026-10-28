@@ -95,11 +95,12 @@ def test_render_lists_incomplete():
     assert "analyze" in text
 
 
-def test_render_declares_none_when_all_pass():
+def test_render_distinguishes_step_success_from_content_acceptance():
     c = gm.build_completion_contract(_state({"search": _ok()}))
     text = gm.render_completion_contract(c)
     assert "未完成项" in text
-    assert "无" in text
+    assert "未报告失败" in text
+    assert "尚待核查" in text
 
 
 # ═══════════ supervisor_finalize 集成 ═══════════

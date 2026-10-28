@@ -529,7 +529,7 @@ function renderDashboard() {
         </div>
         <div class="sidebar-list" id="sidebar-list"></div>
         <div class="sidebar-footer" id="sidebar-footer">
-                  <span class="sidebar-version">v0.42.0</span>
+                  <span class="sidebar-version">v${escHtml(window.__VERSION__ || 'unknown')}</span>
                 </div>
                 <div class="status-bar" id="status-bar">
                   <span class="status-dot" id="health-dot"></span>

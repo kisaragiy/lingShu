@@ -193,7 +193,6 @@ async function sendChatMessage() {
           const parsed = JSON.parse(data);
           const content = parsed.choices?.[0]?.delta?.content || '';
           if (content) {
-            fullContent += content;
             if (content.startsWith('🤔') || content.startsWith('🔀') || content.startsWith('▶️') ||
                 content.startsWith('✅') || content.startsWith('  ✅') || content.startsWith('  ❌') ||
                 content.startsWith('🧠') || content.startsWith('⚡') || content.startsWith('📚')) {
@@ -209,6 +208,7 @@ async function sendChatMessage() {
               thinkingEl.innerHTML = '<div class="thinking-steps">' + steps + '</div>';
               thinkingEl.scrollTop = thinkingEl.scrollHeight;
             } else {
+              fullContent += content;
               if (assistantEl) {
                 let body = assistantEl.querySelector('.chat-msg-body');
                 if (!body) { body = document.createElement('div'); body.className = 'chat-msg-body'; assistantEl.appendChild(body); }
@@ -368,7 +368,8 @@ async function saveReport(btn, sessionId) {
   const bubbles = container.querySelectorAll('.chat-bubble.assistant');
   const last = bubbles[bubbles.length - 1];
   if (!last) return;
-  const content = last.textContent || '';
+  const message = [...chatHistory].reverse().find(m => m.role === 'assistant');
+  const content = message?.content || '';
   const title = '调研报告_' + new Date().toISOString().slice(0,10);
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
   try {
@@ -383,7 +384,8 @@ async function formalizeAndOpen(btn, sessionId) {
   const bubbles = container.querySelectorAll('.chat-bubble.assistant');
   const last = bubbles[bubbles.length - 1];
   if (!last) return;
-  const content = last.textContent || '';
+  const message = [...chatHistory].reverse().find(m => m.role === 'assistant');
+  const content = message?.content || '';
   const title = '正式报告_' + new Date().toISOString().slice(0,10);
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 生成中...';
 

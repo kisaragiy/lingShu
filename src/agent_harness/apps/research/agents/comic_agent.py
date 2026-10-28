@@ -21,6 +21,7 @@ from ....core.pipeline.provider_guard import guarded_post
 from agent_harness.core.pipeline.llm import (
     extract_answer,
     runtime_endpoint,
+    runtime_auth_headers,
     thinking_payload,
 )
 
@@ -116,7 +117,7 @@ def generate_script(user_prompt: str, scene_count: int = 6) -> ComicScript:
         if not api_url:
             raw = ""
         else:
-            resp = guarded_post(api_url, json=payload, timeout=300)
+            resp = guarded_post(api_url, json=payload, headers=runtime_auth_headers(api_url), timeout=300)
             if resp.status_code == 200:
                 raw = extract_answer(resp.json(), 2048)
             else:
