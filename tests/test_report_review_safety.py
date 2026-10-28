@@ -14,9 +14,15 @@ class SourceLinks(HTMLParser):
         super().__init__()
         self.active = None
         self.links = {}
+        self.anchors = set()
+        self.ids = set()
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        if 'id' in attrs:
+            self.ids.add(attrs['id'])
+        if tag == 'a' and attrs.get('href', '').startswith('#source-'):
+            self.anchors.add(attrs['href'][1:])
         if tag == 'li' and attrs.get('id', '').startswith('source-'):
             self.active = attrs['id']
         if tag == 'a' and self.active and attrs.get('href', '').startswith('http'):
@@ -67,6 +73,60 @@ def test_two_declared_numbers_can_refer_to_the_same_url():
     parsed.feed(html)
     assert parsed.links['source-1'] == parsed.links['source-2']
     assert '未解析]' not in html
+
+
+@pytest.mark.parametrize('separator', ['\n', '\n\n', '\r\n', '\r\n\r\n'])
+def test_missing_url_cannot_consume_the_next_source_definition(separator):
+    html = generate_report_html('Report', 'A[来源 1] B[来源 2]\n'
+        '[来源 1]' + separator + '[来源 2] B - https://second.example/report')
+    parsed = SourceLinks()
+    parsed.feed(html)
+    assert 'source-1' not in parsed.links
+    assert 'source-1' not in parsed.anchors
+    assert parsed.links['source-2'] == 'https://second.example/report'
+    assert '[来源 1：未解析]' in html
+
+
+def test_adjacent_source_markers_do_not_borrow_each_others_url():
+    html = generate_report_html('Report', 'A[来源 1] B[来源 2]\n'
+        '[来源 1] [来源 2] B - https://second.example/report')
+    parsed = SourceLinks()
+    parsed.feed(html)
+    assert not parsed.links
+    assert '[来源 1：未解析]' in html and '[来源 2：未解析]' in html
+
+
+def test_leading_zero_source_number_has_a_working_normalized_anchor():
+    html = generate_report_html('Report', 'A[来源 01]\n'
+        '[来源 01] A - https://first.example/report')
+    parsed = SourceLinks()
+    parsed.feed(html)
+    assert parsed.links['source-1'] == 'https://first.example/report'
+    assert parsed.anchors == {'source-1'}
+    assert parsed.anchors <= parsed.ids
+
+
+@pytest.mark.parametrize('definition', [
+    '[来源 1] A - https://first.example/paper_(v2)',
+    '[来源 1] [A](https://first.example/paper_(v2))',
+    '[来源 1] A - https://first.example/paper_(v2)。',
+    'Extra [https://first.example/paper_(v2)]',
+])
+def test_balanced_parentheses_in_source_urls_are_preserved(definition):
+    html = generate_report_html('Report', 'A[来源 1]\n' + definition)
+    parsed = SourceLinks()
+    parsed.feed(html)
+    assert 'https://first.example/paper_(v2)' in parsed.links.values()
+    assert 'https://first.example/paper_' not in parsed.links.values()
+
+
+def test_unbalanced_url_is_unresolved_instead_of_silently_truncated():
+    html = generate_report_html('Report', 'A[来源 1]\n'
+        '[来源 1] A - https://first.example/paper_(v2')
+    parsed = SourceLinks()
+    parsed.feed(html)
+    assert 'source-1' not in parsed.links
+    assert '[来源 1：未解析]' in html
 
 
 @pytest.mark.parametrize('report,evidence', [

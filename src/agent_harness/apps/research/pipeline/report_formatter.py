@@ -95,7 +95,7 @@ def _format_citations(text: str, initial_map: dict[int, str] | None = None,
         raw = m.group(1) or m.group(2)
         if not raw:
             return m.group(0)
-        url = raw.rstrip(".,;:!?)")
+        url = _trim_citation_url(raw)
         if url in seen_urls:
             num = seen_urls[url]
         else:
@@ -131,8 +131,8 @@ def _link_sources(text: str, sources: list[dict]) -> str:
 
     # Replace [来源 N] → <sup class="cite"><a href="#source-N">[N]</a></sup>
     def _replace_source(m):
-        num = m.group(1)
-        index = int(num) - 1
+        num = int(m.group(1))
+        index = num - 1
         if not (0 <= index < len(sources)) or not _safe_href(sources[index].get("url", "")):
             return f'<span class="v-unknown">[来源 {num}：未解析]</span>'
         return f'<sup class="cite"><a href="#source-{num}">[{num}]</a></sup>'
@@ -141,19 +141,34 @@ def _link_sources(text: str, sources: list[dict]) -> str:
     return text
 
 
+def _trim_citation_url(url: str) -> str:
+    """Remove prose/Markdown delimiters, preserving balanced URL parentheses."""
+    url = url.rstrip(".,;:!?。；，）")
+    while url.endswith(")") and url.count(")") > url.count("("):
+        url = url[:-1].rstrip(".,;:!?。；，）")
+    return url
+
+
 def _citation_definitions(content: str) -> tuple[set[int], dict[int, dict]]:
     """Reserve every explicit number, resolving only unambiguous URL definitions."""
     markers = {int(n) for n in re.findall(r"\[来源\s*(\d+)\]", content)
                if 1 <= int(n) <= 1000}
     candidates: dict[int, set[str]] = {}
     titles: dict[int, str] = {}
-    for match in re.finditer(r"(?m)^\s*(?:[-*]\s*)?\[来源\s*(\d+)\]\s*([^\n]*)", content):
+    for line in content.splitlines():
+        match = re.match(r"^[ \t]*(?:[-*][ \t]*)?\[来源[ \t]*(\d+)\][ \t]*(.*)$", line)
+        if not match:
+            continue
         number = int(match.group(1))
         if number not in markers:
             continue
         tail = match.group(2)
-        urls = re.findall(r"https?://[^\s<>\[\]()]+", tail)
-        values = {url.rstrip(".,;:!?。；，）") for url in urls}
+        # A second marker belongs to another source, never to this definition.
+        if re.search(r"\[来源\s*\d+\]", tail):
+            continue
+        urls = re.findall(r'https?://[^\s<>\[\]"]+', tail)
+        values = {_trim_citation_url(url) for url in urls}
+        values = {url for url in values if url.count("(") == url.count(")")}
         candidates.setdefault(number, set()).update(values)
         titles[number] = re.split(r"https?://", tail, maxsplit=1)[0].strip(" -—:[()")
     resolved = {n: {"url": next(iter(urls)), "title": titles[n]}

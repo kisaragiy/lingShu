@@ -132,7 +132,10 @@ SKILLS_DIR = Path(_settings.skills_dir or HARNESS_DIR.parent.parent / "skills")
 
 
 def require_config() -> None:
-    """兼容旧接口。"""
+    """Validate the same runtime configuration used by model requests."""
+    if get_llm_config().get("api_url"):
+        print("✅ 配置校验通过 — 已读取运行时 LLM 后端")
+        return
     _settings.check()
 
 
@@ -174,7 +177,7 @@ def get_llm_config() -> dict:
 
     # 2) 回退环境变量常量 (启动配置)
     return {
-        "api_url": DEEPSEEK_API or LLAMA_API,
+        "api_url": DEEPSEEK_API or LLAMA_API or CLOUD_API_DIRECT,
         "api_key": CLOUD_API_KEY,
         "model": MODEL_DEEPSEEK or MODEL_LLAMA,
     }
