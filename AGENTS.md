@@ -76,6 +76,15 @@ pre-commit 做两件事：有代码变更时跑 `pytest -x -q tests/`；校验 p
 `__version__`、AGENTS.md 三处版本号一致。紧急情况用 `git commit --no-verify`
 跳过，但**不要**改 hook 去放宽门禁。
 
+### 分层回归与速度基线（2026-11-02 起）
+
+- 测试策略与验收口径的唯一说明：`docs/plans/testing-strategy.md`；本地选择器：`scripts/test_selection.py`。
+- 提交时 `scripts/git-hooks/pre-commit` 按 staged 变更选择测试：文档-only 可不跑 pytest；经过审计的低风险路径跑相关测试；其余默认全量离线回归。**局部通过不等于全量验收**。
+- CLI：`python scripts/test_selection.py` 预览；`python scripts/test_selection.py --execute` 执行；`python scripts/test_selection.py --full --execute` 强制全量。
+- 核心代码、依赖、安全、状态、权限、RAG、未知变更不能仅凭文件名猜测影响；必须 fail-closed。没有 Python/pytest 或测试失败必须非零退出。
+- CI 原有全量回归、覆盖率、静态与依赖安全扫描、镜像扫描、集成与首次上手门禁**保持不变**；真实模型业务质量测试与 L4 工程门禁区分。
+- 测试优化须记录真实耗时、数量、覆盖率和环境；不通过削弱断言、删除测试、静默吞错误或盲目并行制造加速。单 worker / SQLite / contextvars 要求继续生效。
+
 ## 四、架构约束（ADR）
 
 ### ADR-001 不在 `core/` 里引入服务端 / 多租户 / 配额组件
