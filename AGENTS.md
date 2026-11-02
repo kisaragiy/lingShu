@@ -76,6 +76,9 @@ pre-commit 做两件事：有代码变更时跑 `pytest -x -q tests/`；校验 p
 `__version__`、AGENTS.md 三处版本号一致。紧急情况用 `git commit --no-verify`
 跳过，但**不要**改 hook 去放宽门禁。
 
+### 企业阶段测试分级（2026-11-02）
+纯文档/进度更新执行 L0：JSON/schema、harness 不变量和引用检查；不因此宣称业务测试通过。实现变更按 [企业主方案第10节](docs/plans/enterprise-pilot.md#10-分级测试门禁) 执行 L1–L5，安全相关变更立即跑对应回归；合并/候选发布保留现有 CI 全部门禁。上文历史通过数只作基线，收集数变化需解释，不得删除用例、放宽门禁或伪造新成绩。
+
 ## 四、架构约束（ADR）
 
 ### ADR-001 不在 `core/` 里引入服务端 / 多租户 / 配额组件
@@ -90,6 +93,12 @@ pre-commit 做两件事：有代码变更时跑 `pytest -x -q tests/`；校验 p
 ### ADR-003 运行时配置必须经 `get_llm_config()`
 **决策**：① 打包一律 `console=False`，失败路径走 `tkinter` 弹窗；② 配置读取走运行时函数，import 常量只作回退；③ 自动配置必须落 `config.json`（环境变量对已 import 的模块是快照）。
 **理由**：设置页填入的地址必须立即生效，且在打包形态下可见。
+
+### 企业研究增量阶段（2026-11-02，规划未验收）
+- 唯一执行主方案为 [docs/plans/enterprise-pilot.md](docs/plans/enterprise-pilot.md)，配套 [评测规范](docs/acceptance/enterprise-eval.md) 与 [未验收记录](docs/acceptance/pilot-results.md)。TASK_SPLIT.md 仅保留历史；PROGRESS.json 的当前 features 为新阶段，旧任务在 historical_features 保留待核验。
+- 在现有 apps/research 应用内增量实现业务状态/审核/ACL，复用现有 graph/registry、权限/风险/审计、任务/取消/预算；单 Kernel、不得建立第二执行路径或企业专用执行器。core 禁多租户/配额/运营的 ADR-001 继续有效。
+- 本期只支持单企业受控试点、员工级对象隔离，必须验证全部可达入口（含旧 API/MCP/插件/恢复），不是 SaaS 多租户支持；不改变单 worker、本机优先与配置外置边界。
+- 方案写入、旧功能存在、历史测试通过均不等于新阶段验收。Engineering Ready、Pilot Ready、Business Validated 分开记录；仅满足冻结条件并签字后发布维护版本，业务无真实样本则保持未验证。
 
 ## 五、已知设计边界
 
