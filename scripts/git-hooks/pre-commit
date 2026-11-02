@@ -7,18 +7,12 @@ PYPROJECT="$REPO_DIR/pyproject.toml"
 AGENTS="$REPO_DIR/AGENTS.md"
 VERSION_MODULE="$REPO_DIR/src/agent_harness/__init__.py"
 
-# 只检查有代码变更的提交（grep -c 无匹配时退出码为 1，set -e 下会静默中止整个 hook，故兜 || true）
-SRC_CHANGES=$(git diff --cached --name-only | grep -v "^AGENTS.md" | grep -v "^pyproject.toml" | grep -c "." || true)
-if [ "$SRC_CHANGES" -eq 0 ]; then
-  exit 0
-fi
-
-# ── 测试验证 ────────────────────────────────────
-echo "🧪 运行测试..."
+# Local fast feedback is selected conservatively from staged changes.
+# Unknown/high-risk changes force full offline pytest. CI release gates unchanged.
+# Version alignment is checked even for documentation-only commits.
+echo "🧪 按变更风险选择测试..."
 cd "$REPO_DIR"
 
-# 用项目 venv（PATH 上的 python 可能是无关解释器，例如 Hermes 自带 python 无 pytest）
-# worktree 场景：.venv 只在主仓库存在 → 通过 git-common-dir 回溯主仓库根
 COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null || echo "")
 MAIN_ROOT=""
 if [ -n "$COMMON_DIR" ]; then
@@ -26,31 +20,26 @@ if [ -n "$COMMON_DIR" ]; then
 fi
 
 PYBIN=""
-for CAND in "$REPO_DIR/.venv/Scripts/python.exe" "$MAIN_ROOT/.venv/Scripts/python.exe"; do
+for CAND in "$REPO_DIR/.venv/Scripts/python.exe" "$REPO_DIR/.venv/bin/python" "$MAIN_ROOT/.venv/Scripts/python.exe" "$MAIN_ROOT/.venv/bin/python"; do
   if [ -n "$CAND" ] && [ -x "$CAND" ]; then
     PYBIN="$CAND"
     break
   fi
 done
 if [ -z "$PYBIN" ]; then
-  PYBIN=$(command -v python || echo "")
+  PYBIN=$(command -v python || command -v python3 || echo "")
 fi
-
-if [ -n "$PYBIN" ]; then
-  "$PYBIN" -m pytest -x -q tests/ 2>&1 | tail -10
-  PYTEST_EXIT=${PIPESTATUS[0]}
-else
-  echo "⚠️  未找到 Python，跳过测试"
-  PYTEST_EXIT=0
-fi
-
-if [ "$PYTEST_EXIT" -ne 0 ]; then
-  echo ""
-  echo "❌ 测试未通过，请修复后再提交"
-  echo "   跳过测试: git commit --no-verify"
+if [ -z "$PYBIN" ]; then
+  echo "❌ 未找到 Python，不能验证提交（fail closed）"
   exit 1
 fi
-echo "✅ 测试通过"
+"$PYBIN" scripts/test_selection.py --execute
+PYTEST_EXIT=$?
+if [ "$PYTEST_EXIT" -ne 0 ]; then
+  echo "❌ 测试或测试选择器失败 (exit=$PYTEST_EXIT)，请修复后提交"
+  exit "$PYTEST_EXIT"
+fi
+echo "✅ 本地测试级别检查完成（完整发布门禁由 CI 保证）"
 
 # ── 版本一致性检查 ──────────────────────────────
 
