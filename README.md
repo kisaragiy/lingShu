@@ -36,6 +36,8 @@
 
 内容核查边界与示例见 [报告核查说明](docs/report-verification.md)。
 
+企业研究增量阶段见 [实施与冻结方案](docs/plans/enterprise-pilot.md)、[评测规范](docs/acceptance/enterprise-eval.md) 与 [验收记录（模板，未验收）](docs/acceptance/pilot-results.md)。当前仅完成方案编写，企业业务闭环、多人隔离、持久化恢复与业务效果尚未完成本期验收；方案不代表已支持企业生产或可以冻结。
+
 ## 🖥️ 效果
 
 <p align="center">

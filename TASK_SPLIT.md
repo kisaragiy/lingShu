@@ -1,4 +1,6 @@
-# 灵枢 — 路线图
+# 灵枢 — 路线图（历史归档）
+
+> 2026-11-02：以下为 2026-07-11 / v0.52.0 历史快照，原内容保留，不再作为当前执行指令；不是当前 master 的能力结论。企业研究增量阶段以 [enterprise-pilot](docs/plans/enterprise-pilot.md) 为唯一主方案，状态见 [PROGRESS.json](PROGRESS.json)，验收见 [pilot-results](docs/acceptance/pilot-results.md)。未逐项复核的历史事项不能自动判完成或据此重做。
 
 > 根据 2026-07-11 复盘结论更新。
 

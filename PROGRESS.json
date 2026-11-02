@@ -2,49 +2,152 @@
   "schema_version": 1,
   "project": "lingshu-agent-harness",
   "created": "2026-10-14T23:40:00+08:00",
-  "updated": "2026-10-23T20:25:08+08:00",
+  "updated": "2026-11-02T21:31:22+08:00",
   "smoke_cmd": "python -m pytest tests/test_failure_attribution.py tests/test_module_eval.py tests/test_skill_lifecycle.py -q",
-  "notes": "由 TASK-PROGRESS.md（2026-08-24 盘点，可能已部分过期）种子的机器可读接班清单。散文版仍在 TASK-PROGRESS.md；本文件是唯一事实来源。完成一项须带 --evidence 才能 pass。",
+  "notes": "企业研究增量阶段唯一机器进度。方案文档已编写待审阅；功能、运行验收及冻结均未完成。旧5项原样保留在 historical_features，待 P0 核验。passes=true 必须附当前候选实测证据；文档合并不等于阶段完成。",
   "features": [
     {
-      "id": "p0-1-untracked-cleanup",
-      "desc": "把 25 个未跟踪文件逐一定性（有价值并入主代码 / 废弃删除），最终 `git status --short` 不再有 tmp_*/fix_*/do_zimage.py 等未跟踪垃圾",
+      "id": "ep-p0-baseline",
+      "desc": "核对实际入口/准入/数据根/旧任务并提交带源码和实测证据的基线清单，锁定范围与验收参数",
       "passes": false,
       "evidence": null,
       "verified_at": null,
-      "notes": "来源 TASK-PROGRESS.md P0-1"
+      "status": "not_started",
+      "dependencies": [],
+      "plan": "docs/plans/enterprise-pilot.md",
+      "notes": "未实施、未验收；完成须按主方案与 acceptance 记录当前候选证据。"
     },
     {
-      "id": "p0-2-remove-junk-dirs",
-      "desc": "删除 2 个编码事故产生的垃圾目录（不可逆，需用户批准）——目录树中不再存在它们",
+      "id": "ep-p1-workflow",
+      "desc": "在现有 research 应用走通创建、运行、草稿版本、人工驳回/批准、导出归档，状态机与接口契约通过",
       "passes": false,
       "evidence": null,
       "verified_at": null,
-      "notes": "来源 TASK-PROGRESS.md P0-2；需要用户批准"
+      "status": "not_started",
+      "dependencies": [
+        "ep-p0-baseline"
+      ],
+      "plan": "docs/plans/enterprise-pilot.md",
+      "notes": "未实施、未验收；完成须按主方案与 acceptance 记录当前候选证据。"
     },
     {
-      "id": "p0-3-memory-import",
-      "desc": "跨产品记忆导入功能在 tabs.js 前端 + API + test 全部落地可跑；`.venv/Scripts/python.exe -m pytest tests/test_memory_import.py -q` 全绿",
+      "id": "ep-p2-isolation",
+      "desc": "全部可达入口的双用户对象授权、RAG scope、工具准入与注入测试通过，零成功越权",
       "passes": false,
       "evidence": null,
       "verified_at": null,
-      "notes": "来源 TASK-PROGRESS.md P0-3"
+      "status": "not_started",
+      "dependencies": [
+        "ep-p0-baseline",
+        "ep-p1-workflow"
+      ],
+      "plan": "docs/plans/enterprise-pilot.md",
+      "notes": "未实施、未验收；完成须按主方案与 acceptance 记录当前候选证据。"
     },
     {
-      "id": "p1-4-write-docs",
-      "desc": "P1+P2 相关工作（跨产品记忆导入、新工具集）技术文档已沉淀到 docs/ 或 CHANGELOG，含「做了什么/怎么做/为什么/下一步」",
+      "id": "ep-p3-recovery",
+      "desc": "持久化清单/容器重建/空环境备份恢复/崩溃对账/迁移回退通过且 RPO/RTO 达标",
       "passes": false,
       "evidence": null,
       "verified_at": null,
-      "notes": "来源 TASK-PROGRESS.md P1-4"
+      "status": "not_started",
+      "dependencies": [
+        "ep-p1-workflow",
+        "ep-p2-isolation"
+      ],
+      "plan": "docs/plans/enterprise-pilot.md",
+      "notes": "未实施、未验收；完成须按主方案与 acceptance 记录当前候选证据。"
     },
     {
-      "id": "p1-5-version-align",
-      "desc": "AGENTS.md / CHANGELOG 版本号与 git log 最新版本一致（AGENTS.md 现停 v0.28.0，git 已更高）",
+      "id": "ep-p4-evaluation",
+      "desc": "最终候选 CI、开认证集成、安全与真实模型容量通过，业务评测结果独立如实记录",
       "passes": false,
       "evidence": null,
       "verified_at": null,
-      "notes": "来源 TASK-PROGRESS.md P1-5"
+      "status": "not_started",
+      "dependencies": [
+        "ep-p1-workflow",
+        "ep-p2-isolation",
+        "ep-p3-recovery"
+      ],
+      "plan": "docs/plans/enterprise-pilot.md",
+      "notes": "未实施、未验收；完成须按主方案与 acceptance 记录当前候选证据。"
+    },
+    {
+      "id": "ep-p5-freeze",
+      "desc": "独立员工闭环与交付文档验收、Engineering/Pilot 签字、业务状态如实披露后发布并冻结",
+      "passes": false,
+      "evidence": null,
+      "verified_at": null,
+      "status": "not_started",
+      "dependencies": [
+        "ep-p0-baseline",
+        "ep-p1-workflow",
+        "ep-p2-isolation",
+        "ep-p3-recovery",
+        "ep-p4-evaluation"
+      ],
+      "plan": "docs/plans/enterprise-pilot.md",
+      "notes": "未实施、未验收；完成须按主方案与 acceptance 记录当前候选证据。"
     }
-  ]
+  ],
+  "historical_features": {
+    "archived_on": "2026-11-02",
+    "source_updated": "2026-10-23T20:25:08+08:00",
+    "source_notes": "由 TASK-PROGRESS.md（2026-08-24 盘点，可能已部分过期）种子的机器可读接班清单。散文版仍在 TASK-PROGRESS.md；本文件是唯一事实来源。完成一项须带 --evidence 才能 pass。",
+    "status": "historical_unverified",
+    "notes": "原 features 逐项原样保留；passes=false 是历史快照，不代表当前缺陷。新阶段 P0 依据代码和实测证据核验，不自动重做或置通过。harness next 仅遍历当前 features。",
+    "features": [
+      {
+        "id": "p0-1-untracked-cleanup",
+        "desc": "把 25 个未跟踪文件逐一定性（有价值并入主代码 / 废弃删除），最终 `git status --short` 不再有 tmp_*/fix_*/do_zimage.py 等未跟踪垃圾",
+        "passes": false,
+        "evidence": null,
+        "verified_at": null,
+        "notes": "来源 TASK-PROGRESS.md P0-1"
+      },
+      {
+        "id": "p0-2-remove-junk-dirs",
+        "desc": "删除 2 个编码事故产生的垃圾目录（不可逆，需用户批准）——目录树中不再存在它们",
+        "passes": false,
+        "evidence": null,
+        "verified_at": null,
+        "notes": "来源 TASK-PROGRESS.md P0-2；需要用户批准"
+      },
+      {
+        "id": "p0-3-memory-import",
+        "desc": "跨产品记忆导入功能在 tabs.js 前端 + API + test 全部落地可跑；`.venv/Scripts/python.exe -m pytest tests/test_memory_import.py -q` 全绿",
+        "passes": false,
+        "evidence": null,
+        "verified_at": null,
+        "notes": "来源 TASK-PROGRESS.md P0-3"
+      },
+      {
+        "id": "p1-4-write-docs",
+        "desc": "P1+P2 相关工作（跨产品记忆导入、新工具集）技术文档已沉淀到 docs/ 或 CHANGELOG，含「做了什么/怎么做/为什么/下一步」",
+        "passes": false,
+        "evidence": null,
+        "verified_at": null,
+        "notes": "来源 TASK-PROGRESS.md P1-4"
+      },
+      {
+        "id": "p1-5-version-align",
+        "desc": "AGENTS.md / CHANGELOG 版本号与 git log 最新版本一致（AGENTS.md 现停 v0.28.0，git 已更高）",
+        "passes": false,
+        "evidence": null,
+        "verified_at": null,
+        "notes": "来源 TASK-PROGRESS.md P1-5"
+      }
+    ]
+  },
+  "current_plan": "docs/plans/enterprise-pilot.md",
+  "acceptance_spec": "docs/acceptance/enterprise-eval.md",
+  "acceptance_results": "docs/acceptance/pilot-results.md",
+  "baseline_commit": "87034360d684193f762c22fa8107a5684d8b7230",
+  "readiness": {
+    "engineering": "not_evaluated",
+    "pilot": "not_evaluated",
+    "business": "not_validated",
+    "freeze": "not_approved"
+  }
 }
